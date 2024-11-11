@@ -24,6 +24,8 @@ output_path = '/nobackup/mm17ktn/ESN/Echo-State-Networks/source/'
 
 exec(open("Val_Functions.py").read())
 exec(open("Functions.py").read())
+print('run functions files')
+
 
 #### Load Data ####
 q = np.load(input_path + 'q5000_30000.npy')
@@ -46,7 +48,7 @@ U = data
 # number of time steps for washout, train, validation, test
 N_lyap    = 400
 N_washout = 400
-N_train   = 30*N_lyap
+N_train   = 25*N_lyap
 N_val     = 3*N_lyap
 N_test    = 3*N_lyap
 dim       = 2
@@ -91,7 +93,7 @@ plt.close()
 bias_in   = np.array([np.mean(np.abs((U_data-u_mean)/norm))]) #input bias (average absolute value of the inputs)
 bias_out  = np.array([1.]) #output bias
 
-N_units      = 500 #neurons
+N_units      = 1000 #neurons
 connectivity = 3
 sparseness   = 1 - connectivity/(N_units-1)
 
@@ -100,6 +102,13 @@ tikh = np.array([1e-3,1e-6,1e-9,1e-12])  # Tikhonov factor (optimize among the v
 print('tikh:', tikh)
 print('N_r:', N_units, 'sparsity:', sparseness)
 print('bias_in:', bias_in, 'bias_out:', bias_out)
+
+data_dir = '/Run_n_units{0:}/'.format(N_units)
+output_path = output_path+data_dir
+print(output_path)
+if not os.path.exists(output_path):
+    os.makedirs(output_path)
+    print('made directory')
 
 #### Grid Search and BO #####
 n_in  = 0           #Number of Initial random points
@@ -162,12 +171,12 @@ def g(val):
 print(search_space)
 
 #Number of Networks in the ensemble
-ensemble = 50
+ensemble = 100
 # Which validation strategy (implemented in Val_Functions.ipynb)
 val      = RVC_Noise
-N_fo     = 10                        # number of validation intervals
+N_fo     = 21                       # number of validation intervals
 N_in     = N_washout                 # timesteps before the first validation interval (can't be 0 due to implementation)
-N_fw     = (N_train-N_val)//(N_fo-1) # how many steps forward the validation interval is shifted (in this way they are evenly spaced)
+N_fw     = (N_train-N_val)//(N_fo) # how many steps forward the validation interval is shifted (in this way they are evenly spaced)
 N_splits = 4                         # reduce memory requirement by increasing N_splits
 
 #Quantities to be saved
@@ -299,7 +308,7 @@ N_intt   = 3*N_lyap                #length of each test set interval
 sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
 threshold_ph = 0.2
 
-ensemble_test = 3
+ensemble_test = 5
 
 ens_pred = np.zeros((N_intt, dim, ensemble_test))
 ens_PH = np.zeros((N_test, ensemble_test))
@@ -396,7 +405,7 @@ plt.close()
 #Save the details and results of the search for post-process
 opt_specs = [spec_in,spec_end,in_scal_in,in_scal_end]
 
-fln = output_path+'/data/ESN_' + val.__name__ + str(N_units) +'.mat'
+fln = output_path+ '/'+ val.__name__ + str(N_units) +'.mat'
 with open(fln,'wb') as f:  # need 'wb' in Python3
     savemat(f, {"norm": norm})
     savemat(f, {"fix_hyp": np.array([bias_in[0], N_washout],dtype='float64')})
@@ -408,6 +417,39 @@ with open(fln,'wb') as f:  # need 'wb' in Python3
 # to load in another file
 data = loadmat(fln)
 Win  = data['Win'][0] #gives Winn
+
+# validation ensembles convergence
+ensemble_list = np.linspace(1,101,100)
+print(np.shape(ensemble_list))
+
+lowest_MSE_values = np.zeros((ensemble))
+for f in range(ensemble):
+    lowest_MSE = 10**(np.min(f_iters[f, :]))
+    lowest_MSE_values[f] = lowest_MSE
+
+avg_MSE = []
+median_vals = np.zeros((ensemble))
+lower_vals = np.zeros((ensemble))
+upper_vals = np.zeros((ensemble))
+for f in range(1,ensemble+1):
+    values = lowest_MSE_values[:f]
+    avg_MSE.append(values)
+    print(np.shape(values))
+    lower = np.percentile(values, 25)
+    upper = np.percentile(values, 75) 
+    median = np.percentile(values, 50)
+    median_vals[f-1] = median
+    upper_vals[f-1] = upper
+    lower_vals[f-1] = lower
+
+fig, ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
+ax.plot(ensemble_list, lower_vals, color='tab:green', linestyle='--', alpha=0.3)
+ax.plot(ensemble_list, upper_vals, color='tab:green', linestyle='--', alpha=0.3)
+ax.plot(ensemble_list, median_vals, color='tab:green')
+ax.fill_between(ensemble_list, lower_vals, upper_vals, color='tab:green', alpha=0.3)
+ax.set_xlabel('no. of ensembles')
+ax.set_ylabel('avg MSE (validation set)')
+fig.savefig(output_path+'/ens_conv.png')
 
 
 

@@ -15,6 +15,7 @@ def step(x_pre, u, sigma_in, rho):
             new augmented state (new state with bias_out appended)
     """
     # input is normalized and input bias added
+    #print('shapes:', np.shape((u-u_mean)/norm), np.shape(bias_in))
     u_augmented = np.hstack(((u-u_mean)/norm, bias_in))
     # reservoir update
     x_post      = np.tanh(Win.dot(u_augmented*sigma_in) + W.dot(rho*x_pre))
@@ -33,6 +34,8 @@ def open_loop(U, x0, sigma_in, rho):
     """
     N     = U.shape[0]
     Xa    = np.empty((N+1, N_units+1))
+    print("Shape of x0:", x0.shape)           # Should be (N_units,)
+    print("Shape of bias_out:", bias_out.shape)  # Should be (1,)
     Xa[0] = np.concatenate((x0,bias_out))
     for i in np.arange(1,N+1):
         Xa[i] = step(Xa[i-1,:N_units], U[i-1], sigma_in, rho)
