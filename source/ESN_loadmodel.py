@@ -18,8 +18,12 @@ from skopt.plots import plot_convergence
 print("Current time:", time.time())
 
 data_path = '/nobackup/mm17ktn/ESN/Echo-State-Networks/source/input_data/'
-model_path = '/nobackup/mm17ktn/ESN/Echo-State-Networks/source/Run_n_units1000/'
-output_path = '/nobackup/mm17ktn/ESN/Echo-State-Networks/source/Run_n_units1000/testing_independent/' #### change testing type 
+model_path = '/nobackup/mm17ktn/ESN/Echo-State-Networks/source/Run_n_units500_ensemble100/'
+output_path = '/nobackup/mm17ktn/ESN/Echo-State-Networks/source/Run_n_units500_ensemble100/testing/' #### change testing type 
+
+if not os.path.exists(output_path):
+    os.makedirs(output_path)
+    print('made directory')
 
 print('running functions')
 exec(open("Val_Functions.py").read())
@@ -85,7 +89,7 @@ N_units  = 500
 bias_out  = np.array([1.]) #output bias
 print('bias_out:', bias_out)
 
-fln = model_path+'/ESN_' + val.__name__ + str(N_units) +'.mat'
+fln = model_path+'/' + val.__name__ + str(N_units) +'.mat'
 data = loadmat(fln)
 print(data.keys())
 
@@ -113,7 +117,7 @@ print('shape of norm:', np.shape(norm))
 
 
 ##### quick test #####
-N_test   = 9                       #number of intervals in the test set
+N_test   = 3                       #number of intervals in the test set
 N_tstart = N_washout + N_train     #where the first test interval starts
 N_intt   = 3*N_lyap                #length of each test set interval
 
@@ -125,14 +129,16 @@ print('N_intt:', N_intt)
 print('N_washout:', N_washout)
 
 # #prediction horizon normalization factor and threshold
-sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
+sigma_ph        = np.sqrt(np.mean(np.var(U,axis=1)))
+sigma_ph_scaled = np.sqrt(np.mean(np.var((U-u_mean) / norm,axis=1)))
 threshold_ph = 0.2
 
-ensemble_test = 50
+ensemble_test = 100
 
 ens_pred = np.zeros((N_intt, dim, N_test, ensemble_test))
 true_data = np.zeros((N_intt, dim, N_test))
 ens_PH = np.zeros((N_test, ensemble_test))
+ens_PH_scaled = np.zeros((N_test, ensemble_test))
 
 method = 'independent'
 
@@ -153,10 +159,11 @@ for j in range(ensemble_test):
     print(np.shape(U))
 
     # to store prediction horizon in the test set
-    PH       = np.zeros(N_test)
+    PH        = np.zeros(N_test)
+    PH_scaled = np.zeros(N_test)
 
     # to plot results
-    plot = True
+    plot = False
     if plot:
         n_plot = 2
 
@@ -164,8 +171,8 @@ for j in range(ensemble_test):
     for i in range(N_test):
         print('starting index for testing:', N_tstart + i*N_intt)
         # data for washout and target in each interval
-        U_wash    = U[N_tstart - N_washout +i*(N_intt//3) : N_tstart + i*(N_intt//3)].copy()
-        Y_t       = U[N_tstart + i*(N_intt//3)            : N_tstart + i*(N_intt//3) + N_intt].copy()
+        U_wash    = U[N_tstart - N_washout +i*N_intt : N_tstart + i*N_intt].copy()
+        Y_t       = U[N_tstart + i*N_intt           : N_tstart + i*N_intt + N_intt].copy()
         print(np.shape(U_wash), np.shape(np.zeros(N_units)))
         
         #washout for each interval
@@ -174,15 +181,24 @@ for j in range(ensemble_test):
 
         # Prediction Horizon
         Yh_t        = closed_loop(N_intt-1, Xa1[-1], Wout, sigma_in, rho)[0]
+        
         #save prediciton and true data
         ens_pred[:,:,i,j] = Yh_t
         if j == 0:
             true_data[:,:,i] = Y_t
             print('ens=', j, 'true data saved')
+            
         #find PH
         Y_err       = np.sqrt(np.mean((Y_t-Yh_t)**2,axis=1))/sigma_ph
         PH[i]       = np.argmax(Y_err>threshold_ph)/N_lyap
         if PH[i] == 0 and Y_err[0]<threshold_ph: PH[i] = N_intt/N_lyap #(in case PH is larger than interval)
+        
+        # find PH scaled
+        Yh_t_scaled        = (Yh_t - u_mean) / norm
+        Y_t_scaled         = (Y_t - u_mean) / norm
+        Y_err_scaled       = np.sqrt(np.mean((Y_t_scaled-Yh_t_scaled)**2,axis=1))/sigma_ph_scaled
+        PH_scaled[i]       = np.argmax(Y_err_scaled>threshold_ph)/N_lyap
+        if PH_scaled[i] == 0 and Y_err_scaled[0]<threshold_ph: PH[i] = N_intt/N_lyap #(in case PH is larger than interval)
 
         if plot:
             #left column has the washout (open-loop) and right column the prediction (closed-loop)
@@ -236,16 +252,20 @@ for j in range(ensemble_test):
     print('')
     
 np.save(output_path+'/PH.npy', ens_PH)
+np.save(output_path+'/PH_scaled.npy', ens_PH_scaled)
 np.save(output_path+'/ens_pred.npy', ens_pred)
 np.save(output_path+'/true_data.npy', true_data)
 
 #ens_pred = np.zeros((N_intt, dim, N_test, ensemble_test))
+
+from scipy.stats import gmean
 
 for i in range(N_test):
     fig, ax =plt.subplots(2, figsize=(12,6), sharex=True)
     xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
     Yh_t_ens = ens_pred[:,:,i,:]
     mean_ens = np.mean(Yh_t_ens, axis=-1)
+    median_ens = np.percentile(Yh_t_ens, 50, axis=-1)
     lower = np.percentile(Yh_t_ens, 5, axis=-1)
     upper = np.percentile(Yh_t_ens, 95, axis=-1)
     Y_t = true_data[:,:,i]
@@ -253,23 +273,28 @@ for i in range(N_test):
     for v in range(dim):
         print(v)
         ax[v].plot(xx, Y_t[:,v], color='tab:blue', label='True')
-        ax[v].plot(xx, mean_ens[:,v], color='tab:orange', label='mean prediction')
+        ax[v].plot(xx, median_ens[:,v], color='tab:orange', label='median prediction')
         ax[v].fill_between(xx, lower[:,v], upper[:,v], color='tab:orange', alpha=0.3, label='90% confidence interval')
         ax[v].grid()
         ax[v].legend()
     ax[1].set_xlabel('Lyapunov Time')
     ax[0].set_ylabel('KE')
     ax[1].set_ylabel('q')
-    fig.savefig(output_path+'/ens_pred_test%i.png' % i)
+    fig.savefig(output_path+'/ens_pred_median_test%i.png' % i)
     plt.close()
 
 fig, ax =plt.subplots(1, figsize=(3,6))
 avg_PH = np.mean(ens_PH, axis=0)
-np.save(output_path+y'/avg_PH.npy', avg_PH)
+np.save(output_path+'/avg_PH.npy', avg_PH)
 # Create a violin plot
 ax.violinplot(avg_PH, showmeans=False, showmedians=True)
 fig.savefig(output_path+'/violin_plot.png')
 
-
+fig, ax =plt.subplots(1, figsize=(3,6))
+avg_PH_scaled = np.mean(ens_PH_scaled, axis=0)
+np.save(output_path+'/avg_PH_scaled.npy', avg_PH_scaled)
+# Create a violin plot
+ax.violinplot(avg_PH_scaled, showmeans=False, showmedians=True)
+fig.savefig(output_path+'/violin_plot_scaled.png')
 
 

@@ -1,3 +1,4 @@
+print('load packages')
 import os
 os.environ["OMP_NUM_THREADS"] = '1' # imposes cores
 import numpy as np
@@ -15,8 +16,6 @@ from scipy.io import loadmat, savemat
 import time as time
 from skopt.plots import plot_convergence
 
-print("Current time:", time.time())
-
 input_path = '/nobackup/mm17ktn/ESN/Echo-State-Networks/source/input_data/'
 output_path = '/nobackup/mm17ktn/ESN/Echo-State-Networks/source/'
 
@@ -25,7 +24,6 @@ output_path = '/nobackup/mm17ktn/ESN/Echo-State-Networks/source/'
 exec(open("Val_Functions.py").read())
 exec(open("Functions.py").read())
 print('run functions files')
-
 
 #### Load Data ####
 q = np.load(input_path + 'q5000_30000.npy')
@@ -48,7 +46,7 @@ U = data
 # number of time steps for washout, train, validation, test
 N_lyap    = 400
 N_washout = 400
-N_train   = 25*N_lyap
+N_train   = 30*N_lyap
 N_val     = 3*N_lyap
 N_test    = 3*N_lyap
 dim       = 2
@@ -102,13 +100,6 @@ tikh = np.array([1e-3,1e-6,1e-9,1e-12])  # Tikhonov factor (optimize among the v
 print('tikh:', tikh)
 print('N_r:', N_units, 'sparsity:', sparseness)
 print('bias_in:', bias_in, 'bias_out:', bias_out)
-
-data_dir = '/Run_n_units{0:}/'.format(N_units)
-output_path = output_path+data_dir
-print(output_path)
-if not os.path.exists(output_path):
-    os.makedirs(output_path)
-    print('made directory')
 
 #### Grid Search and BO #####
 n_in  = 0           #Number of Initial random points
@@ -172,11 +163,19 @@ print(search_space)
 
 #Number of Networks in the ensemble
 ensemble = 100
+
+data_dir = '/Run_n_units{0:}_ensemble{1:}/'.format(N_units, ensemble)
+output_path = output_path+data_dir
+print(output_path)
+if not os.path.exists(output_path):
+    os.makedirs(output_path)
+    print('made directory')
+
 # Which validation strategy (implemented in Val_Functions.ipynb)
 val      = RVC_Noise
-N_fo     = 21                       # number of validation intervals
+N_fo     = 10                        # number of validation intervals
 N_in     = N_washout                 # timesteps before the first validation interval (can't be 0 due to implementation)
-N_fw     = (N_train-N_val)//(N_fo) # how many steps forward the validation interval is shifted (in this way they are evenly spaced)
+N_fw     = (N_train-N_val)//(N_fo-1) # how many steps forward the validation interval is shifted (in this way they are evenly spaced)
 N_splits = 4                         # reduce memory requirement by increasing N_splits
 
 #Quantities to be saved
@@ -338,6 +337,7 @@ for j in range(ensemble_test):
         # data for washout and target in each interval
         U_wash    = U[N_tstart - N_washout +i*N_intt : N_tstart + i*N_intt].copy()
         Y_t       = U[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt].copy()
+        print('start index:', N_tstart+i*N_intt, 'end_index:',  N_tstart+i*N_intt+N_intt)
 
         #washout for each interval
         Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
@@ -346,6 +346,7 @@ for j in range(ensemble_test):
         # Prediction Horizon
         Yh_t        = closed_loop(N_intt-1, Xa1[-1], Wout, sigma_in, rho)[0]
         if i == 1:
+            ens_Y_t = Y_t
             ens_pred[:, :, j] = Yh_t
         Y_err       = np.sqrt(np.mean((Y_t-Yh_t)**2,axis=1))/sigma_ph
         PH[i]       = np.argmax(Y_err>threshold_ph)/N_lyap
@@ -393,7 +394,7 @@ mean_ens = np.mean(ens_pred, axis=-1)
 lower = np.percentile(ens_pred, 5, axis=-1)
 upper = np.percentile(ens_pred, 95, axis=-1)
 for i in range(dim):
-    ax[i].plot(xx, Y_t[:,i], color='tab:blue')
+    ax[i].plot(xx, ens_Y_t[:,i], color='tab:blue')
     ax[i].plot(xx, mean_ens[:,i], color='tab:orange')
     ax[i].fill_between(xx, lower[:,i], upper[:,i], color='tab:orange', alpha=0.3)
     ax[i].grid()
@@ -419,7 +420,7 @@ data = loadmat(fln)
 Win  = data['Win'][0] #gives Winn
 
 # validation ensembles convergence
-ensemble_list = np.linspace(1,101,100)
+ensemble_list = np.linspace(1,ensemble+1,ensemble)
 print(np.shape(ensemble_list))
 
 lowest_MSE_values = np.zeros((ensemble))

@@ -34,8 +34,8 @@ def open_loop(U, x0, sigma_in, rho):
     """
     N     = U.shape[0]
     Xa    = np.empty((N+1, N_units+1))
-    print("Shape of x0:", x0.shape)           # Should be (N_units,)
-    print("Shape of bias_out:", bias_out.shape)  # Should be (1,)
+    #print("Shape of x0:", x0.shape)           # Should be (N_units,)
+    #print("Shape of bias_out:", bias_out.shape)  # Should be (1,)
     Xa[0] = np.concatenate((x0,bias_out))
     for i in np.arange(1,N+1):
         Xa[i] = step(Xa[i-1,:N_units], U[i-1], sigma_in, rho)
