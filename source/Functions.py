@@ -16,7 +16,10 @@ def step(x_pre, u, sigma_in, rho):
     """
     # input is normalized and input bias added
     #print('shapes:', np.shape((u-u_mean)/norm), np.shape(bias_in))
-    u_augmented = np.hstack(((u-u_mean)/norm, bias_in))
+    if normalisation == 'on':
+        u_augmented = np.hstack(((u-u_mean)/norm, bias_in))
+    elif normalisation == 'off':
+        u_augmented = np.hstack((u, bias_in))
     # reservoir update
     x_post      = np.tanh(Win.dot(u_augmented*sigma_in) + W.dot(rho*x_pre))
     # output bias added
@@ -132,6 +135,7 @@ def train_save_n(U_washout, U_train, Y_train, tikh, sigma_in, rho, noise):
 
     LHS   = 0
     RHS   = 0
+    Xa1_list = np.zeros((len(U_train), N_units+1))
     N_len = (U_train.shape[0]-1)//N_splits
 
     for ii in range(N_splits):
@@ -140,17 +144,21 @@ def train_save_n(U_washout, U_train, Y_train, tikh, sigma_in, rho, noise):
         Xa1 = open_loop(U_train[ii*N_len:(ii+1)*N_len], xf, sigma_in, rho)[1:]
         xf  = Xa1[-1,:N_units].copy()
 
-        t1  = time.time()
+        t1  = time.time() 
         LHS += np.dot(Xa1.T, Xa1)
         RHS += np.dot(Xa1.T, Y_train[ii*N_len:(ii+1)*N_len])
+        
+        Xa1_list[ii*N_len:(ii+1)*N_len, :] = Xa1 
 
     if N_splits > 1:# to cover the last part of the data that didn't make into the even splits
         Xa1 = open_loop(U_train[(ii+1)*N_len:], xf, sigma_in, rho)[1:]
         LHS += np.dot(Xa1.T, Xa1)
         RHS += np.dot(Xa1.T, Y_train[(ii+1)*N_len:])
+        
+        Xa1_list[(ii+1)*N_len:, :] = Xa1 
 
     LHS.ravel()[::LHS.shape[1]+1] += tikh
 
     Wout = np.linalg.solve(LHS, RHS)
 
-    return Wout
+    return Wout, Xa1_list

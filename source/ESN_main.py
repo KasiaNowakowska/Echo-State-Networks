@@ -15,6 +15,9 @@ from skopt.learning.gaussian_process.kernels import Matern, WhiteKernel, Product
 from scipy.io import loadmat, savemat
 import time as time
 from skopt.plots import plot_convergence
+from sklearn.preprocessing import StandardScaler
+import sys
+sys.stdout.reconfigure(line_buffering=True)
 
 input_path = '/nobackup/mm17ktn/ESN/Echo-State-Networks/source/input_data/'
 output_path = '/nobackup/mm17ktn/ESN/Echo-State-Networks/source/'
@@ -46,7 +49,7 @@ U = data
 # number of time steps for washout, train, validation, test
 N_lyap    = 400
 N_washout = 400
-N_train   = 30*N_lyap
+N_train   = 31*N_lyap # 46
 N_val     = 3*N_lyap
 N_test    = 3*N_lyap
 dim       = 2
@@ -57,6 +60,16 @@ m = U_data.min(axis=0)
 M = U_data.max(axis=0)
 norm = M-m 
 u_mean = U_data.mean(axis=0)
+print('mean', u_mean)
+print('norm', norm)
+normalisation = 'on'
+standardisation = 'off'
+if standardisation == 'on':
+    ss = StandardScaler()
+    U = ss.fit_transform(U)
+    #data = data[::5]
+    #time_vals = time_vals[::5]
+    print(np.shape(U))
 
 # washout
 U_washout = U[:N_washout].copy()
@@ -84,14 +97,14 @@ if noisy:
     ax[1].plot(U_tv[:N_val,1], 'r--')
 
 ax[0].legend()
-fig.savefig(output_path + '/noise_addition.png')
+fig.savefig(output_path + '/noise_addition_sigman%.2f.png' % sigma_n)
 plt.close()
 
 #### ESN hyperparameters #####
 bias_in   = np.array([np.mean(np.abs((U_data-u_mean)/norm))]) #input bias (average absolute value of the inputs)
 bias_out  = np.array([1.]) #output bias
 
-N_units      = 1000 #neurons
+N_units      = 2000 #neurons
 connectivity = 3
 sparseness   = 1 - connectivity/(N_units-1)
 
@@ -110,7 +123,7 @@ in_scal_in  = np.log10(0.05)
 in_scal_end = np.log10(5.)
 
 # In case we want to start from a grid_search, the first n_grid_x*n_grid_y points are from grid search
-n_grid_x = 6  
+n_grid_x = 6 
 n_grid_y = 6
 n_bo     = 4  #number of points to be acquired through BO after grid search
 n_tot    = n_grid_x*n_grid_y + n_bo #Total Number of Function Evaluatuions
@@ -150,7 +163,7 @@ def g(val):
     res = skopt.gp_minimize(val,                         # the function to minimize
                       search_space,                      # the bounds on each dimension of x
                       base_estimator       = b_e,        # GP kernel
-                      acq_func             = "EI",       # the acquisition function
+                      acq_func             = "gp_hedge",       # the acquisition function
                       n_calls              = n_tot,      # total number of evaluations of f
                       x0                   = x1,         # Initial grid search points to be evaluated at
                       n_random_starts      = n_in,       # the number of additional random initialization points
@@ -164,19 +177,21 @@ print(search_space)
 #Number of Networks in the ensemble
 ensemble = 100
 
-data_dir = '/Run_n_units{0:}_ensemble{1:}/'.format(N_units, ensemble)
+
+# Which validation strategy (implemented in Val_Functions.ipynb)
+val      = RVC_Noise
+N_fo     = 10 # 10,15 (non-chaotic) # 28,43 (chaotic)                        # number of validation intervals
+N_in     = N_washout                 # timesteps before the first validation interval (can't be 0 due to implementation)
+N_fw     = (N_train-N_val-N_in)//(N_fo-1) # how many steps forward the validation interval is shifted (in this way they are evenly spaced)
+N_splits = 4   
+print(N_fw, N_fo)                      # reduce memory requirement by increasing N_splits
+
+data_dir = '/Run_gp_hedge_2_n_units{0:}_ensemble{1:}_n_tot{2:}_normalisation{3:}_standardisation{4:}_sigma_n{5:.1e}_{6:}LTs_{7:}folds/'.format(N_units, ensemble, n_tot, normalisation, standardisation, sigma_n, N_train, N_fo)
 output_path = output_path+data_dir
 print(output_path)
 if not os.path.exists(output_path):
     os.makedirs(output_path)
     print('made directory')
-
-# Which validation strategy (implemented in Val_Functions.ipynb)
-val      = RVC_Noise
-N_fo     = 10                        # number of validation intervals
-N_in     = N_washout                 # timesteps before the first validation interval (can't be 0 due to implementation)
-N_fw     = (N_train-N_val)//(N_fo-1) # how many steps forward the validation interval is shifted (in this way they are evenly spaced)
-N_splits = 4                         # reduce memory requirement by increasing N_splits
 
 #Quantities to be saved
 par      = np.zeros((ensemble, 4))      # GP parameters
@@ -189,6 +204,7 @@ tikh_opt = np.zeros(n_tot)
 Woutt    = np.zeros(((ensemble, N_units+1,dim)))
 Winn     = [] #save as list to keep single elements sparse
 Ws       = [] 
+Xa1_states =  np.zeros(((ensemble, N_train-1, N_units+1))) ####added 
 
 # save the final gp reconstruction for each network
 gps        = [None]*ensemble
@@ -237,11 +253,14 @@ for i in range(ensemble):
     par[i]     = np.array([params[key[2]],params[key[5]][0], params[key[5]][1], gp.noise_])
 
     #saving matrices
-    Woutt[i]   = train_save_n(U_washout, U_tv, Y_tv,
-                              minimum[i,2],10**minimum[i,1], minimum[i,0], minimum[i,3])
+    train      = train_save_n(U_washout, U_tv, Y_tv,
+                              minimum[i,2],10**minimum[i,1], minimum[i,0], minimum[i,3]) ###changed
+    Woutt[i]   = train[0] ###changed
     Winn    += [Win]
     Ws      += [W]
-
+    
+    Xa1_states[i]  = train[1] ###changed
+    
 
     #Plotting Optimization Convergence for each network
     print('Best Results: x', minimum[i,0], 10**minimum[i,1], minimum[i,2],
@@ -307,7 +326,7 @@ N_intt   = 3*N_lyap                #length of each test set interval
 sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
 threshold_ph = 0.2
 
-ensemble_test = 5
+ensemble_test = 3
 
 ens_pred = np.zeros((N_intt, dim, ensemble_test))
 ens_PH = np.zeros((N_test, ensemble_test))
@@ -452,6 +471,34 @@ ax.set_xlabel('no. of ensembles')
 ax.set_ylabel('avg MSE (validation set)')
 fig.savefig(output_path+'/ens_conv.png')
 
+xx = np.arange(Y_tv[:,-2].shape[0])/N_lyap
+for i in range(ensemble):
+    Yh      = np.empty((N_train-1, 2))
+    xa      = Xa1_states[i]
+    Wout    = Woutt[i]
+    Yh_test = np.dot(xa, Wout)
+    fig,ax =plt.subplots(2,sharex=True)
+    for v in range(dim):
+        ax[v].plot(xx,Y_tv[:,v], 'b')
+        ax[v].plot(xx,Yh_test[:,v], '--r')
+        ax[v].grid()
+    ax[1].set_xlabel('Time [Lyapunov Times]')
+    ax[1].set_xlim(0,5)
+    ax[0].set_ylabel('KE')
+    ax[1].set_ylabel('q')
+    fig.savefig(output_path+'/training_states_ens%i.png' % i)
 
-
+for i in range(ensemble):
+    Yh      = np.empty((N_train-1, 2))
+    xa      = Xa1_states[i]
+    var_xa  = np.var(xa)
+    mean_xa = np.mean(xa)
+    fig,ax =plt.subplots(2,sharex=True)
+    ax[0].plot(xx, var_xa, 'b')
+    ax[0].plot(xx, mean_xa, 'b')
+    ax[-1].set_xlabel('Time [Lyapunov Times]')
+    ax.set_xlim(0,5)
+    ax.set_ylabel('KE')
+    ax.set_ylabel('q')
+    fig.savefig(output_path+'/mean_var_states_ens%i.png' % i)
 

@@ -71,7 +71,7 @@ def RVC_Noise(x):
     
     global tikh_opt, k, ti 
     #tikh, U_washout, U_tv, Y_tv, U, N_in, N_fw, N_washout, N_val, N_units
-    print(tikh)
+    #print(tikh)
     #setting and initializing
     rho      = x[0]
     sigma_in = round(10**x[1],2)
