@@ -92,9 +92,9 @@ def active_array_calc(original_data, reconstructed_data, z):
     mask = (rh[:, :, :] >= 1) & (w[:, :, :] > 0) & (b_anom[:, :, :] > 0)
     mask_reconstructed = (rh_reconstructed[:, :, :] >= 1) & (w_reconstructed[:, :, :] > 0) & (b_anom_reconstructed[:, :, :] > 0)
     
-    active_array = np.zeros((len(time_vals), len(x), len(z)))
+    active_array = np.zeros((original_data.shape[0], len(x), len(z)))
     active_array[mask] = 1
-    active_array_reconstructed = np.zeros((len(time_vals), len(x), len(z)))
+    active_array_reconstructed = np.zeros((original_data.shape[0], len(x), len(z)))
     active_array_reconstructed[mask_reconstructed] = 1
     
     # Expand the mask to cover all features (optional, depending on use case)
@@ -103,12 +103,12 @@ def active_array_calc(original_data, reconstructed_data, z):
     mask_expanded_recon = np.expand_dims(mask_reconstructed, axis=-1)  # Shape: (256, 64, 1)
     mask_expanded_recon = np.repeat(mask_expanded_recon, reconstructed_data.shape[-1], axis=-1)  # Shape: (256, 64, 4)
     
-    return active_array, active_array_reconstructed, mask_epanded, mask_expanded_recon
+    return active_array, active_array_reconstructed, mask_expanded, mask_expanded_recon
 
 #### load Data ####
 #### larger data 5000-30000 hf ####
-num_snapshots = [3000]
-POD_snapshots = 2500
+num_snapshots = [1500]
+POD_snapshots = 1000
 x = np.load(input_path+'/x.npy')
 z = np.load(input_path+'/z.npy')
 variables = num_variables = 4
@@ -118,7 +118,7 @@ POD = 'together'
 
 for snap in num_snapshots:
     ### generate directory to save images ###
-    snapshots_path = '/CAE_comparison%i' % snap
+    snapshots_path = '/CAE_comparison%i_256modes' % POD_snapshots
     output_path = output_path1+snapshots_path
     if not os.path.exists(output_path):
         os.makedirs(output_path)
@@ -174,7 +174,7 @@ for snap in num_snapshots:
     data_for_POD_scaled_reshape = ss.fit_transform(data_for_POD_reshape)
     data_for_POD_scaled = data_for_POD_scaled_reshape.reshape(POD_snapshots, len(x), len(z), variables)
     new_data_scaled_reshape = ss.transform(new_data_reshape)
-    new_data_scaled = new_data_reshape.reshape(new_data_snapshots, , len(x), len(z), variables)
+    new_data_scaled = new_data_reshape.reshape(new_data_snapshots, len(x), len(z), variables)
     
     # Print the shape of the combined array
     print('shape of all data and POD data after scaling:', data_all.shape, data_for_POD_scaled.shape)
@@ -188,7 +188,7 @@ for snap in num_snapshots:
     data_matrix_new = new_data_scaled.reshape(new_data_snapshots, -1) #
 
     from sklearn.decomposition import PCA
-    n_components=[128]
+    n_components=[256]
     cumulative_explained_variance_values   = np.zeros(len(n_components))
     evr_reconstruction_POD                 = np.zeros(len(n_components))
     MSE_reconstruction_POD                 = np.zeros(len(n_components))
@@ -277,17 +277,17 @@ for snap in num_snapshots:
         
         #### visualise reconstruction ####
         # EVR for reconstruction of POD data
-        numerator = np.sum((data_matrix - data_reduced) **2)
+        numerator = np.sum((data_matrix - data_reconstructed_reshaped) **2)
         denominator = np.sum(data_matrix ** 2)
         evr_reconstruction = 1 - (numerator/denominator)
-        evr_reconstruction_POD[c_index] = evr_reconsturction
+        evr_reconstruction_POD[c_index] = evr_reconstruction
         
         #MSE for reconstruction of POD data
-        mse = mean_squared_error(data_matrix, data_reduced)
+        mse = mean_squared_error(data_matrix, data_reconstructed_reshaped)
         MSE_reconstruction_POD[c_index] = mse
         
         #NRMSE
-        nrmse = NRMSE(data_matrix, data_reduced)
+        nrmse = NRMSE(data_matrix, data_reconstructed_reshaped)
         NRMSE_reconstruction_POD[c_index] = nrmse
         
         if Plotting:
@@ -340,12 +340,12 @@ for snap in num_snapshots:
         
         accuracy = np.mean(active_array == active_array_reconstructed)
         accuracy_POD[c_index] = accuracy
-        mse_plume = mean_squared_error(data_for_POD[:,:,:,:][mask], data_reconstructed_unscaled[:,:,:,v][mask])
+        mse_plume = mean_squared_error(data_for_POD[:,:,:,:][mask], data_reconstructed_unscaled[:,:,:,:][mask])
         MSE_plume_POD[c_index] = mse_plume
         
         #SSIM
-        ssim = compute_ssim_for_4d(data_for_POD, data_reconstructed_unscaled)
-        SSIM_POD[c_index] = ssim
+        ssim_value = compute_ssim_for_4d(data_for_POD, data_reconstructed_unscaled)
+        SSIM_POD[c_index] = ssim_value
      
         import json
 
@@ -360,29 +360,30 @@ for snap in num_snapshots:
         "nrmse": nrmse,
         "accuracy": accuracy,
         "MSE_plume": mse_plume,
-        "test_ssim": ssim,
+        "test_ssim": ssim_value,
         }
     
         with open(output_path_met, "w") as file:
             json.dump(metrics, file, indent=4)
             
         #### PROJECTION ####
-        data_reduced_projection = pca.transform(data_matrix_new)
-        new_reconstructed       = pca.inverse_trasnform(data_reduced_projection)
+        data_reduced_projection             = pca.transform(data_matrix_new)
+        new_reconstructed_reshaped          = pca.inverse_transform(data_reduced_projection)
+        new_reconstructed                   = new_reconstructed_reshaped.reshape(new_data_snapshots, 256, 64, num_variables)  # (5000, 256, 1, 2)
         
         #### visualise reconstruction ####
         # EVR for reconstruction of POD data
-        numerator = np.sum((data_matrix_new - data_reduced_projection) **2)
+        numerator = np.sum((data_matrix_new - new_reconstructed_reshaped) **2)
         denominator = np.sum(data_matrix_new ** 2)
         evr_reconstruction = 1 - (numerator/denominator)
-        evr_reconstruction_new[c_index] = evr_reconsturction
+        evr_reconstruction_new[c_index] = evr_reconstruction
         
         #MSE for reconstruction of POD data
-        mse = mean_squared_error(data_matrix_new, data_reduced_projection)
+        mse = mean_squared_error(data_matrix_new, new_reconstructed_reshaped)
         MSE_reconstruction_new[c_index] = mse
         
         #NRMSE
-        nrmse = NRMSE(data_matrix_new, data_reduced_projection)
+        nrmse = NRMSE(data_matrix_new, new_reconstructed_reshaped)
         NRMSE_reconstruction_new[c_index] = nrmse
         
         if Plotting:
@@ -390,10 +391,10 @@ for snap in num_snapshots:
                 fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
                 minm = min(np.min(new_data[:, :, 32, var]), np.min(new_reconstructed[:, :, 32, var]))
                 maxm = max(np.max(new_data[:, :, 32, var]), np.max(new_reconstructed[:, :, 32, var]))
-                c1 = ax[0].pcolormesh(time_vals_new, x, new_data[:,:, 32, var].T, vmin=minm, vmax=maxm)
+                c1 = ax[0].pcolormesh(time_vals_new, x, new_data[:,:, 32, var].T, vmin=np.min(new_data[:, :, 32, var]), vmax=np.max(new_data[:, :, 32, var]))
                 fig.colorbar(c1, ax=ax[0])
                 ax[0].set_title('true')
-                c2 = ax[1].pcolormesh(time_vals_new, x, new_reconstructed[:,:,32,var].T, vmin=minm, vmax=maxm)
+                c2 = ax[1].pcolormesh(time_vals_new, x, new_reconstructed[:,:,32,var].T, vmin=np.min(new_data[:, :, 32, var]), vmax=np.max(new_data[:, :, 32, var]))
                 fig.colorbar(c1, ax=ax[1])
                 ax[1].set_title('reconstruction')
                 for v in range(2):
@@ -404,11 +405,11 @@ for snap in num_snapshots:
         
         if Plotting:
             # reconstuct global
-            reconstructed_groundtruth_global_new = calculate_global_q_KE(new_reconstructed)
+            reconstructed_global_new = calculate_global_q_KE(new_reconstructed)
             fig, ax = plt.subplots(2,1, figsize=(12,6), tight_layout=True, sharex=True)
             for i in range(2):
                 ax[i].plot(time_vals_new, groundtruth_global[POD_snapshots:,i], color='tab:blue', label='truth')
-                ax[i].plot(time_vals_new, reconstructed_groundtruth_global_new[:,i], color='tab:orange', label='reconstruction')
+                ax[i].plot(time_vals_new, reconstructed_global_new[:,i], color='tab:orange', label='reconstruction')
                 ax[i].grid()
             ax[0].set_ylabel('KE')
             ax[1].set_ylabel('q')
@@ -435,12 +436,12 @@ for snap in num_snapshots:
         
         accuracy = np.mean(active_array == active_array_reconstructed)
         accuracy_POD[c_index] = accuracy
-        mse_plume = mean_squared_error(new_data[:,:,:,:][mask], new_reconstructed[:,:,:,v][mask])
+        mse_plume = mean_squared_error(new_data[:,:,:,:][mask], new_reconstructed[:,:,:,:][mask])
         MSE_plume_new[c_index] = mse_plume
         
         #SSIM
-        ssim = compute_ssim_for_4d(new_data, new_reconstructed)
-        SSIM_new[c_index] = ssim
+        ssim_value = compute_ssim_for_4d(new_data, new_reconstructed)
+        SSIM_new[c_index] = ssim_value
         
         # Full path for saving the file
         output_file = "metrics_new_set_snapshots%i_components%i.json" % (POD_snapshots, c)
@@ -453,7 +454,7 @@ for snap in num_snapshots:
         "nrmse": nrmse,
         "accuracy": accuracy,
         "MSE_plume": mse_plume,
-        "test_ssim": ssim,
+        "test_ssim": ssim_value,
         }
     
         with open(output_path_met, "w") as file:
