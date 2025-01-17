@@ -105,16 +105,11 @@ del u
 del b
 
 data_all  = np.concatenate((q_array, w_array, u_array, b_array), axis=-1)
-data_all_reshape = data_all.reshape(len(time_vals), len(x) * len(z) * variables)
-### scale data ###
-ss = StandardScaler()
-data_scaled_reshape = ss.fit_transform(data_all_reshape)
-data_scaled = data_scaled_reshape.reshape(len(time_vals), len(x), len(z), variables)
 
 # Print the shape of the combined array
-print('shape of all data and scaled data:', data_all.shape, data_scaled.shape)
+print('shape of all data and scaled data:', data_all.shape)
 
-U = data_scaled
+U = data_all
 dt = time_vals[1]-time_vals[0]
 print('dt:', dt)
 
@@ -436,6 +431,38 @@ def main():
     U_test       = split_data(U_vt, b_size, test_batches).astype('float32')
     del U_vv, U_tt, U_vt
 
+    # Placeholder for standardized data
+    U_train_scaled = np.zeros_like(U_train)
+    U_val_scaled = np.zeros_like(U_val)
+    U_test_scaled = np.zeros_like(U_test)
+    scalers = [StandardScaler() for _ in range(variables)]
+
+    # Apply StandardScaler separately to each channel
+    for v in range(variables):
+        # Reshape training data for the current variable
+        reshaped_train_channel = U_train[:, :, :, :, v].reshape(-1, U_train.shape[2] * U_train.shape[3])
+
+        # Fit the scaler on the training data for the current variable
+        scaler = scalers[v]
+        scaler.fit(reshaped_train_channel)
+
+        # Standardize the training data
+        standardized_train_channel = scaler.transform(reshaped_train_channel)
+
+        # Reshape the standardized data back to the original shape (batches, batch_size, x, z)
+        U_train_scaled[:, :, :, :, v] = standardized_train_channel.reshape(U_train.shape[0], U_train.shape[1], U_train.shape[2], U_train.shape[3])
+        
+        # Standardize the validation data using the same scaler
+        reshaped_val_channel = U_val[:, :, :, :, v].reshape(-1, U_val.shape[2] * U_val.shape[3])
+        standardized_val_channel = scaler.transform(reshaped_val_channel)
+        U_val_scaled[:, :, :, :, v] = standardized_val_channel.reshape(U_val.shape[0], U_val.shape[1], U_val.shape[2], U_val.shape[3])
+
+        # Standardize the test data using the same scaler
+        reshaped_test_channel = U_test[:, :, :, :, v].reshape(-1, U_test.shape[2] * U_test.shape[3])
+        standardized_test_channel = scaler.transform(reshaped_test_channel)
+        U_test_scaled[:, :, :, :, v] = standardized_test_channel.reshape(U_test.shape[0], U_test.shape[1], U_test.shape[2], U_test.shape[3])
+
+
 
     # define the model
     # we do not have pooling and upsampling, instead we use stride=2
@@ -497,7 +524,7 @@ def main():
                                                         name='Enc_'+str(j)+'_Add_Layer1_'+str(i)))
 
     # Obtain the shape of the latent space
-    output = enc_mods[-1](U_train[0])
+    output = enc_mods[-1](U_train_scaled[0])
     N_1 = output.shape
     print('shape of latent space', N_1)
     N_latent = N_1[-3] * N_1[-2] * N_1[-1]
@@ -538,7 +565,7 @@ def main():
 
 
     # run the model once to print summary
-    enc0, dec0 = model(U_train[0], enc_mods, dec_mods)
+    enc0, dec0 = model(U_train_scaled[0], enc_mods, dec_mods)
     print('latent   space size:', N_latent)
     print('physical space size:', U[0].flatten().shape)
     print('')
@@ -643,13 +670,13 @@ def main():
         nrmse2_0       = 0
         accuracy_new_0 = 0
         mse_plume_0    = 0 
-        rng.shuffle(U_train, axis=0) #shuffle batches
+        rng.shuffle(U_train_scaled, axis=0) #shuffle batches
         for j in range(n_batches):
-            loss, decoded    = train_step(U_train[j], enc_mods, dec_mods)
+            loss, decoded    = train_step(U_train_scaled[j], enc_mods, dec_mods)
             loss_0          += loss
 
             # Compute SSIM
-            original = U_train[j]  # Validation input
+            original = U_train_scaled[j]  # Validation input
             #print(np.shape(original), np.shape(decoded))
             #print(f"Type of original: {type(original)}")
             #print(f"Type of decoded: {type(decoded)}")
@@ -698,11 +725,11 @@ def main():
             accuracy_new_val= 0
             mse_plume_val   = 0 
             for j in range(val_batches):
-                loss, decoded       = train_step(U_val[j], enc_mods, dec_mods,train=False)
+                loss, decoded       = train_step(U_val_scaled[j], enc_mods, dec_mods,train=False)
                 loss_val           += loss
 
                 # Compute SSIM
-                original = U_val[j]  # Validation input
+                original = U_val_scaled[j]  # Validation input
                 batch_ssim = compute_ssim_for_4d(original, decoded)
                 ssim_val += batch_ssim
 
@@ -855,5 +882,5 @@ def main():
 
     print('finished job')
 
-wandb.agent(sweep_id="aqid83hh", function=main)
+wandb.agent(sweep_id=sweep_id, function=main)
 
