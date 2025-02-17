@@ -3,23 +3,71 @@ import time
 import sys
 sys.path.append(os.getcwd())
 import matplotlib
-#matplotlib.use('Agg')  # Set the backend to Agg
+matplotlib.use('Agg')  # Set the backend to Agg
 import matplotlib.pyplot as plt
 #import pandas as pd
 import numpy as np
 import h5py
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
+from scipy.integrate import solve_ivp
 
 import sys
 sys.stdout.reconfigure(line_buffering=True)
 
 output_path='./ToyData/'
 
+#%% Generate Lorenz
+def lorenz_system(t, state, sigma, rho, beta):
+    x, y, z = state
+    dxdt = sigma * (y - x)
+    dydt = x * (rho - z) - y
+    dzdt = x * y - beta * z
+    return [dxdt, dydt, dzdt]
+
+# Parameters
+sigma = 10#16
+rho = 28# 45.92
+beta = 8/3 #4
+
+# Initial conditions
+initial_state = [1.0, 1.0, 1.0]
+
+# Time span
+t_start = 0.0
+t_end = 100
+num_points = 10000
+t_span = np.linspace(t_start, t_end, num_points)
+dt_Lorenz = (t_end-t_start)/num_points
+print('dt_Lorenz', dt_Lorenz)
+
+# Solve the differential equations
+solution = solve_ivp(lorenz_system, [t_start, t_end], initial_state,
+                     args=(sigma, rho, beta), t_eval=t_span)
+
+# Extract the solution
+x_values = solution.y[0]
+y_values = solution.y[1]
+z_values = solution.y[2]
+print(np.shape(x_values))
+
+amplitude_vals = x_values[5000:10000:5]
+print(np.shape(amplitude_vals))
+dt_amplitude = 5 * dt_Lorenz
+print('dt_amplitude', dt_amplitude)
+total_time_amplitude = np.linspace(0, dt_amplitude * len(amplitude_vals), len(amplitude_vals))
+print('end_total_time_amplitude', total_time_amplitude[-1])
+
+fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
+ax.plot(total_time_amplitude, amplitude_vals)
+ax.set_ylabel('amplitude')
+ax.set_xlabel('time')
+fig.savefig(output_path+'/LorenzAmplitude.png')
+
 # Parameters
 nx, nz = 128, 64  # Grid resolution in x and z
-nt = 500         # Number of snapshots
-time = np.linspace(0, 20, nt, endpoint=False)  # Time vector
+nt = 1000         # Number of snapshots
+time = np.linspace(0, 50, nt, endpoint=False)  # Time vector
 
 print(np.shape(time), time[0], time[-1])
 dt = time[1]-time[0]
@@ -30,7 +78,7 @@ z = np.linspace(0, 10, nz)
 x_grid, z_grid = np.meshgrid(x, z)
 
 # Plume parameters
-A = 2.0             # Amplitude of Gaussian plume
+A = amplitude_vals             # Amplitude of Gaussian plume
 sigma_x = 0.25         # Standard deviation of Gaussian plume in x
 sigma_z = 3      # Standard deviation of Gaussian plume in z (for narrow plume in height) #10
 x0 = 7.0            # Static x-center of plume
@@ -49,13 +97,8 @@ combined_data = np.zeros((nt, nx, nz))
 
 # Generate data
 for t_idx, t in enumerate(time):
-    if t_idx<100 or 200<t_idx<300 or 400<t_idx<500:
-        x0 = 7.0  # Plume position (7,7)
-    else:
-        x0 = 2.0  # Plume position (2,7)
-
     # Gaussian plume
-    plume = A * np.exp(-((x_grid - x0)**2 / (2 * sigma_x**2) + (z_grid - z0)**2 / (2 * sigma_z**2)))
+    plume = A[t_idx] * np.exp(-((x_grid - x0)**2 / (2 * sigma_x**2) + (z_grid - z0)**2 / (2 * sigma_z**2)))
 
     # Traveling wave
     wave = np.sin(k * x_grid - omega * t)

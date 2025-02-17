@@ -91,9 +91,21 @@ def load_data(file, name):
 name='combined'
 data_set, x, z, time_vals = load_data(input_path+'/plume_wave_dataset.h5', name)
 print('shape of data', np.shape(data_set))
+print(np.shape(x))
 
 data_set = data_set.reshape(len(time_vals), len(x), len(z), 1)
 print('shape of reshaped data set', np.shape(data_set))
+data_set = data_set[:, 73:105, :, :]
+x = x[73:105]
+print('reduced domain shape', np.shape(data_set))
+print('reduced x domain', np.shape(x))
+print('reduced x domain', len(x))
+print(x[0], x[-1])
+
+fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
+c1 = ax.pcolormesh(time_vals, x, data_set[:,:,32,0].T)
+fig.colorbar(c1, ax=ax)
+fig.savefig(input_path+'/combined_hovmoller_small_domain.png')
 
 U = data_set
 dt = time_vals[1]-time_vals[0]
@@ -119,7 +131,7 @@ sweep_configuration = {
     },
 }
 
-sweep_id = wandb.sweep(sweep=sweep_configuration, project="toydata_lorenz_plumes")
+sweep_id = wandb.sweep(sweep=sweep_configuration, project="toydata_lorenz_plumes_small_domain")
 
 job = 0
 
@@ -907,5 +919,4 @@ def main():
     print('finished job')
 
 wandb.agent(sweep_id=sweep_id, function=main)
-
 

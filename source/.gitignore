@@ -4,3 +4,8 @@ input_data
 data
 run1
 *.png
+
+ToyData/Autoencoder
+ToyData/Run*
+ToyData/*.json
+

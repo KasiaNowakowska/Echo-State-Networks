@@ -33,6 +33,19 @@ def load_data(file, name):
 
     return data, x, z, time_vals
 
+def fft(variable, x):
+    variable = variable - np.mean(variable)
+    fft = np.fft.fft(variable)
+    fft = np.fft.fftshift(fft)
+    end = x[-1]
+    start = x[0]
+    m = np.fft.fftfreq(len(x), d=(end-start)/len(x))
+    m = np.fft.fftshift(m)
+    m = 2*np.pi*m/(1)
+    magnitude_w = np.abs(fft)
+    psd = magnitude_w
+    return psd, m
+
 def wavelet_transform(data, time_value, dt, name, z_value=32):
     signal = data[time_value,:,z_value]
     print(np.shape(signal))
@@ -107,7 +120,7 @@ def wavelet_transform(data, time_value, dt, name, z_value=32):
     ax.set_ylabel('signal')
     ax.grid()
     plt.legend()
-    fig.savefig(output_path+name+'_sigal_recon.png')
+    fig.savefig(output_path+name+'_signal_recon.png')
 
     plume_location_original = x[np.argmax(signal)]
     plume_location_fully = x[np.argmax(fully_reconstructed_signal)]
@@ -115,3 +128,58 @@ def wavelet_transform(data, time_value, dt, name, z_value=32):
     print('plume location from original = ', plume_location_original)
     print('plume location from fully reconstructed signal = ', plume_location_fully)
     print('plume location from partly reconstructed signal = ', plume_location_partly)
+
+def dis_wavelet_transform(signal, level, wavelet = 'db4', z_value=32):
+    coeffs = pywt.wavedec(signal, wavelet, level=level, mode='symmetric')
+
+    fig, ax = plt.subplots(level+1, figsize=(12,6))
+    for i in range(level+1):
+        ax[i].plot(coeffs[i])
+        ax[i].grid()
+    fig.savefig(output_path+'/discrete_wavelet_coeffs.png')
+
+    plume_coeffs = [coeffs[0]] + [np.zeros(c.shape) for c in coeffs[1:]]
+    plume_reconstructed = pywt.waverec(plume_coeffs, wavelet)
+    fig, ax = plt.subplots(1, figsize=(12,3))
+    ax.plot(x, signal, label='true signal')
+    ax.plot(x, plume_reconstructed, label='reconstruction')
+    ax.set_title('reconstruction from approximation coefficient')
+    ax.grid()
+    ax.set_xlabel('x')
+    ax.set_ylabel('magnitude')
+    ax.legend()
+    fig.savefig(output_path+'/approximation_reconstruction.png')
+
+    wave_coeffs = [np.zeros_like(coeffs[0])] + [coeffs[1]] + [coeffs[2]]
+    wave_reconstructed = pywt.waverec(wave_coeffs, wavelet)
+    print(np.shape(wave_reconstructed))
+    print(np.shape(x))
+    fig, ax = plt.subplots(1, figsize=(12,3))
+    ax.plot(x, signal, label='true signal')
+    ax.plot(x, wave_reconstructed, label='reconstruction')
+    ax.set_title('reconstruction from detail coefficients')
+    ax.grid()
+    ax.set_xlabel('x')
+    ax.set_ylabel('magnitude')
+    ax.legend()
+    fig.savefig(output_path+'/detail_reconstruction.png')
+
+
+data_set, x, z, time = load_data(input_path+'/plume_wave_dataset.h5', 'combined')
+time_vals = time
+time_value = 95
+z_value=32
+dt = time[1]-time[0]
+signal = data_set[time_value,:,z_value]
+
+psd, m = fft(signal, x)
+fig, ax =plt.subplots(1, figsize=(6,8), constrained_layout=True)
+ax.plot(m[len(m)//2:], psd[len(m)//2:])
+ax.set_xlabel('freq')
+ax.set_ylabel('magnitude')
+ax.grid()
+fig.savefig(output_path+'/combined_fft.png')
+
+wavelet_transform(data_set, time_value, dt, 'combined', z_value=32)
+
+dis_wavelet_transform(signal, 2, wavelet='db4', z_value=32)

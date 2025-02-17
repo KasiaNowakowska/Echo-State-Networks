@@ -3,7 +3,7 @@ import time
 import sys
 sys.path.append(os.getcwd())
 import matplotlib
-#matplotlib.use('Agg')  # Set the backend to Agg
+matplotlib.use('Agg')  # Set the backend to Agg
 import matplotlib.pyplot as plt
 #import pandas as pd
 import numpy as np
@@ -15,8 +15,8 @@ import json
 import sys
 sys.stdout.reconfigure(line_buffering=True)
 
-input_path='./ToyData/'
-output_path='./ToyData/'
+input_path='./input_data/Ra2e7/' #'./ToyData/'
+output_path='./Ra2e7/'
 
 def load_data(file, name):
     with h5py.File(file, 'r') as hf:
@@ -27,6 +27,18 @@ def load_data(file, name):
         x = hf['x'][:]  # 1D x-axis
         z = hf['z'][:]  # 1D z-axis
         time = hf['time'][:]  # 1D time vector
+
+    return data, x, z, time
+
+def load_data_2e7(file, name):
+    with h5py.File(file, 'r') as hf:
+        print(name)
+        print(hf[name])
+        data = np.array(hf[name])
+
+        x = hf['x'][:]  # 1D x-axis
+        z = hf['z'][:]  # 1D z-axis
+        time = hf['total_time'][:]  # 1D time vector
 
     return data, x, z, time
 
@@ -68,6 +80,7 @@ def POD(data, c,  file_str, Plotting=True):
         indexes_to_plot = np.array([1, 2, 3, 4] ) -1
         indexes_to_plot = indexes_to_plot[indexes_to_plot <= (c-1)]
         print('plotting for modes', indexes_to_plot)
+        print('number of modes', len(indexes_to_plot))
 
         #time coefficients
         fig, ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
@@ -235,9 +248,10 @@ def MSE(original_data, reconstructed_data):
     mse = mean_squared_error(original_data, reconstructed_data)
     return mse
 
+'''
 #### plume ###
 data_names = ['plume', 'wave', 'combined']
-n_modes = [1, 2, 4]
+n_modes = [1, 2, 3]
 for index, name in enumerate(data_names):
     data_set, x, z, time = load_data(input_path+'/plume_wave_dataset.h5', name)
     data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_ = POD(data_set, n_modes[index], name)
@@ -267,4 +281,34 @@ for index, name in enumerate(data_names):
 
     with open(output_path_met, "w") as file:
         json.dump(metrics, file, indent=4)
+'''
+
+data_set, x, z, time = load_data_2e7(input_path+'/data_all.h5', 'w_vertical')
+data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_ = POD(data_set, n_modes[index], name)
+plot_reconstruction(data_set, data_reconstructed, 32, 20, name)
+nrmse = NRMSE(data_set, data_reconstructed)
+mse   = MSE(data_set, data_reconstructed)
+evr   = EVR_recon(data_set, data_reconstructed)
+SSIM  = compute_ssim_for_4d(data_set, data_reconstructed)
+
+print('NRMSE', nrmse)
+print('MSE', mse)
+print('EVR_recon', evr)
+print('SSIM', SSIM)
+
+# Full path for saving the file
+output_file = name + '_metrics.json' 
+
+output_path_met = os.path.join(output_path, output_file)
+
+metrics = {
+"no. modes": n_modes[index],
+"EVR": evr,
+"MSE": mse,
+"NRMSE": nrmse,
+"SSIM": SSIM,
+}
+
+with open(output_path_met, "w") as file:
+    json.dump(metrics, file, indent=4)
 

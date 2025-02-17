@@ -49,8 +49,21 @@ from pathlib import Path
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error
 
+from scipy.sparse import csr_matrix, csc_matrix, lil_matrix
+from scipy.sparse.linalg import eigs as sparse_eigs
+import skopt
+from skopt.space import Real
+from skopt.learning import GaussianProcessRegressor as GPR
+from skopt.learning.gaussian_process.kernels import Matern, WhiteKernel, Product, ConstantKernel
+from scipy.io import loadmat, savemat
+from skopt.plots import plot_convergence
+
 import wandb
 wandb.login()
+
+exec(open("Val_Functions.py").read())
+exec(open("Functions.py").read())
+print('run functions files')
 
 input_path = args['--input_path']
 output_path = args['--output_path']
@@ -75,7 +88,7 @@ def load_data(file, name):
     return data, x, z, time
 
 
-#### LOAD DATA AND POD ####
+#### LOAD DATA ####
 name='combined'
 data_set, x, z, time_vals = load_data(input_path+'/plume_wave_dataset.h5', name)
 print('shape of data', np.shape(data_set))
@@ -140,6 +153,19 @@ def model(inputs, enc_mods, dec_mods, is_train=False):
         decoded += dec_mod(encoded, training=is_train)
 
     return encoded, decoded
+    
+@tf.function #this creates the tf graph  
+def Decoder(encoded, dec_mods, is_train=False):
+    '''
+    Multiscale autoencoder, taken from Hasegawa 2020. The contribution of the CNNs at different
+    scales are simply summed.
+    '''
+    
+    decoded = 0
+    for dec_mod in dec_mods:
+        decoded += dec_mod(encoded, training=is_train)
+
+    return decoded
 
 @tf.function #this creates the tf graph
 def train_step(inputs, enc_mods, dec_mods, train=True):
@@ -237,7 +263,7 @@ def periodic_padding(image, padding=1, asym=False):
     #print("shape of padded image: ", padded_image.shape)
     return padded_image
 
-def plot_reconstruction(original, reconstruction, z_value, t_value, file_str):
+def plot_reconstruction(original, reconstruction, z_value, t_value, time_vals, file_str):
     if original.ndim == 4:
         original = original.reshape(original.shape[0], original.shape[1], original.shape[2])
     if reconstruction.ndim == 4:
@@ -248,7 +274,7 @@ def plot_reconstruction(original, reconstruction, z_value, t_value, file_str):
         print("Both data arrays have the same dimensions and are 3D.")
     else:
         print("The data arrays either have different dimensions or are not 3D.")
-    
+
     fig, ax = plt.subplots(2, figsize=(12,6), tight_layout=True, sharex=True)
     minm = min(np.min(original[t_value, :, :]), np.min(reconstruction[t_value, :, :]))
     maxm = max(np.max(original[t_value, :, :]), np.max(reconstruction[t_value, :, :]))
@@ -261,75 +287,23 @@ def plot_reconstruction(original, reconstruction, z_value, t_value, file_str):
     for v in range(2):
         ax[v].set_ylabel('z')
     ax[-1].set_xlabel('x')
-    fig.savefig(output_path+file_str+'_snapshot_recon_t%i.png' % t_value)
+    fig.savefig(output_path+'/snapshot_recon'+file_str+'.png')
 
     fig, ax = plt.subplots(2, figsize=(12,6), tight_layout=True, sharex=True)
     minm = min(np.min(original[:, :, z_value]), np.min(reconstruction[:, :, z_value]))
     maxm = max(np.max(original[:, :, z_value]), np.max(reconstruction[:, :, z_value]))
     print(np.max(original[:, :, z_value]))
     print(minm, maxm)
-    time_zone = np.linspace(0, original.shape[0],  original.shape[0])
-    c1 = ax[0].pcolormesh(time_zone, x, original[:, :, z_value].T)
+    c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value].T)
     fig.colorbar(c1, ax=ax[0])
     ax[0].set_title('true')
-    c2 = ax[1].pcolormesh(time_zone, x, reconstruction[:, :, z_value].T)
+    c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value].T)
     fig.colorbar(c1, ax=ax[1])
     ax[1].set_title('reconstruction')
     for v in range(2):
         ax[v].set_ylabel('x')
     ax[-1].set_xlabel('time')
-    fig.savefig(output_path+file_str+'_hovmoller_recon.png')
-
-def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, file_str):
-    if original.ndim == 4:
-        original = original.reshape(original.shape[0], original.shape[1], original.shape[2])
-    if reconstruction.ndim == 4:
-        reconstruction = reconstruction.reshape(reconstruction.shape[0], reconstruction.shape[1], reconstruction.shape[2])
-        
-    # Check if both data arrays have the same dimensions and the dimension is 2
-    if original.ndim == reconstruction.ndim == 3:
-        print("Both data arrays have the same dimensions and are 3D.")
-    else:
-        print("The data arrays either have different dimensions or are not 3D.")
-
-    abs_error = np.abs(original-reconstruction)
-    
-    fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
-    minm = min(np.min(original[t_value, :, :]), np.min(reconstruction[t_value, :, :]))
-    maxm = max(np.max(original[t_value, :, :]), np.max(reconstruction[t_value, :, :]))
-    c1 = ax[0].pcolormesh(x, z, original[t_value,:,:].T, vmin=minm, vmax=maxm)
-    fig.colorbar(c1, ax=ax[0])
-    ax[0].set_title('true')
-    c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:].T, vmin=minm, vmax=maxm)
-    fig.colorbar(c2, ax=ax[1])
-    ax[1].set_title('reconstruction')
-    c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:].T, cmap='Reds')
-    fig.colorbar(c3, ax=ax[2])
-    ax[2].set_title('error')
-    for v in range(3):
-        ax[v].set_ylabel('z')
-    ax[-1].set_xlabel('x')
-    fig.savefig(output_path+file_str+'_snapshot_recon_error_t%i.png' % t_value)
-
-    fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
-    minm = min(np.min(original[:, :, z_value]), np.min(reconstruction[:, :, z_value]))
-    maxm = max(np.max(original[:, :, z_value]), np.max(reconstruction[:, :, z_value]))
-    print(np.max(original[:, :, z_value]))
-    print(minm, maxm)
-    time_zone = np.linspace(0, original.shape[0],  original.shape[0])
-    c1 = ax[0].pcolormesh(time_zone, x, original[:, :, z_value].T, vmin=minm, vmax=maxm)
-    fig.colorbar(c1, ax=ax[0])
-    ax[0].set_title('true')
-    c2 = ax[1].pcolormesh(time_zone, x, reconstruction[:, :, z_value].T, vmin=minm, vmax=maxm)
-    fig.colorbar(c1, ax=ax[1])
-    ax[1].set_title('reconstruction')
-    c3 = ax[2].pcolormesh(time_zone, x, abs_error[:, :, z_value].T, cmap='Reds')
-    fig.colorbar(c3, ax=ax[2])
-    ax[2].set_title('reconstruction')
-    for v in range(2):
-        ax[v].set_ylabel('x')
-    ax[-1].set_xlabel('time')
-    fig.savefig(output_path+file_str+'_hovmoller_recon_error.png')
+    fig.savefig(output_path+'/hovmoller_recon'+file_str+'.png')
 
 #### Metrics ####
 from sklearn.metrics import mean_squared_error
@@ -372,32 +346,24 @@ def compute_ssim_for_4d(original, decoded):
         print("Both data arrays have the same dimensions and are 4D.")
     else:
         print("The data arrays either have different dimensions or are not 4D.")
-    
-    #print('shape of data:', np.shape(original))
+
     # Initialize SSIM accumulator
     total_ssim = 0
-    #print('total_ssim', total_ssim)
     timesteps = original.shape[0]
     channels = original.shape[-1]
-    #print(timesteps, channels)
   
     for t in range(timesteps):
         for c in range(channels):
-            #print(t, c)
             # Extract the 2D slice for each timestep and channel
             orig_slice = original[t, :, :, c]
-            dec_slice = decoded[t, :, :, c].numpy()
-            #print(orig_slice, dec_slice)
+            dec_slice = decoded[t, :, :, c]
             
             # Compute SSIM for the current slice
             batch_ssim = ssim(orig_slice, dec_slice, data_range=orig_slice.max() - orig_slice.min(), win_size=3)
-            #print(batch_ssim)
             total_ssim += batch_ssim
-            #print(total_ssim)
   
     # Compute the average SSIM across all timesteps and channels
     avg_ssim = total_ssim / (timesteps * channels)
-    print('avg_ssim', avg_ssim)
     return avg_ssim
 
 def EVR_recon(original_data, reconstructed_data):
@@ -528,6 +494,11 @@ U_val       = split_data(U_vv_scaled, b_size, val_batches).astype('float32')
 
 del U_vv, U_tt, U_vv_scaled, U_tt_scaled
 
+
+#transform training, val and test sets
+U_scaled = ss_transform(U, scaler)
+print('shape of scaled U', np.shape(U_scaled))
+
 # define the model
 # we do not have pooling and upsampling, instead we use stride=2
 
@@ -589,7 +560,6 @@ for j in range(N_parallel):
                                                 activation=act,padding=pad_dec,strides=1,
                                                     name='Enc_'+str(j)+'_Add_Layer1_'+str(i)))
 
-print('shape of U_train', np.shape(U_train))
 # Obtain the shape of the latent space
 output = enc_mods[-1](U_train[0])
 N_1 = output.shape
@@ -656,60 +626,481 @@ for i in range(N_parallel):
     b[i] = tf.keras.models.load_model(models_dir + '/dec_mod'+str(ker_size[i])+'_'+str(N_latent)+'.h5',
                                           custom_objects={"PerPad2D": PerPad2D})
 
-#### NRMSE across x,z and averaged in time ####
-truth = U_tv_scaled
-decoded = model(truth,a,b)[1]
-print(np.shape(decoded), np.shape(truth))
+##### Compute encoded time_series #####
+train_leng = 0
+N_pos = 1000
+k     = (U_scaled.shape[0] - train_leng)//N_pos
 
-test_times = time_vals[b_size*n_batches*skip+b_size*val_batches*skip:
-                         b_size*n_batches*skip+b_size*val_batches*skip+b_size*test_batches*skip] 
-print(test_times[0], test_times[-1])
+U_enc = np.empty((k*N_pos, N_1[1], N_1[2], N_1[3]))
+for i in range(k):
+        U_enc[i*N_pos:(i+1)*N_pos]= model(U_scaled[i*N_pos:(i+1)*N_pos], a, b)[0]
 
-#SSIM
-test_ssim = compute_ssim_for_4d(truth, decoded)
+with h5py.File(output_path+'/encoded_data'+str(N_latent)+'.h5', 'w') as df:
+    df['U_enc'] = U_enc
 
-#MSE
-mse = MSE(truth, decoded.numpy())
+###### ESN #######
+upsample   = 1
+data_len   = 1000
+transient  = 0
 
-#NRMSE
-nrmse = NRMSE(truth, decoded.numpy())
+dt = dt*upsample
 
-#EVR 
-evr = EVR_recon(truth, decoded.numpy())
+dim      = N_latent #N_latent
+act      = 'tanh'
+U_encoded        = np.array(U_enc[transient:transient+data_len:upsample])#full encoded image (time, N1, N2,N3)
+shape    = U_encoded.shape
+print(shape)
 
-print("nrmse:", nrmse)
-print("mse:", mse)
-print("test_ssim:", test_ssim)
-print("EVR:", evr)
+U = U_encoded.reshape(shape[0], shape[1]*shape[2]*shape[3])
 
-import json
+fig, ax = plt.subplots(shape[0], figsize=(6,16), constrained_layout=True)
+for i in range(shape[0]):
+    ax[i].plot(U[i])
+fig.savefig(output_path+'/latent_space_data_all.png')
+plt.close()
 
-# Full path for saving the file
-output_file = "test_metrics.json"
+# number of time steps for washout, train, validation, test
+N_lyap    = int((2/3) // 0.05 )
+print('N_lyap', N_lyap)
+N_washout = 5*N_lyap #65
+N_train   = 40*N_lyap #520
+N_val     = 3*N_lyap #39
+N_test    = 2*N_lyap
 
-output_path_met = os.path.join(output_path, output_file)
+indexes_to_plot = np.array([1, 2, 5, 8] ) -1
 
-metrics = {
-"MSE": mse,
-"NRMSE": nrmse,
-"SSIM": test_ssim,
-"EVR": evr,
-}
+# compute normalization factor (range component-wise)
+U_data = U[:N_washout+N_train].copy()
+m = U_data.min(axis=0)
+M = U_data.max(axis=0)
+norm = M-m 
+u_mean = U_data.mean(axis=0)
 
-with open(output_path_met, "w") as file:
-    json.dump(metrics, file, indent=4)
+# standardisation 
+norm_std = U_data.std(axis=0)
+normalisation = 'standard' #on, off, standard
 
-decoded = decoded.numpy()
-decoded_unscaled = ss_inverse_transform(decoded, scaler)
-truth_unscaled = ss_inverse_transform(truth, scaler)
+print('norm', norm)
+print('u_mean', u_mean)
+print('norm_std', norm_std)
 
-n       =  4
+# washout
+U_washout = U[:N_washout].copy()
+# data to be used for training + validation
+U_tv  = U[N_washout:N_washout+N_train-1].copy() #inputs
+Y_tv  = U[N_washout+1:N_washout+N_train].copy() #data to match at next timestep
 
-start   = b_size*n_batches*skip+b_size*val_batches*skip  #b_size*n_batches*skip+b_size*val_batches*skip #start after validation set
+# plotting part of training data to visualize noise
+fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
+ax.plot(U_tv[:N_val,0], c='tab:blue', label='Non-noisy')
 
-skips = 10
-for i in range(n):
-    index = 0 + skips*i
+# adding noise to training set inputs with sigma_n the noise of the data
+# improves performance and regularizes the error as a function of the hyperparameters
 
-    plot_reconstruction(truth_unscaled, decoded_unscaled, 32, index, name)
-    plot_reconstruction_and_error(truth_unscaled, decoded_unscaled, 32, index, name)
+seed = 0   #to be able to recreate the data, set also seed for initial condition u0
+rnd1  = np.random.RandomState(seed)
+noisy = True
+if noisy:
+    data_std = np.std(U,axis=0)
+    sigma_n = 1e-3     #change this to increase/decrease noise in training inputs (up to 1e-1)
+    for i in range(dim):
+        U_tv[:,i] = U_tv[:,i] \
+                        + rnd1.normal(0, sigma_n*data_std[i], N_train-1)
+    ax.plot(U_tv[:N_val,0], 'r--', label='Noisy')
+
+ax.legend()
+ax.grid()
+fig.savefig(output_path+'/training_data.png')
+
+#network parameters
+bias_in   = np.array([np.mean(np.abs((U_data-u_mean)/norm))]) #input bias (average absolute value of the inputs)
+bias_out  = np.array([1.]) #output bias 
+
+N_units      = 200 #neurons
+connectivity = 3   
+sparseness   = 1 - connectivity/(N_units-1) 
+
+tikh = np.array([1e-6,1e-9,1e-12])  # Tikhonov factor (optimize among the values in this list)
+
+#### hyperparamter search ####
+n_in  = 0           #Number of Initial random points
+
+spec_in     = 0.1 #0.6    #range for hyperparameters (spectral radius and input scaling)
+spec_end    = 1.0 #1.1
+in_scal_in  = np.log10(0.001) #0.001
+in_scal_end = np.log10(5.)
+
+# In case we want to start from a grid_search, the first n_grid_x*n_grid_y points are from grid search
+n_grid_x = 6  
+n_grid_y = 6
+n_bo     = 4  #number of points to be acquired through BO after grid search
+n_tot    = n_grid_x*n_grid_y + n_bo #Total Number of Function Evaluatuions #5,5,5
+
+
+# computing the points in the grid
+if n_grid_x > 0:
+    x1    = [[None] * 2 for i in range(n_grid_x*n_grid_y)]
+    k     = 0
+    for i in range(n_grid_x):
+        for j in range(n_grid_y):
+            x1[k] = [spec_in + (spec_end - spec_in)/(n_grid_x-1)*i,
+                     in_scal_in + (in_scal_end - in_scal_in)/(n_grid_y-1)*j]
+            k   += 1
+
+# range for hyperparameters
+search_space = [Real(spec_in, spec_end, name='spectral_radius'),
+                Real(in_scal_in, in_scal_end, name='input_scaling')]
+
+# ARD 5/2 Matern Kernel with sigma_f in front for the Gaussian Process
+kernell = ConstantKernel(constant_value=1.0, constant_value_bounds=(1e-1, 3e0))*\
+                  Matern(length_scale=[0.2,0.2], nu=2.5, length_scale_bounds=(5e-2, 1e1)) 
+
+
+#Hyperparameter Optimization using Grid Search plus Bayesian Optimization
+def g(val):
+    
+    #Gaussian Process reconstruction
+    b_e = GPR(kernel = kernell,
+            normalize_y = True, #if true mean assumed to be equal to the average of the obj function data, otherwise =0
+            n_restarts_optimizer = 3,  #number of random starts to find the gaussian process hyperparameters
+            noise = 1e-10, # only for numerical stability
+            random_state = 10) # seed
+    
+    
+    #Bayesian Optimization
+    res = skopt.gp_minimize(val,                         # the function to minimize
+                      search_space,                      # the bounds on each dimension of x
+                      base_estimator       = b_e,        # GP kernel
+                      acq_func             = "gp_hedge",       # the acquisition function
+                      n_calls              = n_tot,      # total number of evaluations of f
+                      x0                   = x1,         # Initial grid search points to be evaluated at
+                      n_random_starts      = n_in,       # the number of additional random initialization points
+                      n_restarts_optimizer = 3,          # number of tries for each acquisition
+                      random_state         = 10,         # seed
+                           )   
+    return res
+
+
+#Number of Networks in the ensemble
+ensemble = 1
+
+data_dir = '/Run_n_units{0:}_ensemble{1:}_normalisation{2:}/'.format(N_units, ensemble, normalisation)
+output_path = output_path+data_dir
+print(output_path)
+if not os.path.exists(output_path):
+    os.makedirs(output_path)
+    print('made directory')
+    
+data_dir = '/GP{0:}_{1:}/'.format(n_grid_x*n_grid_y, n_bo)
+output_path = output_path+data_dir
+print(output_path)
+if not os.path.exists(output_path):
+    os.makedirs(output_path)
+    print('made directory')
+
+# Which validation strategy (implemented in Val_Functions.ipynb)
+val      = RVC_Noise
+N_fo     = 17                     # number of validation intervals
+N_in     = N_washout                 # timesteps before the first validation interval (can't be 0 due to implementation)
+N_fw     = (N_train-N_val-N_washout)//(N_fo-1) # how many steps forward the validation interval is shifted (in this way they are evenly spaced)
+N_splits = 4                         # reduce memory requirement by increasing N_splits
+
+print('Number of folds', N_fo)
+print('how many steps forward validation interval moves', N_fw)
+
+#Quantities to be saved
+par      = np.zeros((ensemble, 4))      # GP parameters
+x_iters  = np.zeros((ensemble,n_tot,2)) # coordinates in hp space where f has been evaluated
+f_iters  = np.zeros((ensemble,n_tot))   # values of f at those coordinates
+minimum  = np.zeros((ensemble, 4))      # minima found per each member of the ensemble
+
+# to store optimal hyperparameters and matrices
+tikh_opt = np.zeros(n_tot)
+Woutt    = np.zeros(((ensemble, N_units+1,dim)))
+Winn     = [] #save as list to keep single elements sparse
+Ws       = []
+Xa1_states =  np.zeros(((ensemble, N_train-1, N_units+1))) ####added  
+
+# save the final gp reconstruction for each network
+gps        = [None]*ensemble
+
+# to print performance of every set of hyperparameters
+print_flag = False
+
+# optimize ensemble networks (to account for the random initialization of the input and state matrices)
+for i in range(ensemble):
+
+    print('Realization    :',i+1)
+
+    k   = 0
+
+    # Win and W generation
+    seed= i+1
+    rnd = np.random.RandomState(seed)
+
+    #sparse syntax for the input and state matrices
+    Win  = lil_matrix((N_units,dim+1))
+    for j in range(N_units):
+        Win[j,rnd.randint(0, dim+1)] = rnd.uniform(-1, 1) #only one element different from zero
+    Win = Win.tocsr()
+
+    W = csr_matrix( #on average only connectivity elements different from zero
+        rnd.uniform(-1, 1, (N_units, N_units)) * (rnd.rand(N_units, N_units) < (1-sparseness)))
+
+    spectral_radius = np.abs(sparse_eigs(W, k=1, which='LM', return_eigenvectors=False))[0]
+    W = (1/spectral_radius)*W #scaled to have unitary spec radius
+
+    # Bayesian Optimization
+    tt       = time.time()
+    res      = g(val)
+    print('Total time for the network:', time.time() - tt)
+
+
+    #Saving Quantities for post_processing
+    gps[i]     = res.models[-1]
+    gp         = gps[i]
+    x_iters[i] = np.array(res.x_iters)
+    f_iters[i] = np.array(res.func_vals)
+    minimum[i] = np.append(res.x,[tikh_opt[np.argmin(f_iters[i])],res.fun])
+    params     = gp.kernel_.get_params()
+    key        = sorted(params)
+    par[i]     = np.array([params[key[2]],params[key[5]][0], params[key[5]][1], gp.noise_])
+
+    #saving matrices
+    train      = train_save_n(U_washout, U_tv, Y_tv,
+                              minimum[i,2],10**minimum[i,1], minimum[i,0], minimum[i,3]) ###changed
+    Woutt[i]   = train[0] ###changed
+    Winn    += [Win]
+    Ws      += [W]
+    
+    Xa1_states[i]  = train[1] ###changed
+
+    #Plotting Optimization Convergence for each network
+    print('Best Results: x', minimum[i,0], 10**minimum[i,1], minimum[i,2],
+          'f', -minimum[i,-1])
+    # Full path for saving the file
+    hyp_file = name + '_ESN_hyperparams_ens%i.json' % i
+
+    output_path_hyp = os.path.join(output_path, hyp_file)
+
+    hyps = {
+    "test": i,
+    "no. modes": N_latent,
+    "spec rad": minimum[i,0],
+    "input scaling": 10**minimum[i,1],
+    "tikh": minimum[i,2],
+    "min f": minimum[i,-1],
+    }
+
+    with open(output_path_hyp, "w") as file:
+        json.dump(hyps, file, indent=4)
+    
+    fig, ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
+    plot_convergence(res)
+    fig.savefig(output_path+'/convergence_realisation%i.png' % i)
+    plt.close()
+    
+##### visualise grid search #####
+# Plot Gaussian Process reconstruction for each network in the ensemble after n_tot evaluations
+# The GP reconstruction is based on the n_tot function evaluations decided in the search
+
+# points to evaluate the GP at
+n_length    = 100
+xx, yy      = np.meshgrid(np.linspace(spec_in, spec_end,n_length), np.linspace(in_scal_in, in_scal_end,n_length))
+x_x         = np.column_stack((xx.flatten(),yy.flatten()))
+x_gp        = res.space.transform(x_x.tolist())     ##gp prediction needs this normalized format
+y_pred      = np.zeros((ensemble,n_length,n_length))
+
+
+for i in range(ensemble):
+    # retrieve the gp reconstruction
+    gp         = gps[i]
+
+    pred, pred_std = gp.predict(x_gp, return_std=True)
+
+    fig, ax  = plt.subplots(1, figsize=(12,10), tight_layout=True)
+
+    amin = np.amin([10,f_iters.max()])
+
+    y_pred[i] = np.clip(-pred, a_min=-amin,
+                        a_max=-f_iters.min()).reshape(n_length,n_length)
+                        # Final GP reconstruction for each realization at the evaluation points
+
+    ax.set_title('Mean GP of realization \#'+ str(i+1))
+
+    #Plot GP Mean
+    ax.set_xlabel('Spectral Radius')
+    ax.set_ylabel('$\log_{10}$Input Scaling')
+    CS      = ax.contourf(xx, yy, y_pred[i],levels=10,cmap='Blues')
+    cbar = fig.colorbar(CS, ax=ax)
+    cbar.set_label('-$\log_{10}$(MSE)',labelpad=15)
+    CSa     = ax.contour(xx, yy, y_pred[i],levels=10,colors='black',
+                          linewidths=1, linestyles='solid')
+
+    #   Plot the n_tot search points
+    ax.scatter(x_iters[i,:n_grid_x*n_grid_y,0],
+                x_iters[i,:n_grid_x*n_grid_y,1], c='r', marker='^') #grid points
+    ax.scatter(x_iters[i,n_grid_x*n_grid_y:,0],
+                x_iters[i,n_grid_x*n_grid_y:,1], c='lime', marker='s') #bayesian opt points
+
+    fig.savefig(output_path + '/GP_%i.png' % i)
+    plt.close()
+np.save(output_path + '/f_iters.npy', f_iters)
+
+                        
+#Save the details and results of the search for post-process
+opt_specs = [spec_in,spec_end,in_scal_in,in_scal_end]
+
+fln = output_path + '/ESN_matrices' + '.mat'
+with open(fln,'wb') as f:  # need 'wb' in Python3
+    savemat(f, {"norm": norm})
+    savemat(f, {"fix_hyp": np.array([bias_in, N_washout],dtype='float64')})
+    savemat(f, {'opt_hyp': np.column_stack((minimum[:,0], 10**minimum[:,1]))})
+    savemat(f, {"Win": Winn})
+    savemat(f, {'W': Ws})
+    savemat(f, {"Wout": Woutt})
+
+##### quick test #####
+N_test   = 1                    #number of intervals in the test set
+N_tstart = N_washout + N_train   #where the first test interval starts
+N_intt   = 2*N_lyap             #length of each test set interval
+
+# #prediction horizon normalization factor and threshold
+sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
+threshold_ph = 0.2
+
+ensemble_test = 1
+
+ens_pred = np.zeros((N_intt, dim, ensemble_test))
+ens_PH = np.zeros((N_test, ensemble_test))
+for j in range(ensemble_test):
+
+    print('Realization    :',j+1)
+
+    #load matrices and hyperparameters
+    Wout     = Woutt[j].copy()
+    Win      = Winn[j] #csr_matrix(Winn[j])
+    W        = Ws[j]   #csr_matrix(Ws[j])
+    rho      = minimum[j,0].copy()
+    sigma_in = 10**minimum[j,1].copy()
+    print('Hyperparameters:',rho, sigma_in)
+
+    # to store prediction horizon in the test set
+    PH       = np.zeros(N_test)
+
+    # to plot results
+    plot = True
+    if plot:
+        n_plot = 3
+        plt.rcParams["figure.figsize"] = (15,3*n_plot)
+        plt.figure()
+        plt.tight_layout()
+
+    #run different test intervals
+    for i in range(N_test):
+        print(N_tstart + i*N_intt)
+        # data for washout and target in each interval
+        U_wash    = U[N_tstart - N_washout +i*N_intt : N_tstart + i*N_intt].copy()
+        Y_t       = U[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt].copy()
+
+        #washout for each interval
+        Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
+        Uh_wash = np.dot(Xa1, Wout)
+
+        # Prediction Horizon
+        Yh_t        = closed_loop(N_intt-1, Xa1[-1], Wout, sigma_in, rho)[0]
+        print(np.shape(Yh_t))
+        if i == 0:
+            ens_pred[:, :, j] = Yh_t
+        Y_err       = np.sqrt(np.mean((Y_t-Yh_t)**2,axis=1))/sigma_ph
+        PH[i]       = np.argmax(Y_err>threshold_ph)/N_lyap
+        if PH[i] == 0 and Y_err[0]<threshold_ph: PH[i] = N_intt/N_lyap #(in case PH is larger than interval)
+
+        if plot:
+            #left column has the washout (open-loop) and right column the prediction (closed-loop)
+            # only first n_plot test set intervals are plotted
+            if i<n_plot:
+                if ensemble_test % 1 == 0:
+                
+                    #### modes prediction ####
+                    fig,ax =plt.subplots(len(indexes_to_plot),sharex=True, tight_layout=True)
+                    xx = np.arange(U_wash[:,-2].shape[0])/N_lyap
+                    print(np.shape(xx), xx[0], xx[-1])
+                    for v in range(len(indexes_to_plot)):
+                        index = indexes_to_plot[v]
+                        ax[v].plot(xx,U_wash[:,index], 'b', label='True')
+                        ax[v].plot(xx,Uh_wash[:-1,index], '--r', label='ESN')
+                        ax[v].grid()
+                        ax[v].set_ylabel('mode %i' % (index+1))
+                    ax[-1].set_xlabel('Time[Lyapunov Times]')
+                    if i==0:
+                        ax[0].legend(ncol=2)
+                    fig.suptitle('washout_ens%i_test%i' % (j,i))
+                    fig.savefig(output_path+'/washout_ens%i_test%i.png' % (j,i))
+                    plt.close()
+
+                    fig,ax =plt.subplots(len(indexes_to_plot),sharex=True, tight_layout=True)
+                    xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
+                    for v in range(len(indexes_to_plot)):
+                        index = indexes_to_plot[v]
+                        ax[v].plot(xx,Y_t[:,index], 'b')
+                        ax[v].plot(xx,Yh_t[:,index], '--r')
+                        ax[v].grid()
+                        ax[v].set_ylabel('mode %i' % (index+1))
+                    ax[-1].set_xlabel('Time [Lyapunov Times]')
+                    fig.savefig(output_path+'/prediction_ens%i_test%i.png' % (j,i))
+                    plt.close()
+                    
+                    fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
+                    xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
+                    ax.plot(xx,Y_err, 'b')
+                    ax.axhline(y=threshold_ph, xmin=xx[0], xmax=xx[-1])
+                    ax.grid()
+                    ax.set_ylabel('PH')
+                    ax.set_xlabel('Time')
+                    fig.savefig(output_path+'/PH_ens%i_test%i.png' % (j,i))
+                    plt.close()
+
+                    ##### reconstructions ####
+                    #prediction (time, latent space = N1*N2*N3)
+                    prediction_reshaped         = Yh_t.reshape(N_intt, N_1[1], N_1[2], N_1[3])
+                    decoded_prediction          = Decoder(prediction_reshaped,b).numpy()
+                    reconstructed_predictions   = ss_inverse_transform(decoded_prediction, scaler)
+                    
+                    truth_reshaped              = Y_t.reshape(N_intt, N_1[1], N_1[2], N_1[3])
+                    decoded_truth               = Decoder(truth_reshaped,b).numpy()
+                    reconstructed_truth         = ss_inverse_transform(decoded_truth, scaler)
+                    
+                    plot_reconstruction(reconstructed_truth, reconstructed_predictions, 32, 20, xx, 'ens%i_test%i' %(j,i))
+                    nrmse = NRMSE(reconstructed_truth, reconstructed_predictions)
+                    mse   = MSE(reconstructed_truth, reconstructed_predictions)
+                    evr   = EVR_recon(reconstructed_truth, reconstructed_predictions)
+                    SSIM  = compute_ssim_for_4d(reconstructed_truth, reconstructed_predictions)
+
+                    print('NRMSE', nrmse)
+                    print('MSE', mse)
+                    print('EVR_recon', evr)
+                    print('SSIM', SSIM)
+                    print('PH', PH[i])
+                    print('latent space', N_latent)
+
+                    # Full path for saving the file
+                    output_file = name + '_CAE_ESN_test_metrics_ens%i_test%i.json' % (j,i)
+
+                    output_path_met = os.path.join(output_path, output_file)
+
+                    metrics = {
+                    "test": i,
+                    "latent space": N_latent,
+                    "EVR": evr,
+                    "MSE": mse,
+                    "NRMSE": nrmse,
+                    "SSIM": SSIM,
+                    "PH": PH[i],
+                    }
+
+                    # Convert float32 to Python float
+                    metrics = {k: float(v) if isinstance(v, np.float32) else v for k, v in metrics.items()}
+
+                    with open(output_path_met, "w") as file:
+                        json.dump(metrics, file, indent=4)
