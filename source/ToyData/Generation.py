@@ -95,18 +95,42 @@ plume_data = np.zeros((nt, nx, nz))
 wave_data = np.zeros((nt, nx, nz))
 combined_data = np.zeros((nt, nx, nz))
 
-# Generate data
-for t_idx, t in enumerate(time):
-    # Gaussian plume
-    plume = A[t_idx] * np.exp(-((x_grid - x0)**2 / (2 * sigma_x**2) + (z_grid - z0)**2 / (2 * sigma_z**2)))
+data_type = 'coupled'
 
-    # Traveling wave
-    wave = np.sin(k * x_grid - omega * t)
+if data_type == 'uncoupled':
+    # Generate (uncoupled) data
+    for t_idx, t in enumerate(time):
+        # Gaussian plume
+        plume = A[t_idx] * np.exp(-((x_grid - x0)**2 / (2 * sigma_x**2) + (z_grid - z0)**2 / (2 * sigma_z**2)))
 
-    # Store data
-    plume_data[t_idx] = plume.T
-    wave_data[t_idx] = wave.T
-    combined_data[t_idx] = plume.T + wave.T
+        # Traveling wave
+        wave = np.sin(k * x_grid - omega * t)
+
+        # Store data
+        plume_data[t_idx] = plume.T
+        wave_data[t_idx] = wave.T
+        combined_data[t_idx] = plume.T + wave.T
+elif data_type == 'coupled':
+    threshold = 0.6
+    # Generate data
+    for t_idx, t in enumerate(time):
+        # Gaussian plume
+        plume = A[t_idx] * np.exp(-((x_grid - x0) ** 2 / (2 * sigma_x ** 2) + (z_grid - z0) ** 2 / (2 * sigma_z ** 2)))
+
+        # Traveling wave
+        wave = np.cos(t)**2 * np.sin(k * x_grid - omega * t)
+
+        # Combined effect
+        combined = plume + wave
+
+        # Apply threshold: plume appears only where combined amplitude exceeds the threshold
+        plume_masked = np.where(wave > threshold, plume, 0)
+
+        # Store data
+        plume_data[t_idx] = plume.T
+        wave_data[t_idx] = wave.T
+        combined_data[t_idx] = (plume_masked + wave).T  # Keep total combined data
+
 
 with h5py.File(output_path+'plume_wave_dataset.h5', 'w') as hf:
     hf.create_dataset('plume', data=plume_data)

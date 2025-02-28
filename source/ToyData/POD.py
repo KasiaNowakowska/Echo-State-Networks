@@ -307,6 +307,7 @@ metrics = {
 "MSE": mse,
 "NRMSE": nrmse,
 "SSIM": SSIM,
+"EV from POD": cumulative_explained_variance[-1],
 }
 
 with open(output_path_met, "w") as file:
