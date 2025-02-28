@@ -18,6 +18,8 @@ def step(x_pre, u, sigma_in, rho):
     #print('shapes:', np.shape((u-u_mean)/norm), np.shape(bias_in))
     if normalisation == 'on':
         u_augmented = np.hstack(((u-u_mean)/norm, bias_in))
+    elif normalisation == 'standard':
+        u_augmented = np.hstack(((u-u_mean)/norm_std, bias_in))
     elif normalisation == 'off':
         u_augmented = np.hstack((u, bias_in))
     # reservoir update

@@ -96,8 +96,6 @@ def active_array_calc(original_data, reconstructed_data, z):
     active_array[mask] = 1
     active_array_reconstructed = np.zeros((original_data.shape[0], len(x), len(z)))
     active_array_reconstructed[mask_reconstructed] = 1
-
-    print('shape of mask in function', np.shape(mask))
     
     # Expand the mask to cover all features (optional, depending on use case)
     mask_expanded       =  np.repeat(mask[:, :, :, np.newaxis], 4, axis=-1)  # Shape: (256, 64, 1)
@@ -114,7 +112,7 @@ z = np.load(input_path+'/z.npy')
 variables = num_variables = 4
 variable_names = ['q', 'w', 'u', 'b']
 scaling = 'scaled'
-POD = 'together'
+POD = 'seperate'
 
 for snap in num_snapshots:
     #### larger data 5000-30000 hf ####
@@ -200,7 +198,7 @@ for snap in num_snapshots:
     data_matrix_new = new_data_scaled.reshape(new_data_snapshots, -1) #
 
     from sklearn.decomposition import PCA
-    n_components=[64]
+    n_components=[32]
     cumulative_explained_variance_values   = np.zeros(len(n_components))
     evr_reconstruction_POD                 = np.zeros(len(n_components))
     MSE_reconstruction_POD                 = np.zeros(len(n_components))
@@ -222,27 +220,29 @@ for snap in num_snapshots:
     Projection = True
 
     ### generate directory to save images ###
-    snapshots_path = '/CAE_comparison_new%i_%imodes' % (POD_snapshots, n_components[0])
+    snapshots_path = '/CAE_comparison_new_seperatePOD%i_%imodes' % (POD_snapshots, n_components[0])
     output_path = output_path1+snapshots_path
     if not os.path.exists(output_path):
         os.makedirs(output_path)
         print('made directory')
 
-    for v in range(variables):
-        fig, ax = plt.subplots(1)
-        c=ax.pcolormesh(time_vals_for_POD, x, data_for_POD_scaled[:,:,32,v].T)
-        fig.colorbar(c, ax=ax)        
-        fig.savefig(output_path+'/train_scaling%i.png' % v)
-
     c_index = 0
     for c in n_components:
-        if POD == 'together':
-            print('together')
-            pca = PCA(n_components=c, svd_solver='randomized', random_state=42)
-            pca.fit(data_matrix)
-            data_reduced = pca.transform(data_matrix)  # (5000, n_modes)
-            data_reconstructed_reshaped = pca.inverse_transform(data_reduced)  # (5000, 256 * 2)
-            data_reconstructed = data_reconstructed_reshaped.reshape(POD_snapshots, 256, 64, num_variables)  # (5000, 256, 1, 2)
+        if POD == 'seperate':
+            print('seperate')
+            data_reconstructed = np.zeros_like(data_for_POD_scaled)
+            pcas = [PCA(n_components=c, svd_solver='randomized', random_state=42) for _ in range(variables)]
+            for v in range(variables):
+                data_matrix = data_for_POD_scaled[:,:,:,v].reshape(POD_snapshots, -1) ##data_scaled originally
+                print('shape of matirx for POD', np.shape(data_matrix)) 
+                
+                # Fit the scaler on the training data for the current variable
+                pca = pcas[v]
+                pca.fit(data_matrix)
+                data_reduced = pca.transform(data_matrix)  # (5000, n_modes)
+                data_reconstructed_reshaped = pca.inverse_transform(data_reduced)  # (5000, 256 * 2)
+                data_reconstructed[:,:,:,v] = data_reconstructed_reshaped.reshape(POD_snapshots, 256, 64)  # (5000, 256, 1, 2)
+
             if scaling == 'scaled':        
                 data_reconstructed_unscaled = np.zeros_like(data_for_POD)
                 for v in range(variables):
@@ -252,6 +252,9 @@ for snap in num_snapshots:
 
                 data_reconstructed_reshaped_unscaled = data_reconstructed_unscaled.reshape(data_for_POD.shape[0], len(x)*len(z)*variables)
             components = pca.components_
+
+            data_reconstructed_reshaped = data_reconstructed.reshape(POD_snapshots, 256* 64* variables)
+            data_matrix = data_for_POD_scaled.reshape(POD_snapshots, 256* 64* variables)
             
             # Get the explained variance ratio
             explained_variance_ratio = pca.explained_variance_ratio_
@@ -279,6 +282,7 @@ for snap in num_snapshots:
                 indexes_to_plot = np.array([1, 2, 10, 50, 100] ) -1
                 indexes_to_plot = indexes_to_plot[indexes_to_plot <= c]
                 
+                '''
                 #time coefficients
                 fig, ax = plt.subplots(1, figsize=(8,3), tight_layout=True)
                 for index, element in enumerate(indexes_to_plot):
@@ -298,7 +302,7 @@ for snap in num_snapshots:
                 for v in range(variables):
                     fig, ax =plt.subplots(len(indexes_to_plot), figsize=(6,12), tight_layout=True, sharex=True)
                     for i in range(len(indexes_to_plot)):
-                        mode = components[indexes_to_plot[i]].reshape(256, 64, variables)  # Reshape to original dimensions for visualization
+                        mode = components[indexes_to_plot[i]].reshape(256, 64, 1)  # Reshape to original dimensions for visualization
                         c1 = ax[i].pcolormesh(x, z, mode[:, :, v].T, cmap='viridis', vmin=minm, vmax=maxm)  # Visualizing the first variable
                         #ax[i].axis('off')
                         ax[i].set_title('mode % i' % (indexes_to_plot[i]+1))
@@ -307,6 +311,7 @@ for snap in num_snapshots:
                     ax[-1].set_xlabel('x')
                     fig.savefig(output_path+'/modes_structure%i_snapshots%i_var%i.png' % (c, snap, v))
                     plt.close()
+                '''
         
         #### visualise reconstruction ####
         # EVR for reconstruction of POD data
@@ -357,7 +362,6 @@ for snap in num_snapshots:
         
         # plumes 
         active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(data_for_POD, data_reconstructed_unscaled, z)
-        print('shape of mask', np.shape(mask))
         
         if Plotting:
             fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
@@ -405,10 +409,14 @@ for snap in num_snapshots:
             json.dump(metrics, file, indent=4)
          
         if Projection:
-            #### PROJECTION ####
-            data_reduced_projection             = pca.transform(data_matrix_new)
-            new_reconstructed_reshaped          = pca.inverse_transform(data_reduced_projection)
-            new_reconstructed                   = new_reconstructed_reshaped.reshape(new_data_snapshots, 256, 64, num_variables)  # (5000, 256, 1, 2)
+            new_reconstructed = np.zeros_like(new_data_scaled)
+            for v in range(variables):
+                pca = pcas[v]
+                #### PROJECTION ####
+                data_matrix_new = new_data_scaled[:,:,:,v].reshape(new_data_scaled.shape[0], -1) ##data_scaled originally
+                data_reduced_projection             = pca.transform(data_matrix_new)
+                new_reconstructed_reshaped          = pca.inverse_transform(data_reduced_projection)
+                new_reconstructed[:,:,:,v]          = new_reconstructed_reshaped.reshape(new_data_snapshots, 256, 64)  # (5000, 256, 1, 2)
 
             if scaling == 'scaled':        
                 data_reconstructed_unscaled = np.zeros_like(new_data)
@@ -418,6 +426,10 @@ for snap in num_snapshots:
                     data_reconstructed_unscaled[:, :, :, v] = unscaled_new_channel.reshape(new_data.shape[0], new_data.shape[1], new_data.shape[2])
 
                 data_reconstructed_reshaped_unscaled = data_reconstructed_unscaled.reshape(new_data.shape[0], len(x)*len(z)*variables)
+
+            data_matrix_new = new_data_scaled.reshape(new_data_snapshots, 256 *64 * variables)
+
+            new_reconstructed_reshaped = new_reconstructed.reshape(new_data_snapshots, 256 *64 * variables)
 
             print('projected data', np.shape(data_reconstructed_unscaled))
             print('projected data true', np.shape(new_data))

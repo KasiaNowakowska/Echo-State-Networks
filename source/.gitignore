@@ -5,7 +5,20 @@ data
 run1
 *.png
 
+wandb
+
 ToyData/Autoencoder
 ToyData/Run*
 ToyData/*.json
+ToyData/CAE_ESN
+ToyData/original_data
+ToyData/plume_wave_dataset.h5
+Run*
+Autoencoder/
+Ra2e8/
+Ra2e7/
 
+POD_Analysis/
+POD_ESN_2Variables/
+__pycache__/
+older_runs/

@@ -30,22 +30,95 @@ exec(open("Val_Functions.py").read())
 exec(open("Functions.py").read())
 print('run functions files')
 
-def calculate_mse_over_time(true_values, reconstructed_values):
-    # Check if both arrays have the same shape (snapshots, height, width)
-    if true_values.shape != reconstructed_values.shape:
-        raise ValueError("True values and reconstructed values must have the same shape.")
+from skimage.metrics import structural_similarity as ssim
+def compute_ssim_for_4d(original, decoded):
+    """
+    Compute the average SSIM across all timesteps and channels for 4D arrays.
+    """
+  
+    # Initialize SSIM accumulator
+    total_ssim = 0
+    timesteps = original.shape[0]
+    channels = original.shape[-1]
+  
+    for t in range(timesteps):
+        for c in range(channels):
+            # Extract the 2D slice for each timestep and channel
+            orig_slice = original[t, :, :, c]
+            dec_slice = decoded[t, :, :, c]
+            
+            # Compute SSIM for the current slice
+            batch_ssim = ssim(orig_slice, dec_slice, data_range=orig_slice.max() - orig_slice.min(), win_size=3)
+            total_ssim += batch_ssim
+  
+    # Compute the average SSIM across all timesteps and channels
+    avg_ssim = total_ssim / (timesteps * channels)
+    return avg_ssim
     
-    # Calculate MSE for each snapshot (along height and width)
-    mse_per_snapshot = np.mean((true_values - reconstructed_values) ** 2, axis=(1, 2))
+def calculate_global_q_KE(data):
+    avgq = np.mean(data[:,:,:,0], axis=(1,2))
+    ke = 0.5*data[:,:,:,1]*data[:,:,:,1]
+    avgke = np.mean(ke, axis=(1,2))
+    globalvar = np.zeros((data.shape[0], 2))
+    globalvar[:,0] = avgke
+    globalvar[:,1] = avgq
+    return globalvar
     
-    # Average the MSE across all snapshots (time dimension)
-    mse_avg_time = np.mean(mse_per_snapshot)
+def NRMSE(original_data, reconstructed_data):
+    rmse = np.sqrt(mean_squared_error(original_data, reconstructed_data))
     
-    return mse_avg_time
+    variance = np.var(original_data)
+    std_dev  = np.sqrt(variance)
+    
+    nrmse = (rmse/std_dev)
+    
+    return nrmse
 
-#### Load Data ####
+def active_array_calc(original_data, reconstructed_data, z):
+    beta = 1.201
+    alpha = 3.0
+    T = original_data[:,:,:,3] - beta*z
+    T_reconstructed = reconstructed_data[:,:,:,3] - beta*z
+    q_s = np.exp(alpha*T)
+    q_s_reconstructed = np.exp(alpha*T)
+    rh = original_data[:,:,:,0]/q_s
+    rh_reconstructed = reconstructed_data[:,:,:,0]/q_s_reconstructed
+    mean_b = np.mean(original_data[:,:,:,3], axis=1, keepdims=True)
+    mean_b_reconstructed= np.mean(reconstructed_data[:,:,:,3], axis=1, keepdims=True)
+    b_anom = original_data[:,:,:,3] - mean_b
+    b_anom_reconstructed = reconstructed_data[:,:,:,3] - mean_b_reconstructed
+    w = original_data[:,:,:,1]
+    w_reconstructed = reconstructed_data[:,:,:,1]
+    
+    mask = (rh[:, :, :] >= 1) & (w[:, :, :] > 0) & (b_anom[:, :, :] > 0)
+    mask_reconstructed = (rh_reconstructed[:, :, :] >= 1) & (w_reconstructed[:, :, :] > 0) & (b_anom_reconstructed[:, :, :] > 0)
+    
+    active_array = np.zeros((original_data.shape[0], len(x), len(z)))
+    active_array[mask] = 1
+    active_array_reconstructed = np.zeros((original_data.shape[0], len(x), len(z)))
+    active_array_reconstructed[mask_reconstructed] = 1
+
+    print('shape of mask in function', np.shape(mask))
+    
+    # Expand the mask to cover all features (optional, depending on use case)
+    mask_expanded       =  np.repeat(mask[:, :, :, np.newaxis], 4, axis=-1)  # Shape: (256, 64, 1)
+    mask_expanded_recon =  np.repeat(mask_reconstructed[:, :, :, np.newaxis], 4, axis=-1) # Shape: (256, 64, 1)
+    
+    return active_array, active_array_reconstructed, mask_expanded, mask_expanded_recon
+
+#### load Data ####
 #### larger data 5000-30000 hf ####
-total_num_snapshots = 2500
+num_snapshots = 5001
+POD_snapshots = 500
+x = np.load(input_path+'/x.npy')
+z = np.load(input_path+'/z.npy')
+variables = num_variables = 4
+variable_names = ['q', 'w', 'u', 'b']
+scaling = 'scaled'
+POD = 'together'
+
+#### larger data 5000-30000 hf ####
+total_num_snapshots = num_snapshots #snap
 x = np.load(input_path+'/x.npy')
 z = np.load(input_path+'/z.npy')
 variables = num_variables = 4
@@ -78,92 +151,143 @@ del w
 del u 
 del b
 
-data_all  = np.concatenate((q_array, w_array, u_array, b_array), axis=-1)
+data_all         = np.concatenate((q_array, w_array, u_array, b_array), axis=-1)
 data_all_reshape = data_all.reshape(len(time_vals), len(x) * len(z) * variables)
+
+data_for_POD = data_all[:POD_snapshots]
+data_for_POD_reshape = data_for_POD.reshape(POD_snapshots, len(x) * len(z) * variables)
+time_vals_for_POD = time_vals[:POD_snapshots]
+new_data_snapshots = total_num_snapshots-POD_snapshots
+new_data = data_all[POD_snapshots:]
+new_data_reshape = new_data.reshape(new_data_snapshots, len(x) * len(z) * variables)
+time_vals_new = time_vals[POD_snapshots:]
+
 ### scale data ###
-ss = StandardScaler()
-data_scaled_reshape = ss.fit_transform(data_all_reshape)
-data_scaled = data_scaled_reshape.reshape(len(time_vals), len(x), len(z), variables)
+# Placeholder for standardized data
+data_for_POD_scaled = np.zeros_like(data_for_POD)
+new_data_scaled = np.zeros_like(new_data)
+scalers = [StandardScaler() for _ in range(variables)]
+
+# Apply StandardScaler separately to each channel
+for v in range(variables):
+    # Reshape training data for the current variable
+    reshaped_POD_channel = data_for_POD[:, :, :, v].reshape(-1, data_for_POD.shape[1] * data_for_POD.shape[2])
+
+    # Fit the scaler on the training data for the current variable
+    scaler = scalers[v]
+    scaler.fit(reshaped_POD_channel)
+
+    # Standardize the training data
+    standardized_POD_channel = scaler.transform(reshaped_POD_channel)
+
+    # Reshape the standardized data back to the original shape (batches, batch_size, x, z)
+    data_for_POD_scaled[:, :, :, v] = standardized_POD_channel.reshape(data_for_POD.shape[0], data_for_POD.shape[1], data_for_POD.shape[2])
+    
+    # Standardize the new data using the same scaler
+    reshaped_new_channel = new_data[:, :, :, v].reshape(-1, new_data.shape[1] * new_data.shape[2])
+    standardized_new_channel = scaler.transform(reshaped_new_channel)
+    new_data_scaled[:, :, :, v] = standardized_new_channel.reshape(new_data.shape[0], new_data.shape[1], new_data.shape[2])
 
 # Print the shape of the combined array
-print('shape of all data and scaled data:', data_all.shape, data_scaled.shape)
-
-POD_num_snapshots = 2500
-data_for_POD = data_scaled[:POD_num_snapshots]
-print(data_for_POD.shape)
+print('shape of all data and POD data after scaling:', data_all.shape, data_for_POD_scaled.shape)
 
 #### global ####
-groundtruth_avgq = np.mean(data_all[:,:,:,0], axis=(1,2))
-groundtruth_ke = 0.5*data_all[:,:,:,1]*data_all[:,:,:,1]
-groundtruth_avgke = np.mean(groundtruth_ke, axis=(1,2))
-groundtruth_global = np.zeros((total_num_snapshots,2))
-groundtruth_global[:,0] = groundtruth_avgke
-groundtruth_global[:,1] = groundtruth_avgq
+groundtruth_global = calculate_global_q_KE(data_all)
 
 ### reshape data and run POD ###
-data_matrix = data_for_POD.reshape(POD_num_snapshots, -1)
-print(np.shape(data_matrix))
+data_matrix = data_for_POD_scaled.reshape(POD_snapshots, -1) ##data_scaled originally
+print('shape of matirx for POD', np.shape(data_matrix)) 
+data_matrix_new = new_data_scaled.reshape(new_data_snapshots, -1) #
 
-n_components=100
-from sklearn.decomposition import PCA
-pca = PCA(n_components=n_components, svd_solver='randomized', random_state=42)
-data_reduced = pca.fit_transform(data_matrix)  # (5000, n_modes)
-data_reconstructed_reshaped = pca.inverse_transform(data_reduced)  # (5000, 256 * 2)
-#data_reconstructed_reshaped = ss.inverse_transform(data_reconstructed_reshaped)
-data_reconstructed = data_reconstructed_reshaped.reshape(POD_num_snapshots, 256, 64, num_variables)  # (5000, 256, 1, 2)
-components = pca.components_
-print('shape of coefficients:', np.shape(data_reduced))
-#### unscale the data ####
-data_reconstructed_reshaped_unscaled = ss.inverse_transform(data_reconstructed_reshaped)
-data_reconstructed_unscaled = data_reconstructed_reshaped_unscaled.reshape(POD_num_snapshots, 256, 64, num_variables)
+Plotting = True
+Projection = True
 
-data_dir = '/POD_ESN_4var_n_snapshots{0:}_n_modes{1:}/'.format(POD_num_snapshots, n_components)
-output_path = output_path+data_dir
-print(output_path)
+### generate directory to save images ###
+n_components=128
+snapshots_path = '/POD_ESN_snapshots%i_%imodes' % (POD_snapshots, n_components[0])
+output_path = output_path1+snapshots_path
 if not os.path.exists(output_path):
     os.makedirs(output_path)
     print('made directory')
 
+from sklearn.decomposition import PCA
+pca = PCA(n_components=c, svd_solver='randomized', random_state=42)
+pca.fit(data_matrix)
+data_reduced = pca.transform(data_matrix)  # (5000, n_modes)
+data_reconstructed_reshaped = pca.inverse_transform(data_reduced)  # (5000, 256 * 2)
+data_reconstructed = data_reconstructed_reshaped.reshape(POD_snapshots, 256, 64, num_variables)  # (5000, 256, 1, 2)
+if scaling == 'scaled':        
+    data_reconstructed_unscaled = np.zeros_like(data_for_POD)
+    for v in range(variables):
+        reshaped_channel_reconstructed_POD = data_reconstructed[:, :, :, v].reshape(-1, data_for_POD.shape[1] * data_for_POD.shape[2])
+        unscaled_POD_channel = scalers[v].inverse_transform(reshaped_channel_reconstructed_POD)
+        data_reconstructed_unscaled[:, :, :, v] = unscaled_POD_channel.reshape(data_for_POD.shape[0], data_for_POD.shape[1], data_for_POD.shape[2])
+
+    data_reconstructed_reshaped_unscaled = data_reconstructed_unscaled.reshape(data_for_POD.shape[0], len(x)*len(z)*variables)
+components = pca.components_
+
+# Get the explained variance ratio
+explained_variance_ratio = pca.explained_variance_ratio_
+# Calculate cumulative explained variance
+cumulative_explained_variance = np.cumsum(explained_variance_ratio)
+# add to list
+cumulative_explained_variance_values[c_index] = cumulative_explained_variance[-1]
+print('cumulative explained variance for', c, 'components is', cumulative_explained_variance[-1])
+
+
+#### PROJECTION ####
+data_reduced_projection             = pca.transform(data_matrix_new)
+new_reconstructed_reshaped          = pca.inverse_transform(data_reduced_projection)
+new_reconstructed                   = new_reconstructed_reshaped.reshape(new_data_snapshots, 256, 64, num_variables)  # (5000, 256, 1, 2)
+
+if scaling == 'scaled':        
+    data_reconstructed_unscaled = np.zeros_like(new_data)
+    for v in range(variables):
+        reshaped_channel_reconstructed_new = new_reconstructed[:, :, :, v].reshape(-1, new_data.shape[1] * new_data.shape[2])
+        unscaled_new_channel = scalers[v].inverse_transform(reshaped_channel_reconstructed_new)
+        data_reconstructed_unscaled[:, :, :, v] = unscaled_new_channel.reshape(new_data.shape[0], new_data.shape[1], new_data.shape[2])
+
+    data_reconstructed_reshaped_unscaled = data_reconstructed_unscaled.reshape(new_data.shape[0], len(x)*len(z)*variables)
+
+print('projected data', np.shape(data_reconstructed_unscaled))
+print('projected data true', np.shape(new_data))
 
 #### visualise reconstruction ####
-for var in range(num_variables):
-    fig, ax = plt.subplots(2, figsize=(12,6), tight_layout=True)
-    minm = min(np.min(data_all[:POD_num_snapshots, :, 32, var]), np.min(data_reconstructed_unscaled[:, :, 32, var]))
-    maxm = max(np.max(data_all[:POD_num_snapshots, :, 32, var]), np.max(data_reconstructed_unscaled[:, :, 32, var]))
-    c1 = ax[0].contourf(time_vals[:POD_num_snapshots], x, data_all[:POD_num_snapshots,:, 32, var].T, vmin=minm, vmax=maxm)
-    fig.colorbar(c1, ax=ax[0])
-    ax[0].set_title('true')
-    c2 = ax[1].contourf(time_vals[:POD_num_snapshots], x, data_reconstructed_unscaled[:,:,32,var].T, vmin=minm, vmax=maxm)
-    fig.colorbar(c1, ax=ax[1])
-    ax[1].set_title('reconstruction')
-    for v in range(2):
-        ax[v].set_xlabel('time')
-        ax[v].set_ylabel('x')
-        ax[v].set_xlim(5000, 6000)
-    fig.savefig(output_path+'/reconstruction_var%i.png' % var)
-    plt.close()
+if Plotting:
+    for var in range(num_variables):
+        fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
+        minm = min(np.min(new_data[:, :, 32, var]), np.min(data_reconstructed_unscaled[:, :, 32, var]))
+        maxm = max(np.max(new_data[:, :, 32, var]), np.max(data_reconstructed_unscaled[:, :, 32, var]))
+        c1 = ax[0].pcolormesh(time_vals_new, x, new_data[:,:, 32, var].T, vmin=np.min(new_data[:, :, 32, var]), vmax=np.max(new_data[:, :, 32, var]))
+        fig.colorbar(c1, ax=ax[0])
+        ax[0].set_title('true')
+        c2 = ax[1].pcolormesh(time_vals_new, x, data_reconstructed_unscaled[:,:,32,var].T, vmin=np.min(new_data[:, :, 32, var]), vmax=np.max(new_data[:, :, 32, var]))
+        fig.colorbar(c1, ax=ax[1])
+        ax[1].set_title('reconstruction')
+        for v in range(2):
+            ax[v].set_xlabel('time')
+            ax[v].set_ylabel('x')
+            ax[v].set_xlim(time_vals_new[0], time_vals_new[499])
+        fig.savefig(output_path+'/reconstruction_modes_new_set_c%i_snapshots%i_var%i.png' % (c, snap, var))
+        plt.close()
 
 # reconstuct global
-reconstructed_groundtruth_avgq = np.mean(data_reconstructed_unscaled[:,:,:,0], axis=(1,2))
-reconstructed_groundtruth_ke = 0.5*data_reconstructed_unscaled[:,:,:,1]*data_reconstructed_unscaled[:,:,:,1]
-reconstructed_groundtruth_avgke = np.mean(reconstructed_groundtruth_ke, axis=(1,2))
-reconstructed_groundtruth_global = np.zeros((POD_num_snapshots,2))
-reconstructed_groundtruth_global[:,0] = reconstructed_groundtruth_avgke
-reconstructed_groundtruth_global[:,1] = reconstructed_groundtruth_avgq
-print(np.shape(reconstructed_groundtruth_global))
-fig, ax = plt.subplots(2,1, figsize=(12,6), tight_layout=True, sharex=True)
-for i in range(2):
-    ax[i].plot(time_vals[:POD_num_snapshots], groundtruth_global[:POD_num_snapshots,i], color='tab:blue', label='truth')
-    ax[i].plot(time_vals[:POD_num_snapshots], reconstructed_groundtruth_global[:,i], color='tab:orange', label='reconstruction')
-    ax[i].grid()
-ax[0].set_ylabel('KE')
-ax[1].set_ylabel('q')
-ax[1].set_xlabel('time')
-ax[1].legend()
-fig.savefig(output_path+'/global_reconstruction.png')
+if Plotting:
+    # reconstuct global
+    reconstructed_global_new = calculate_global_q_KE(data_reconstructed_unscaled)
+    fig, ax = plt.subplots(2,1, figsize=(12,6), tight_layout=True, sharex=True)
+    for i in range(2):
+        ax[i].plot(time_vals_new, groundtruth_global[POD_snapshots:,i], color='tab:blue', label='truth')
+        ax[i].plot(time_vals_new, reconstructed_global_new[:,i], color='tab:orange', label='reconstruction')
+        ax[i].grid()
+    ax[0].set_ylabel('KE')
+    ax[1].set_ylabel('q')
+    ax[1].set_xlabel('time')
+    ax[1].legend()
+    fig.savefig(output_path+'/global_reconstruction_new_set_c%i_snapshots%i.png' % (c, snap))
 
 #### dataset generation ####
-U = data_reduced
+U = data_reduced_projection 
 print('shape of data for ESN', np.shape(U))
 
 # number of time steps for washout, train, validation, test
@@ -243,9 +367,9 @@ in_scal_in  = np.log10(0.05)
 in_scal_end = np.log10(5.)
 
 # In case we want to start from a grid_search, the first n_grid_x*n_grid_y points are from grid search
-n_grid_x = 8  
-n_grid_y = 8
-n_bo     = 6  #number of points to be acquired through BO after grid search
+n_grid_x = 5  
+n_grid_y = 5
+n_bo     = 5  #number of points to be acquired through BO after grid search
 n_tot    = n_grid_x*n_grid_y + n_bo #Total Number of Function Evaluatuions
 
 
@@ -535,18 +659,41 @@ for j in range(ensemble_test):
 
                     ##### reconstructions ####
                     reconstructed_predictions_reshaped = pca.inverse_transform(Yh_t)
-                    reconstructed_predictions_unscaled = ss.inverse_transform(reconstructed_predictions_reshaped)
-                    reconstructed_predictions = reconstructed_predictions_unscaled.reshape(N_intt , len(x), len(z), variables)  # (5000, 256, 1, 2)
+                    reconstructed_predictions_scaled   = reconstructed_predictions_reshaped.reshape(new_data_snapshots, 256, 64, num_variables)  # (5000, 256, 1, 2)
 
                     POD_reconstruction_reshaped = pca.inverse_transform(Y_t)
-                    POD_reconstruction_unscaled = ss.inverse_transform(POD_reconstruction_reshaped)
-                    POD_reconstruction = POD_reconstruction_unscaled.reshape(N_intt, len(x), len(z), variables)
+                    reconstructed_POD_scaled    = POD_reconstruction_reshaped.reshape(new_data_snapshots, 256, 64, num_variables)  # (5000, 256, 1, 2)
+
+                    # EVR for reconstruction of POD data
+                    numerator = np.sum((POD_reconstruction_reshaped - reconstructed_predictions_scaled) **2)
+                    denominator = np.sum(POD_reconstruction_reshaped ** 2)
+                    evr_reconstruction = 1 - (numerator/denominator)
+                    
+                    #MSE for reconstruction of POD data
+                    mse = mean_squared_error(POD_reconstruction_reshaped, reconstructed_predictions_scaled)
+                    
+                    #NRMSE
+                    nrmse = NRMSE(POD_reconstruction_reshaped, reconstructed_predictions_scaled)
+
+                    reconstructed_predictions = np.zeros_like(new_data)
+                    reconstructed_POD = np.zeros_like(new_data)
+                    for v in range(variables):
+                        reshaped_channel_reconstructed_prediction = reconstructed_predictions_scaled[:, :, :, v].reshape(-1, new_data.shape[1] * new_data.shape[2])
+                        unscaled_new_channel = scalers[v].inverse_transform(reshaped_channel_reconstructed_prediction)
+                        reconstructed_predictions[:, :, :, v] = unscaled_new_channel.reshape(new_data.shape[0], new_data.shape[1], new_data.shape[2])
+
+                        reshaped_channel_reconstructed_POD = rreconstructed_POD_scaled[:, :, :, v].reshape(-1, new_data.shape[1] * new_data.shape[2])
+                        unscaled_new_channel = scalers[v].inverse_transform(reshaped_channel_reconstructed_POD)
+                        reconstructed_POD[:, :, :, v] = unscaled_new_channel.reshape(new_data.shape[0], new_data.shape[1], new_data.shape[2])
+
+                    reconstructed_predictions_reshaped_unscaled = reconstructed_predictions.reshape(new_data.shape[0], len(x)*len(z)*variables)
+                    reconstructed_POD_reshaped_unscaled = reconstructed_POD.reshape(new_data.shape[0], len(x)*len(z)*variables)
 
                     for v in range(variables):
                         fig, ax = plt.subplots(2, figsize=(12,6), sharex=True, tight_layout=True)
-                        minm = min(np.min(POD_reconstruction[:, :, 32, v]), np.min(reconstructed_predictions[:, :, 32, v]))
-                        maxm = max(np.max(POD_reconstruction[:, :, 32, v]), np.max(reconstructed_predictions[:, :, 32, v]))
-                        c1 = ax[0].contourf(xx, x, POD_reconstruction[:,:,32,v].T, vmin=minm, vmax=maxm)
+                        minm = min(np.min(reconstructed_POD[:, :, 32, v]), np.min(reconstructed_predictions[:, :, 32, v]))
+                        maxm = max(np.max(reconstructed_POD[:, :, 32, v]), np.max(reconstructed_predictions[:, :, 32, v]))
+                        c1 = ax[0].contourf(xx, x, reconstructed_POD[:,:,32,v].T, vmin=minm, vmax=maxm)
                         c2 = ax[1].contourf(xx, x, reconstructed_predictions[:,:,32,v].T, vmin=minm, vmax=maxm)
                         norm1 = mcolors.Normalize(vmin=minm, vmax=maxm)
                         fig.colorbar(c1, ax=ax[0], label='POD', norm=norm1, extend='both')
@@ -557,99 +704,59 @@ for j in range(ensemble_test):
                         fig.savefig(output_path+'/prediction_recon_ens%i_test%i_var%i.png' % (j,i,v))
                         plt.close()
 
+
                     #### globals #####
-                    reconstructed_prediction_avgq = np.mean(reconstructed_predictions[:,:,:,0], axis=(1,2))
-                    reconstructed_prediction_ke = 0.5*reconstructed_predictions[:,:,:,1]*reconstructed_predictions[:,:,:,1]
-                    reconstructed_prediction_avgke = np.mean(reconstructed_prediction_ke, axis=(1,2))
-
-                    reconstructed_prediction_global = np.zeros((N_intt,2))
-                    reconstructed_prediction_global[:,0] = reconstructed_prediction_avgke
-                    reconstructed_prediction_global[:,1] = reconstructed_prediction_avgq
-
-                    reconstructed_groundtruth_avgq = np.mean(POD_reconstruction[:,:,:,0], axis=(1,2))
-                    reconstructed_groundtruth_ke = 0.5*POD_reconstruction[:,:,:,1]*POD_reconstruction[:,:,:,1]
-                    reconstructed_groundtruth_avgke = np.mean(reconstructed_groundtruth_ke, axis=(1,2))
-
-                    reconstructed_groundtruth_global = np.zeros((N_intt,2))
-                    reconstructed_groundtruth_global[:,0] = reconstructed_groundtruth_avgke
-                    reconstructed_groundtruth_global[:,1] = reconstructed_groundtruth_avgq
-                        
-                    fig, ax = plt.subplots(2,1, figsize=(12,6), tight_layout=True)
-                    for v in range(2):
-                        ax[v].plot(xx, reconstructed_groundtruth_global[:,v], color='tab:blue', label='POD')
-                        ax[v].plot(xx, reconstructed_prediction_global[:,v], color='tab:orange', label='ESN')
-                        ax[v].grid()
-                    ax[-1].set_xlabel('Time [Lyapunov Times]')
+                    reconstructed_global_new = calculate_global_q_KE(reconstructed_predictions)
+                    fig, ax = plt.subplots(2,1, figsize=(12,6), tight_layout=True, sharex=True)
+                    for i in range(2):
+                        ax[i].plot(time_vals_new, groundtruth_global[POD_snapshots:,i], color='tab:blue', label='truth')
+                        ax[i].plot(time_vals_new, reconstructed_global_new[:,i], color='tab:orange', label='reconstruction')
+                        ax[i].grid()
                     ax[0].set_ylabel('KE')
                     ax[1].set_ylabel('q')
+                    ax[1].set_xlabel('time')
                     ax[1].legend()
-                    #ax[1].set_xlim()
-                    fig.savefig(output_path+'/global_prediction_ens%i_test%i.png' % (j,i))
-                    plt.close()
+                    fig.savefig(output_path+'/global_reconstruction_new_set_c%i_snapshots%i.png' % (c, snap))
+                    # plumes 
+                    active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(new_data, reconstructed_predictions, z)
+                    print(np.shape(active_array))
+                    print(np.shape(mask))
                     
-                    #### error in waves #### 
-                    MSE = np.zeros((num_variables))
-                    for v in range(num_variables):
-                        MSE[v] = calculate_mse_over_time(reconstructed_predictions[250:,:,:,v], POD_reconstruction[250:,:,:,v])
-                    print(MSE)
-
-                    #### error in plumes #### 
-                    beta = 1.201
-                    alpha = 3.0
-                    T = POD_reconstruction[:,:,:,3] - beta*z
-                    T_reconstructed = reconstructed_predictions[:,:,:,3]
-                    q_s = np.exp(alpha*T)
-                    q_s_reconstructed = np.exp(alpha*T)
-                    rh =  POD_reconstruction[:,:,:,0]/q_s
-                    rh_reconstructed = reconstructed_predictions[:,:,:,0]/q_s_reconstructed
-                    mean_b = np.mean(POD_reconstruction[:,:,:,3], axis=1, keepdims=True)
-                    mean_b_reconstructed= np.mean(reconstructed_predictions[:,:,:,3], axis=1, keepdims=True)
-                    b_anom = POD_reconstruction[:,:,:,3] - mean_b
-                    b_anom_reconstructed = reconstructed_predictions[:,:,:,3] - mean_b_reconstructed
-                    w =  POD_reconstruction[:,:,:,1]
-                    w_reconstructed = reconstructed_predictions[:,:,:,1]
+                    if Plotting:
+                        fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
+                        c1 = ax[0].contourf(time_vals_new, x, active_array[:,:, 32].T, cmap='Reds')
+                        fig.colorbar(c1, ax=ax[0])
+                        ax[0].set_title('true')
+                        c2 = ax[1].contourf(time_vals_new, x, active_array_reconstructed[:,:, 32].T, cmap='Reds')
+                        fig.colorbar(c1, ax=ax[1])
+                        ax[1].set_title('reconstruction')
+                        for v in range(2):
+                            ax[v].set_xlabel('time')
+                            ax[v].set_ylabel('x')
+                            ax[v].set_xlim(time_vals_new[0], time_vals_new[499])
+                        fig.savefig(output_path+'/active_plumes_new_set_c%i_snapshots%i.png' % (c, snap))
+                        plt.close()
                     
-                    mask = (rh[:, :, :] >= 1) & (w[:, :, :] > 0) & (b_anom[:, :, :] > 0)
-                    mask_reconstructed = (rh_reconstructed[:, :, :] >= 1) & (w_reconstructed[:, :, :] > 0) & (b_anom_reconstructed[:, :, :] > 0)
-                    
-                    active_array = np.zeros((N_intt, len(x), len(z)))
-                    active_array[mask] = 1
-                    active_array_reconstructed = np.zeros((N_intt, len(x), len(z)))
-                    active_array_reconstructed[mask_reconstructed] = 1
-                    
-                    fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
-                    c1 = ax[0].contourf(xx, x, active_array[:,:, 32].T, cmap='Reds')
-                    fig.colorbar(c1, ax=ax[0])
-                    ax[0].set_title('true')
-                    c2 = ax[1].contourf(xx, x, active_array_reconstructed[:,:, 32].T, cmap='Reds')
-                    fig.colorbar(c1, ax=ax[1])
-                    ax[1].set_title('reconstruction')
-                    for v in range(2):
-                        ax[v].set_xlabel('time')
-                        ax[v].set_ylabel('x')
-                    fig.savefig(output_path+'/active_plumes.png')
-                    plt.close()
-                    
-                    #mae_rh = np.mean(np.abs(rh[mask] - rh_reconstructed[mask_reconstructed]))
-                    #mae_w = np.mean(np.abs(w[mask] - w_reconstructed[mask_reconstructed]))
-                    #mae_b_anom = np.mean(np.abs(b_anom[mask] - b_anom_reconstructed[mask_reconstructed]))
-                    
-                    #print(mae_rh, mae_w, mae_b_anom)
                     accuracy = np.mean(active_array == active_array_reconstructed)
-                    print(accuracy)
+                    mse_plume = mean_squared_error(new_data[:,:,:,:][mask], new_reconstructed[:,:,:,:][mask])
+                    MSE_plume_new[c_index] = mse_plume
+                    nrmse_plume = NRMSE(new_data[:,:,:,:][mask], new_reconstructed[:,:,:,:][mask])
                     
-                    MAE = np.zeros((num_variables))
-                    print(np.shape(MAE))
-                    for v in range(num_variables):
-                        MAE[v] = np.mean(np.abs(POD_reconstruction[:,:,:,v][mask] - reconstructed_predictions[:,:,:,v][mask]))
+                    #SSIM
+                    ssim_value = compute_ssim_for_4d(new_data, data_reconstructed_unscaled)
+                   
 
                     metrics = {
                     "test": i,
                     "N_tstart + i*N_intt": N_tstart + i*N_intt,
-                    "MSE_domain": list(MSE),
-                    "MAE_plumes": list(MAE),
-                    "accuracy": accuracy,
                     "PH": PH[i],
+                    "EVR": evr_reconstruction,
+                    "mse": mse,
+                    "nrmse": nrmse,
+                    "accuracy": accuracy,
+                    "MSE_plume": mse_plume,
+                    "NRMSE_plume": nrmse_plume,
+                    "test_ssim": ssim_value,
                     }
                     
                     metrics_file = "metrics.json"

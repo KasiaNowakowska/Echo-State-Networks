@@ -46,7 +46,7 @@ for gpu in gpus:
 # tf.config.set_visible_devices([], 'GPU') #runs the code without GPU
 import time
 from pathlib import Path
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, RobustScaler, MinMaxScaler
 from sklearn.metrics import mean_squared_error
 
 import wandb
@@ -62,7 +62,7 @@ if not os.path.exists(output_path):
     print('made directory')
 
 #### larger data 5000-30000 hf ####
-total_num_snapshots = 2000
+total_num_snapshots = 500
 x = np.load(input_path+'/x.npy')
 z = np.load(input_path+'/z.npy')
 variables = num_variables = 4
@@ -96,21 +96,18 @@ del u
 del b
 
 data_all  = np.concatenate((q_array, w_array, u_array, b_array), axis=-1)
-data_all_reshape = data_all.reshape(len(time_vals), len(x) * len(z) * variables)
-### scale data ###
-ss = StandardScaler()
-data_scaled_reshape = ss.fit_transform(data_all_reshape)
-data_scaled = data_scaled_reshape.reshape(len(time_vals), len(x), len(z), variables)
 
 # Print the shape of the combined array
-print('shape of all data and scaled data:', data_all.shape, data_scaled.shape)
+print('shape of all data and scaled data:', data_all.shape)
 
-U = data_scaled
+U = data_all
 dt = time_vals[1]-time_vals[0]
 print('dt:', dt)
 
 del w_array
 del q_array
+del u_array
+del b_array
 
 import yaml
 
@@ -296,7 +293,7 @@ def main():
         variance = np.var(original_data)
         std_dev  = np.sqrt(variance)
         
-        nrmse = 1 - (rmse/std_dev)
+        nrmse = (rmse/std_dev)
         
         return nrmse
 
@@ -332,12 +329,12 @@ def main():
         active_array_reconstructed = np.zeros((original_data.shape[0], len(x), len(z)))
         active_array_reconstructed[mask_reconstructed] = 1
         
+        print('shape of mask in function', np.shape(mask))
+        
         # Expand the mask to cover all features (optional, depending on use case)
-        mask_expanded       = np.expand_dims(mask, axis=-1)  # Shape: (256, 64, 1)
-        mask_expanded       = np.repeat(mask_expanded, original_data.shape[-1], axis=-1)  # Shape: (256, 64, 4)
-        mask_expanded_recon = np.expand_dims(mask_reconstructed, axis=-1)  # Shape: (256, 64, 1)
-        mask_expanded_recon = np.repeat(mask_expanded_recon, reconstructed_data.shape[-1], axis=-1)  # Shape: (256, 64, 4)
-    
+        mask_expanded       =  np.repeat(mask[:, :, :, np.newaxis], 4, axis=-1)  # Shape: (256, 64, 1)
+        mask_expanded_recon =  np.repeat(mask_reconstructed[:, :, :, np.newaxis], 4, axis=-1) # Shape: (256, 64, 1)
+        
         return active_array, active_array_reconstructed, mask_expanded, mask_expanded_recon
 
     from skimage.metrics import structural_similarity as ssim
@@ -404,7 +401,7 @@ def main():
 
 
     #### load in data ###
-    global b_size
+    global b_size   #batch_size
     n_batches   = int((U.shape[0]/b_size) *0.7)  #number of batches #20
     val_batches = int((U.shape[0]/b_size) *0.2)    #int(n_batches*0.2) # validation set size is 0.2 the size of the training set #2
     test_batches = int((U.shape[0]/b_size) *0.1)
@@ -425,10 +422,72 @@ def main():
                              b_size*n_batches*skip+b_size*val_batches*skip])
     U_val       = split_data(U_vv, b_size, val_batches).astype('float32')
     # test data
-    U_vt        = np.array(U[b_size*n_batches*skip+b_size*val_batches*skip:
+    U_test        = np.array(U[b_size*n_batches*skip+b_size*val_batches*skip:
                              b_size*n_batches*skip+b_size*val_batches*skip+b_size*test_batches*skip])
+
+    # Placeholder for standardized data
+    U_tt_scaled = np.zeros_like(U_tt)
+    U_vv_scaled = np.zeros_like(U_vv)
+    U_test_scaled = np.zeros_like(U_test)
+    scalers = [MinMaxScaler() for _ in range(variables)]
+
+    # Apply StandardScaler separately to each channel
+    for v in range(variables):
+        # Reshape training data for the current variable
+        reshaped_train_channel = U_tt[:, :, :, v].reshape(-1, U_tt.shape[1] * U_tt.shape[2])
+
+        print('shape of data for ss', np.shape(reshaped_train_channel))
+
+        # Fit the scaler on the training data for the current variable
+        scaler = scalers[v]
+        scaler.fit(reshaped_train_channel)
+
+        # Standardize the training data
+        standardized_train_channel = scaler.transform(reshaped_train_channel)
+
+        # Reshape the standardized data back to the original shape (batches, batch_size, x, z)
+        U_tt_scaled[:, :, :, v] = standardized_train_channel.reshape(U_tt.shape[0], U_tt.shape[1], U_tt.shape[2])
+        
+        # Standardize the validation data using the same scaler
+        reshaped_val_channel = U_vv[:, :, :, v].reshape(-1, U_vv.shape[1] * U_vv.shape[2])
+        standardized_val_channel = scaler.transform(reshaped_val_channel)
+        U_vv_scaled[:, :, :, v] = standardized_val_channel.reshape(U_vv.shape[0], U_vv.shape[1], U_vv.shape[2])
+
+        # Standardize the test data using the same scaler
+        reshaped_test_channel = U_test[:, :, :, v].reshape(-1, U_test.shape[1] * U_test.shape[2])
+        standardized_test_channel = scaler.transform(reshaped_test_channel)
+        U_test_scaled[ :, :, :, v] = standardized_test_channel.reshape(U_test.shape[0], U_test.shape[1], U_test.shape[2])
+
+    test_times = time_vals[b_size*n_batches*skip+b_size*val_batches*skip:
+                             b_size*n_batches*skip+b_size*val_batches*skip+b_size*test_batches*skip] 
+
+    for v in range(variables):
+        fig, ax = plt.subplots(1)
+        c=ax.pcolormesh(test_times, x, U_test_scaled[:,:,32,v].T)
+        fig.colorbar(c, ax=ax)        
+        fig.savefig(output_path+'/test_scaling%i.png' % v)
+
+        fig, ax = plt.subplots(1)
+        c=ax.pcolormesh(U_tt_scaled[:,:,32,v].T)
+        fig.colorbar(c, ax=ax)        
+        fig.savefig(output_path+'/train_scaling%i.png' % v)
+
+        fig, ax = plt.subplots(1)
+        c=ax.pcolormesh(test_times, x, U_test[:,:,32,v].T)
+        fig.colorbar(c, ax=ax)        
+        fig.savefig(output_path+'/test_unscaled%i.png' % v)
+
+        fig, ax = plt.subplots(1)
+        c=ax.pcolormesh(U_tt[:,:,32,v].T)
+        fig.colorbar(c, ax=ax)        
+        fig.savefig(output_path+'/train_unscaled%i.png' % v)
+
+    U_train_scaled     = split_data(U_tt_scaled, b_size, n_batches).astype('float32') #to be used for randomly shuffled batches
+    U_val_scaled       = split_data(U_vv_scaled, b_size, val_batches).astype('float32')
     del U_vv, U_tt
 
+        
+        
     # define the model
     # we do not have pooling and upsampling, instead we use stride=2
 
@@ -487,7 +546,7 @@ def main():
                                                         name='Enc_'+str(j)+'_Add_Layer1_'+str(i)))
 
     # Obtain the shape of the latent space
-    output = enc_mods[-1](U_train[0])
+    output = enc_mods[-1](U_train_scaled[0])
     N_1 = output.shape
     print('shape of latent space', N_1)
     N_latent = N_1[-3] * N_1[-2] * N_1[-1]
@@ -527,7 +586,7 @@ def main():
         
 
     # run the model once to print summary
-    enc0, dec0 = model(U_train[0], enc_mods, dec_mods)
+    enc0, dec0 = model(U_train_scaled[0], enc_mods, dec_mods)
     print('latent   space size:', N_latent)
     print('physical space size:', U[0].flatten().shape)
     print('')
@@ -552,38 +611,31 @@ def main():
                                               custom_objects={"PerPad2D": PerPad2D})
 
     #### NRMSE across x,z and averaged in time ####
-    truth = U_vt
+    truth = U_test_scaled
     decoded = model(truth,a,b)[1].numpy()
     print(np.shape(decoded), np.shape(truth))
     
     test_times = time_vals[b_size*n_batches*skip+b_size*val_batches*skip:
                              b_size*n_batches*skip+b_size*val_batches*skip+b_size*test_batches*skip] 
     print(test_times[0], test_times[-1])
-    
-    # compute plume error
-    accuracy, MAE_plume  = plume_error(truth, decoded)
-    #SSIM
-    test_ssim = compute_ssim_for_4d(truth, decoded)
-
-    # new metric errors
-    active_array, active_array_reconstructed, mask_expanded, mask_expanded_recon = active_array_calc(truth, decoded, z)
-    accuracy_new          = np.mean(active_array == active_array_reconstructed)
-    mse_plume             = mean_squared_error(truth[mask_expanded], decoded[mask_expanded])
 
     truth_reshaped = truth.reshape(test_batches*b_size, len(x) * len(z) * variables)
     decoded_reshaped = decoded.reshape(test_batches*b_size, len(x) * len(z) * variables) 
     print('shape of time:', np.shape(test_times))
     print('shape of inputs:', np.shape(truth))
     print('shape of reconstructions:', np.shape(decoded))
-
+    
+    ### old metrics ###
+    # compute plume error
+    accuracy, MAE_plume  = plume_error(truth, decoded)
+    #SSIM
+    test_ssim = compute_ssim_for_4d(truth, decoded)
     #MSE
     mse = MSE(decoded_reshaped, truth_reshaped)
     mse_avg = np.mean(mse)
-    
     #MAE
     mae = MAE(decoded_reshaped, truth_reshaped)
     mae_avg = np.mean(mae)
-    
     #NRMSE
     nrmse = NRMSE(decoded_reshaped, truth_reshaped)
     avg_nrmse = np.mean(nrmse)
@@ -591,8 +643,29 @@ def main():
     Energy = 1-sq_avg_nrmse
     curve = 1-Energy
 
+    ### new metrics ###
     evr_value          = EVR(truth_reshaped, decoded_reshaped)
     nrmse2_value       = NRMSE2(truth_reshaped, decoded_reshaped)
+
+    ### unscale the data ###
+    decoded_unscaled = np.zeros_like(U_test)
+    for v in range(variables):
+        reshaped_channel_decoded = decoded[:, :, :, v].reshape(-1, U_test.shape[1] * U_test.shape[2])
+        unscaled_decoded_channel = scalers[v].inverse_transform(reshaped_channel_decoded)
+        decoded_unscaled[:, :, :, v] = unscaled_decoded_channel.reshape(U_test.shape[0], U_test.shape[1], U_test.shape[2])
+
+    truth_unscaled = np.zeros_like(U_test)
+    for v in range(variables):
+        reshaped_channel_truth = truth[:, :, :, v].reshape(-1, U_test.shape[1] * U_test.shape[2])
+        unscaled_truth_channel = scalers[v].inverse_transform(reshaped_channel_truth)
+        truth_unscaled[:, :, :, v] = unscaled_truth_channel.reshape(U_test.shape[0], U_test.shape[1], U_test.shape[2])
+
+    print('shape of decoded_unscaled', np.shape(decoded_unscaled))
+    print('shape of truth_unscaled', np.shape(truth_unscaled))
+
+    active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(truth_unscaled, decoded_unscaled, z)
+    accuracy_new            = np.mean(active_array == active_array_reconstructed)
+    nrmse_plume             = NRMSE2(truth_unscaled[:,:,:,:][mask], decoded_unscaled[:,:,:,:][mask])
 
     print("nrmse:", avg_nrmse)
     print("mse:", mse_avg)
@@ -619,7 +692,7 @@ def main():
     "accuracy": accuracy,
     "MAE_plume": MAE_plume,
     "test_ssim": test_ssim,
-    "MSE plume": mse_plume,
+    "NRMSE plume": nrmse_plume,
     "EVR": evr_value,
     "accuracy_new": accuracy_new,
     "NRMSE2": nrmse2_value,
@@ -709,11 +782,10 @@ def main():
     print('saved images')
     
     
-    #### unscale ####
-    truth_inverse   = ss.inverse_transform(truth_reshaped)
-    decoded_inverse = ss.inverse_transform(decoded_reshaped)
-    truth           = truth_inverse.reshape(test_batches*b_size, len(x) , len(z) , variables) 
-    decoded         = decoded_inverse.reshape(test_batches*b_size, len(x) , len(z) , variables) 
+    #### unscaled images ####
+    truth = truth_unscaled
+    decoded = decoded_unscaled
+
     ##### across time ####
     fig, ax = plt.subplots(3,variables, figsize=(12,6), tight_layout=True, sharex=True)
     z_index = 32
@@ -768,31 +840,6 @@ def main():
 
             fig.suptitle('time:%i' %test_times[index])
         fig.savefig(output_path+'/xz_scaled%i.png' % test_times[index])
-
-    fig, ax = plt.subplots(3,variables, figsize=(12,9), tight_layout=True)
-    index = 30
-    print(index)
-    u     = truth[index]
-    u_dec = decoded[index]
-    for v in range(variables):
-        vmax = u[:,:,v].max()
-        vmin = u[:,:,v].min()
-        minm = min(np.min(u[:, :, v]), np.min(u_dec[:, :, v]))
-        maxm = max(np.max(u[:, :, v]), np.max(u_dec[:, :, v]))
-        NAE = np.abs(u - u_dec)/(vmax-vmin)
-        print(minm, maxm)
-        print('NMAE:', NAE[:,:, v].mean())
-        c1 = ax[0,v].pcolormesh(x, z, u[:, :, v].T, vmin=minm, vmax=maxm)
-        c2 = ax[1,v].pcolormesh(x, z, u_dec[:, :, v].T, vmin=minm, vmax=maxm)
-        c3 = ax[2,v].pcolormesh(x, z, NAE[:, :, v].T, cmap='RdBu')
-
-        fig.colorbar(c1, label='True')
-        fig.colorbar(c2, label='reconstructed')
-        fig.colorbar(c3, label='absolute error')
-
-        fig.suptitle('time:%i' %test_times[index])
-    fig.savefig(output_path+'/xz_scaled%i.png' % test_times[index])
-    print('saved images')
 
 
 main()

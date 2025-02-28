@@ -95,21 +95,18 @@ del u
 del b
 
 data_all  = np.concatenate((q_array, w_array, u_array, b_array), axis=-1)
-data_all_reshape = data_all.reshape(len(time_vals), len(x) * len(z) * variables)
-### scale data ###
-ss = StandardScaler()
-data_scaled_reshape = ss.fit_transform(data_all_reshape)
-data_scaled = data_scaled_reshape.reshape(len(time_vals), len(x), len(z), variables)
 
 # Print the shape of the combined array
-print('shape of all data and scaled data:', data_all.shape, data_scaled.shape)
+print('shape of all data and scaled data:', data_all.shape)
 
-U = data_scaled
+U = data_all
 dt = time_vals[1]-time_vals[0]
 print('dt:', dt)
 
 del w_array
 del q_array
+del u_array
+del b_array
 
 import yaml
 
@@ -352,7 +349,7 @@ def main():
 
 
     #### load in data ###
-    global b_size
+    global b_size   #batch_size
     n_batches   = int((U.shape[0]/b_size) *0.7)  #number of batches #20
     val_batches = int((U.shape[0]/b_size) *0.2)    #int(n_batches*0.2) # validation set size is 0.2 the size of the training set #2
     test_batches = int((U.shape[0]/b_size) *0.1)
@@ -373,10 +370,66 @@ def main():
                              b_size*n_batches*skip+b_size*val_batches*skip])
     U_val       = split_data(U_vv, b_size, val_batches).astype('float32')
     # test data
-    U_vt        = np.array(U[b_size*n_batches*skip+b_size*val_batches*skip:
+    U_test        = np.array(U[b_size*n_batches*skip+b_size*val_batches*skip:
                              b_size*n_batches*skip+b_size*val_batches*skip+b_size*test_batches*skip])
-    del U_vv, U_tt
 
+    # Placeholder for standardized data
+    U_tt_scaled = np.zeros_like(U_tt)
+    U_vv_scaled = np.zeros_like(U_vv)
+    U_test_scaled = np.zeros_like(U_test)
+    scalers = [StandardScaler() for _ in range(variables)]
+
+    # Apply StandardScaler separately to each channel
+    for v in range(variables):
+        # Reshape training data for the current variable
+        reshaped_train_channel = U_tt[:, :, :, v].reshape(-1, U_tt.shape[1] * U_tt.shape[2])
+
+        print('shape of data for ss', np.shape(reshaped_train_channel))
+
+        # Fit the scaler on the training data for the current variable
+        scaler = scalers[v]
+        scaler.fit(reshaped_train_channel)
+
+        # Standardize the training data
+        standardized_train_channel = scaler.transform(reshaped_train_channel)
+
+        # Reshape the standardized data back to the original shape (batches, batch_size, x, z)
+        U_tt_scaled[:, :, :, v] = standardized_train_channel.reshape(U_tt.shape[0], U_tt.shape[1], U_tt.shape[2])
+        
+        # Standardize the validation data using the same scaler
+        reshaped_val_channel = U_vv[:, :, :, v].reshape(-1, U_vv.shape[1] * U_vv.shape[2])
+        standardized_val_channel = scaler.transform(reshaped_val_channel)
+        U_vv_scaled[:, :, :, v] = standardized_val_channel.reshape(U_vv.shape[0], U_vv.shape[1], U_vv.shape[2])
+
+        # Standardize the test data using the same scaler
+        reshaped_test_channel = U_test[:, :, :, v].reshape(-1, U_test.shape[1] * U_test.shape[2])
+        standardized_test_channel = scaler.transform(reshaped_test_channel)
+        U_test_scaled[ :, :, :, v] = standardized_test_channel.reshape(U_test.shape[0], U_test.shape[1], U_test.shape[2])
+
+    test_times = time_vals[b_size*n_batches*skip+b_size*val_batches*skip:
+                             b_size*n_batches*skip+b_size*val_batches*skip+b_size*test_batches*skip] 
+
+    for v in range(variables):
+        fig, ax = plt.subplots(1)
+        c=ax.pcolormesh(test_times, x, U_test_scaled[:,:,32,v].T)
+        fig.colorbar(c, ax=ax)        
+        fig.savefig(output_path+'/test_scaling%i.png' % v)
+
+        fig, ax = plt.subplots(1)
+        c=ax.pcolormesh(U_tt_scaled[:,:,32,v].T)
+        fig.colorbar(c, ax=ax)        
+        fig.savefig(output_path+'/train_scaling%i.png' % v)
+
+        fig, ax = plt.subplots(1)
+        c=ax.pcolormesh(test_times, x, U_test[:,:,32,v].T)
+        fig.colorbar(c, ax=ax)        
+        fig.savefig(output_path+'/test_unscaled%i.png' % v)
+
+    U_train_scaled     = split_data(U_tt_scaled, b_size, n_batches).astype('float32') #to be used for randomly shuffled batches
+    U_val_scaled       = split_data(U_vv_scaled, b_size, val_batches).astype('float32')
+    del U_vv, U_tt
+    
+    '''
     # define the model
     # we do not have pooling and upsampling, instead we use stride=2
 
@@ -732,111 +785,7 @@ def main():
         fig.suptitle('time:%i' %test_times[index])
     fig.savefig(output_path+'/xz_scaled%i.png' % test_times[index])
     print('saved images')
-
-
-main()
-
-'''
-    for channel in range(variables):
-        for i in range(n):
-        
-            #truth
-        
-            skips = 50
-        
-            #snapshots to plot
-            u      = truth[i*skips:1+i*skips]
-            print(i*skips, 1+i*skips)
-            print(np.shape(u))
-            vmax   = u[:,:,:,channel].max()
-            vmin   = u[:,:,:,channel].min()
-        
-            CS0    = ax[i,0].contourf(x, z, u[0,:,:,channel].T, levels=10,
-                                 cmap='coolwarm',vmin=vmin, vmax=vmax)
-            cbar   = plt.colorbar(CS0, ax=ax[0,i])
-            cbar.set_label('$u_{\mathrm{True}}$',labelpad=15)
-            #CS     = plt.contour(x, z,u[0,:,:,0].T, levels=10,colors='black',linewidths=.5, linestyles='solid',vmin=vmin, vmax=vmax)
-        
-            #autoencoded
-        
-            u_dec  = model(u,a,b)[1][0].numpy()
-            CS1     = ax[i,1].contourf(x, z, u_dec[:,:,channel].T, levels=10,
-                                cmap='coolwarm',vmin=vmin, vmax=vmax)
-            cbar   = plt.colorbar(CS1, ax=ax[1,i])
-            cbar.set_label('$u_{\mathrm{Autoencoded}}$',labelpad=15)
-            #CS     = plt.contour(x, z,u_dec[:,:,0].T, levels=10, colors='black',linewidths=.5, linestyles='solid', vmin=vmin, vmax=vmax)
-        
-            fig.suptitle('%s' % variable_names[channel])
-        
-            #error
-        
-            u_err  = np.abs(u_dec-u[0])/(vmax-vmin)
-            print('NMAE: ', u_err[:,:,channel].mean())
-        
-            CS2     = ax[i,2].contourf(x, z,u_err[:,:,channel].T, levels=10, cmap='coolwarm')
-            cbar   = plt.colorbar(CS2, ax=ax[2,i])
-            cbar.set_label('Relative Error',labelpad=15)
-            #CS     = plt.contour(x, z,u_err[:,:,0].T,levels=10,colors='black',linewidths=.5, linestyles='solid')
-    fig.savefig(output_path+'/image.png')
+    '''
 
 main()
 
-'''
-       
-'''
-
-for epoch in range(1):
-    print('running epoch:', epoch)
-    if epoch - last_save > patience: break #early stop
-
-    #Perform gradient descent for all the batches every epoch
-    loss_0 = 0
-    rng.shuffle(U_train, axis=0) #shuffle batches
-    for j in range(n_batches):
-            loss    = train_step(U_train[j], enc_mods, dec_mods)
-            loss_0 += loss
-
-    #save train loss
-    tloss_plot[epoch]  = loss_0.numpy()/n_batches
-
-    print('checking convergence')
-    #Compute Validation Loss
-    loss_val        = 0
-    for j in range(val_batches):
-        loss        = train_step(U_val[j], enc_mods, dec_mods,train=False)
-        loss_val   += loss
-
-    #save validation loss
-    vloss_plot[epoch]  = loss_val.numpy()/val_batches
-
-    min_val_loss = vloss_plot[epoch]
-    print('Saving Model..')
-    for i in range(N_parallel):
-        enc_mods[i].save(models_dir + '/enc_mod'+str(ker_size[i])+'_'+str(N_latent)+'.h5')
-        dec_mods[i].save(models_dir + '/dec_mod'+str(ker_size[i])+'_'+str(N_latent)+'.h5')
-        enc_mods[i].save_weights(models_dir + '/enc_mod'+str(ker_size[i])+'_'+str(N_latent)+'_weights.h5')
-        dec_mods[i].save_weights(models_dir + '/dec_mod'+str(ker_size[i])+'_'+str(N_latent)+'_weights.h5')
-    
-    #saving optimizer parameters
-    min_weights = optimizer.get_weights()
-    hf = h5py.File(models_dir + '/opt_weights.h5','w')
-    for i in range(len(min_weights)):
-        hf.create_dataset('weights_'+str(i),data=min_weights[i])
-    hf.create_dataset('length', data=i)
-    print(type(optimizer.learning_rate))
-    l_rate_value = optimizer.learning_rate.numpy()
-    hf.create_dataset('l_rate', data=l_rate_value)  
-    hf.close()
-    last_save = epoch #store the last time the val loss has decreased for early stop
-    print(f"Model and optimizer saved at epoch {epoch} with validation loss: {min_val_loss}")
-
-    print('Reverting to best model and optimizer, and reducing learning rate')
-    print('epoch:', epoch, 'N_lr:', N_lr)
-    for i in range(N_parallel):
-        enc_mods[i].load_weights(models_dir + '/enc_mod'+str(ker_size[i])+'_'+str(N_latent)+'_weights.h5')
-        dec_mods[i].load_weights(models_dir + '/dec_mod'+str(ker_size[i])+'_'+str(N_latent)+'_weights.h5')
-
-    optimizer.learning_rate = optimizer.learning_rate*lrate_mult
-    optimizer.set_weights(min_weights)
-    print(f"Learning rate reduced to {optimizer.learning_rate.numpy()}")
-'''

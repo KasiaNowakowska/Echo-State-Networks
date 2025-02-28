@@ -44,11 +44,9 @@ import time
 from pathlib import Path
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error
+
 import sys
 sys.stdout.reconfigure(line_buffering=True)
-
-import wandb
-wandb.login()
 
 input_path = args['--input_path']
 output_path = args['--output_path']
@@ -64,88 +62,61 @@ print(now)
 # Format the date and time as YYYY-MM-DD_HH-MM-SS for a file name
 formatted_datetime = now.strftime("%Y-%m-%d_%H-%M-%S")
 # Example of using the formatted datetime in a file name
-output_new = f"validation_4var_1000snaps_seperatescaling_{formatted_datetime}"
+output_new = f"validation_{formatted_datetime}"
 output_path = os.path.join(output_path, output_new)
 print(output_path)
 if not os.path.exists(output_path):
     os.makedirs(output_path)
     print('made directory')
 
+def load_data_set(file, names, snapshots):
+    with h5py.File(file, 'r') as hf:
+        print(hf.keys())
 
-#### larger data 5000-30000 hf ####
-total_num_snapshots = 10000
+        time_vals = hf['total_time_all'][:snapshots]  # 1D time vector
+
+        data = np.zeros((len(time_vals), len(x), len(z), len(names)))
+        
+        index=0
+        for name in names:
+            print(name)
+            print(hf[name])
+            Var = np.array(hf[name])
+            data[:,:,:,index] = Var[:snapshots,:,0,:]
+            index+=1
+
+    return data, time_vals
+
+#### LOAD DATA ####
+variables = ['q_all', 'w_all', 'u_all', 'b_all']
+names = ['q', 'w', 'u', 'b']
+num_variables = 4
 x = np.load(input_path+'/x.npy')
 z = np.load(input_path+'/z.npy')
-variables = num_variables = 4
-variable_names = ['q', 'w', 'u', 'b']
+snapshots =2000
+data_set, time_vals = load_data_set(input_path+'/data_4var_5000_30000.h5', variables, snapshots)
+print('shape of dataset', np.shape(data_set))
 
-with h5py.File(input_path+'/data_4var_5000_30000.h5', 'r') as df:
-    time_vals = np.array(df['total_time_all'][:total_num_snapshots])
-    q = np.array(df['q_all'][:total_num_snapshots])
-    w = np.array(df['w_all'][:total_num_snapshots])
-    u = np.array(df['u_all'][:total_num_snapshots])
-    b = np.array(df['b_all'][:total_num_snapshots])
+data_set = data_set[:, 32:96, :, :]
+x = x[32:96]
+print('reduced domain shape', np.shape(data_set))
+print('reduced x domain', np.shape(x))
+print('reduced x domain', len(x))
+print(x[0], x[-1])
 
-    q = np.squeeze(q, axis=2)
-    w = np.squeeze(w, axis=2)
-    u = np.squeeze(u, axis=2)
-    b = np.squeeze(b, axis=2)
+fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
+c1 = ax.pcolormesh(time_vals, x, data_set[:,:,32,0].T)
+fig.colorbar(c1, ax=ax)
+fig.savefig(output_path+'/hovmoller_small_domain.png')
 
-    print(np.shape(q))
-
-print('shape of time_vals', np.shape(time_vals))
-
-# Reshape the arrays into column vectors
-q_array = q.reshape(len(time_vals), len(x), len(z), 1)
-w_array = w.reshape(len(time_vals), len(x), len(z), 1)
-u_array = u.reshape(len(time_vals), len(x), len(z), 1)
-b_array = b.reshape(len(time_vals), len(x), len(z), 1)
-
-del q
-del w
-del u 
-del b
-
-data_all  = np.concatenate((q_array, w_array, u_array, b_array), axis=-1)
-
-# Print the shape of the combined array
-print('shape of all data and scaled data:', data_all.shape)
-
-U = data_all
+U = data_set
 dt = time_vals[1]-time_vals[0]
 print('dt:', dt)
-
-del w_array
-del q_array
-del u_array
-del b_array
-
-#### Hyperparmas #####
-# WandB hyperparams settings
-sweep_configuration = {
-    "method": "grid",
-    "name": "sweep",
-    "metric": {"goal": "minimize", "name": "Val Loss"},
-    "parameters": {
-        "lat_dep":{"values": [4]},
-        "n_epochs": {"values": [151]},
-        "l_rate": {"values": [0.002]},
-        "b_size": {"values": [32]},
-        "lrate_mult": {"values": [0.8]},
-        "N_lr": {"values": [50]},
-        "N_layers": {"values": [5]},
-        "N_parallel": {"values": [1]},
-        "kernel_choice": {"values": [2]}
-    },
-}
-
-sweep_id = wandb.sweep(sweep=sweep_configuration, project="autoencoder_Ra2e8")
 
 job = 0
 
 def main():
 
-    run = wandb.init()
     global job
     job += 1
 
@@ -319,6 +290,94 @@ def main():
         ax[-1].set_xlabel('time')
         fig.savefig(output_path+file_str+'_snapshot_recon.png')
 
+    def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, file_str):
+        abs_error = np.abs(original-reconstruction)
+        if original.ndim == 3: #len(time_vals), len(x), len(z)
+
+            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+            minm = min(np.min(original[t_value, :, :]), np.min(reconstruction[t_value, :, :]))
+            maxm = max(np.max(original[t_value, :, :]), np.max(reconstruction[t_value, :, :]))
+            c1 = ax[0].pcolormesh(x, z, original[t_value,:,:].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:].T, cmap='Reds')
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(3):
+                ax[v].set_ylabel('z')
+            ax[-1].set_xlabel('x')
+            fig.savefig(output_path+file_str+'_hovmoller_recon_error.png')
+            plt.close()
+
+            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+            minm = min(np.min(original[:, :, z_value]), np.min(reconstruction[:, :, z_value]))
+            maxm = max(np.max(original[:, :, z_value]), np.max(reconstruction[:, :, z_value]))
+            print(np.max(original[:, :, z_value]))
+            print(minm, maxm)
+            c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value].T)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value].T)
+            fig.colorbar(c1, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(time_vals, x, abs_error[:, :, z_value].T, cmap='Reds')
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('x')
+            ax[-1].set_xlabel('time')
+            fig.savefig(output_path+file_str+'_snapshot_recon_error.png')
+            plt.close()
+
+        elif original.ndim == 4: #len(time_vals), len(x), len(z), var
+            time_zone = np.linspace(0, original.shape[0],  original.shape[0])
+            for i in range(original.shape[3]):
+                name = names[i]
+                print(name)
+                fig, ax = plt.subplots(3, figsize=(12,6), tight_layout=True, sharex=True)
+                minm = min(np.min(original[t_value, :, :, i]), np.min(reconstruction[t_value, :, :, i]))
+                maxm = max(np.max(original[t_value, :, :, i]), np.max(reconstruction[t_value, :, :, i]))
+                c1 = ax[0].pcolormesh(x, z, original[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+                fig.colorbar(c1, ax=ax[0])
+                ax[0].set_title('true')
+                c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+                fig.colorbar(c1, ax=ax[1])
+                ax[1].set_title('reconstruction')
+                c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:, i].T, cmap='Reds')
+                fig.colorbar(c3, ax=ax[2])
+                ax[2].set_title('error')
+                for v in range(2):
+                    ax[v].set_ylabel('z')
+                ax[-1].set_xlabel('x')
+                fig.savefig(output_path+file_str+name+'_hovmoller_recon_error.png')
+                plt.close()
+
+                fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+                minm = min(np.min(original[:, :, z_value,i]), np.min(reconstruction[:, :, z_value,i]))
+                maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
+                print(np.max(original[:, :, z_value,i]))
+                print(minm, maxm)
+                print("time shape:", np.shape(time_vals))
+                print("x shape:", np.shape(x))
+                print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
+                c1 = ax[0].pcolormesh(time_zone, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+                fig.colorbar(c1, ax=ax[0])
+                ax[0].set_title('true')
+                c2 = ax[1].pcolormesh(time_zone, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+                fig.colorbar(c1, ax=ax[1])
+                ax[1].set_title('reconstruction')
+                c3 = ax[2].pcolormesh(time_zone, x,  abs_error[:,:,z_value, i].T, cmap='Reds')
+                fig.colorbar(c3, ax=ax[2])
+                ax[2].set_title('error')
+                for v in range(2):
+                    ax[v].set_ylabel('x')
+                ax[-1].set_xlabel('time')
+                fig.savefig(output_path+file_str+name+'_snapshot_recon_error.png')
+                plt.close()
+
     #### Metrics ####
     from sklearn.metrics import mean_squared_error
     def NRMSE(original_data, reconstructed_data):
@@ -468,9 +527,44 @@ def main():
         
             return active_array, active_array_reconstructed, mask_expanded, mask_expanded_recon
 
+    def ss_transform(data, scaler):
+        if data.ndim == 4: #len(time_vals), len(x), len(z), len(var)
+            data_reshape = data.reshape(-1, data.shape[-1])
+        if data_reshape.ndim == 2:
+            print("data array is 2D.")
+        else:
+            print("data array is not 2D")
+            
+        data_scaled = scaler.transform(data_reshape)
+        data_scaled = data_scaled.reshape(data.shape)
+        
+        if data_scaled.ndim == 4:
+            print('scaled and reshaped to 4 dimensions')
+        else:
+            print('not scaled properly')
+            
+        return data_scaled
+        
+    def ss_inverse_transform(data, scaler):
+        if data.ndim == 4: #len(time_vals), len(x), len(z), len(var)
+            data_reshape = data.reshape(-1, data.shape[-1])
+        if data_reshape.ndim == 2:
+            print("data array is 2D.")
+        else:
+            print("data array is not 2D")
+            
+        data_unscaled = scaler.inverse_transform(data_reshape)
+        data_unscaled = data_unscaled.reshape(data.shape)
+        
+        if data_unscaled.ndim == 4:
+            print('unscaled and reshaped to 4 dimensions')
+        else:
+            print('not unscaled properly')
+            
+        return data_unscaled
 
     #### load in data ###
-    b_size      = wandb.config.b_size   #batch_size
+    b_size      = 32  #batch_size
     n_batches   = int((U.shape[0]/b_size) *0.7)  #number of batches #20
     val_batches = int((U.shape[0]/b_size) *0.2)    #int(n_batches*0.2) # validation set size is 0.2 the size of the training set #2
     test_batches = int((U.shape[0]/b_size) *0.1)
@@ -492,43 +586,29 @@ def main():
     U_tv        = np.array(U[b_size*n_batches*skip+b_size*val_batches*skip:
                              b_size*n_batches*skip+b_size*val_batches*skip+b_size*test_batches*skip])
 
-    # Placeholder for standardized data
-    U_tt_scaled = np.zeros_like(U_tt)
-    U_vv_scaled = np.zeros_like(U_vv)
-    U_tv_scaled = np.zeros_like(U_tv)
-    scalers = [StandardScaler() for _ in range(variables)]
+    U_tt_reshape = U_tt.reshape(-1, U_tt.shape[-1])
+    U_vv_reshape = U_vv.reshape(-1, U_vv.shape[-1])
+    U_tv_reshape = U_tv.reshape(-1, U_tv.shape[-1])
 
-    # Apply StandardScaler separately to each channel
-    for v in range(variables):
-        # Reshape training data for the current variable
-        reshaped_train_channel = U_tt[:, :, :, v].reshape(-1, U_tt.shape[1] * U_tt.shape[2])
-
-        print('shape of data for ss', np.shape(reshaped_train_channel))
-
-        # Fit the scaler on the training data for the current variable
-        scaler = scalers[v]
-        scaler.fit(reshaped_train_channel)
-
-        # Standardize the training data
-        standardized_train_channel = scaler.transform(reshaped_train_channel)
-
-        # Reshape the standardized data back to the original shape (batches, batch_size, x, z)
-        U_tt_scaled[:, :, :, v] = standardized_train_channel.reshape(U_tt.shape[0], U_tt.shape[1], U_tt.shape[2])
-        
-        # Standardize the validation data using the same scaler
-        reshaped_val_channel = U_vv[:, :, :, v].reshape(-1, U_vv.shape[1] * U_vv.shape[2])
-        standardized_val_channel = scaler.transform(reshaped_val_channel)
-        U_vv_scaled[:, :, :, v] = standardized_val_channel.reshape(U_vv.shape[0], U_vv.shape[1], U_vv.shape[2])
-
-        # Standardize the test data using the same scaler
-        reshaped_test_channel = U_tv[:, :, :, v].reshape(-1, U_tv.shape[1] * U_tv.shape[2])
-        standardized_test_channel = scaler.transform(reshaped_test_channel)
-        U_tv_scaled[ :, :, :, v] = standardized_test_channel.reshape(U_tv.shape[0], U_tv.shape[1], U_tv.shape[2])
-
+    # fit the scaler
+    scaler = StandardScaler()
+    scaler.fit(U_tt_reshape)
+    print('means', scaler.mean_)
+    
+    #transform training, val and test sets
+    U_tt_scaled = scaler.transform(U_tt_reshape)
+    U_vv_scaled = scaler.transform(U_vv_reshape)
+    U_tv_scaled = scaler.transform(U_tv_reshape)
+    
+    #reshape 
+    U_tt_scaled = U_tt_scaled.reshape(U_tt.shape)
+    U_vv_scaled = U_vv_scaled.reshape(U_vv.shape)
+    U_tv_scaled = U_tv_scaled.reshape(U_tv.shape)
+    
     test_times = time_vals[b_size*n_batches*skip+b_size*val_batches*skip:
                              b_size*n_batches*skip+b_size*val_batches*skip+b_size*test_batches*skip] 
 
-    for v in range(variables):
+    for v in range(num_variables):
         fig, ax = plt.subplots(1)
         c=ax.pcolormesh(test_times, x, U_tv_scaled[:,:,32,v].T)
         fig.colorbar(c, ax=ax)        
@@ -557,15 +637,15 @@ def main():
     # define the model
     # we do not have pooling and upsampling, instead we use stride=2
 
-    lat_dep       = wandb.config.lat_dep       #latent space depth
-    kernel_choice = wandb.config.kernel_choice
+    lat_dep       = 1       #latent space depth
+    kernel_choice = 2
     n_fil         = [6,12,24,lat_dep]          #number of filters ecnoder
     n_dec         = [24,12,6,3]                #number of filters decoder
-    N_parallel    = wandb.config.N_parallel    #number of parallel CNNs for multiscale
+    N_parallel    = 1    #number of parallel CNNs for multiscale
     ker_size      = [(3,3), (5,5), (7,7)]      #kernel sizes
     if N_parallel == 1:
         ker_size  = [ker_size[kernel_choice]]
-    N_layers      = wandb.config.N_layers    #number of layers in every CNN
+    N_layers      = 4    #number of layers in every CNN
     if N_layers == 4:
         n_fil         = [6,12,24,lat_dep]          #number of filters ecnoder
         n_dec         = [24,12,6,3]                #number of filters decoder
@@ -668,18 +748,18 @@ def main():
 
     Loss_Mse    = tf.keras.losses.MeanSquaredError()
 
-    n_epochs    = wandb.config.n_epochs #number of epochs
+    n_epochs    = 151 #number of epochs
 
     #define optimizer and initial learning rate
     optimizer  = tf.keras.optimizers.Adam(amsgrad=True) #amsgrad True for better convergence
     #print(dir(optimizer))
 
-    l_rate     = wandb.config.l_rate
+    l_rate     = 0.002
     optimizer.learning_rate = l_rate
 
     lrate_update = True #flag for l_rate updating
-    lrate_mult   = wandb.config.lrate_mult #decrease by this factore the l_rate
-    N_lr         = wandb.config.N_lr #20 #number of epochs before which the l_rate is not updated
+    lrate_mult   = 0.8 #decrease by this factore the l_rate
+    N_lr         = 150 #20 #number of epochs before which the l_rate is not updated
 
     # quantities to check and store the training and validation loss and the training goes on
     old_loss      = np.zeros(n_epochs) #needed to evaluate training loss convergence to update l_rate
@@ -695,6 +775,9 @@ def main():
     vNRMSE_plot  = np.zeros(n_epochs)
     tNRMSEpl_plot = np.zeros(n_epochs)
     vNRMSEpl_plot = np.zeros(n_epochs)
+    tMSE_plot     = np.zeros(n_epochs)
+    vMSE_plot     = np.zeros(n_epochs)
+
     old_loss[0]  = 1e6 #initial value has to be high
     N_check      = 5 #10   #each N_check epochs we check convergence and validation loss
     patience     = 100 #if the val_loss has not gone down in the last patience epochs, early stop
@@ -733,6 +816,7 @@ def main():
     "n_parallel": N_parallel,
     "N_check:": N_check,
     "lat_dep": lat_dep, 
+    "ker_size": str(ker_size),
     }
 
     with open(output_path_hyp, "w") as file:
@@ -746,12 +830,13 @@ def main():
             if ssim_0 < 0.5: break #early stop
 
         #Perform gradient descent for all the batches every epoch
-        loss_0     = 0
-        ssim_0     = 0
-        evr_0          = 0
+        loss_0        = 0
+        ssim_0        = 0
+        evr_0         = 0
         nrmse_0       = 0
-        accuracy_0 = 0
-        nrmse_plume_0    = 0 
+        accuracy_0    = 0
+        nrmse_plume_0 = 0 
+        mse_0      = 0
         rng.shuffle(U_train, axis=0) #shuffle batches
         for j in range(n_batches):
             loss, decoded    = train_step(U_train[j], enc_mods, dec_mods)
@@ -770,21 +855,17 @@ def main():
             evr_0             += evr_value
             nrmse_value        = NRMSE(original, decoded.numpy())
             nrmse_0           += nrmse_value
-
-            decoded_unscaled = np.zeros_like(decoded)
-            for v in range(variables):
-                reshaped_channel_decoded = decoded[:, :, :, v].numpy().reshape(-1, decoded.shape[1] * decoded.shape[2])
-                unscaled_decoded_channel = scalers[v].inverse_transform(reshaped_channel_decoded)
-                decoded_unscaled[:, :, :, v] = unscaled_decoded_channel.reshape(decoded.shape[0], decoded.shape[1], decoded.shape[2])
-
-            original_unscaled = np.zeros_like(original)
-            for v in range(variables):
-                reshaped_channel_original = original[:, :, :, v].reshape(-1, original.shape[1] * original.shape[2])
-                unscaled_original_channel = scalers[v].inverse_transform(reshaped_channel_original)
-                original_unscaled[:, :, :, v] = unscaled_original_channel.reshape(original.shape[0], original.shape[1],original.shape[2])
-
-            print('shape of decoded_unscaled', np.shape(decoded_unscaled))
-            print('shape of original_unscaled', np.shape(original_unscaled))
+            mse_value          = MSE(original, decoded.numpy())
+            mse_0             += mse_value    
+            print('metrics saved')
+            if j == 0:
+                if (epoch % N_check == 0):
+                    decoded = decoded.numpy()
+                    decoded_unscaled = ss_inverse_transform(decoded, scaler)
+                    original_unscaled = ss_inverse_transform(original, scaler)
+        
+                    fig, ax =plt.subplots(1, figsize=(6,4), tight_layout=True)
+                    plot_reconstruction_and_error(original_unscaled, decoded_unscaled, 32, 20, 'train')
 
             active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(original_unscaled, decoded_unscaled, z)
             accuracy                = np.mean(active_array == active_array_reconstructed)
@@ -800,6 +881,7 @@ def main():
         tNRMSE_plot[epoch]       = nrmse_0/n_batches
         tacc_plot[epoch]         = accuracy_0/n_batches
         tNRMSEpl_plot[epoch]     = nrmse_plume_0/n_batches
+        tMSE_plot[epoch]         = mse_0/n_batches
 
 
         # every N epochs checks the convergence of the training loss and val loss
@@ -810,8 +892,9 @@ def main():
             ssim_val        = 0
             accuracy_val    = 0
             evr_val         = 0
-            nrmse_val      = 0
-            nrmse_plume_val   = 0 
+            nrmse_val       = 0
+            nrmse_plume_val = 0 
+            mse_val         = 0
             for j in range(val_batches):
                 loss, decoded       = train_step(U_val[j], enc_mods, dec_mods,train=False)
                 loss_val           += loss
@@ -825,28 +908,23 @@ def main():
                 evr_value            = EVR_recon(original, decoded.numpy())
                 evr_val             += evr_value
                 nrmse_value          = NRMSE(original, decoded.numpy())
-                nrmse_val          += nrmse_value
+                nrmse_val           += nrmse_value
+                mse_value            = MSE(original, decoded.numpy())
+                mse_val             += mse_value
 
-                decoded_unscaled = np.zeros_like(decoded)
-                for v in range(variables):
-                    reshaped_channel_decoded = decoded[:, :, :, v].numpy().reshape(-1, decoded.shape[1] * decoded.shape[2])
-                    unscaled_decoded_channel = scalers[v].inverse_transform(reshaped_channel_decoded)
-                    decoded_unscaled[:, :, :, v] = unscaled_decoded_channel.reshape(decoded.shape[0], decoded.shape[1], decoded.shape[2])
+                if j == 0:
+                    decoded = decoded.numpy()
+                    decoded_unscaled = ss_inverse_transform(decoded, scaler)
+                    original_unscaled = ss_inverse_transform(original, scaler)
 
-                original_unscaled = np.zeros_like(original)
-                for v in range(variables):
-                    reshaped_channel_original = original[:, :, :, v].reshape(-1, original.shape[1] * original.shape[2])
-                    unscaled_original_channel = scalers[v].inverse_transform(reshaped_channel_original)
-                    original_unscaled[:, :, :, v] = unscaled_original_channel.reshape(original.shape[0], original.shape[1],original.shape[2])
-
-                print('shape of decoded_unscaled', np.shape(decoded_unscaled))
-                print('shape of original_unscaled', np.shape(original_unscaled))
+                    fig, ax =plt.subplots(1, figsize=(6,4), tight_layout=True)
+                    plot_reconstruction_and_error(original_unscaled, decoded_unscaled, 32, 20, 'test')
 
                 active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(original_unscaled, decoded_unscaled, z)
                 accuracy                = np.mean(active_array == active_array_reconstructed)
                 nrmse_plume             = NRMSE(original_unscaled[:,:,:,:][mask], decoded_unscaled[:,:,:,:][mask])
-                accuracy_val         += accuracy
-                nrmse_plume_val      += nrmse_plume
+                accuracy_val           += accuracy
+                nrmse_plume_val        += nrmse_plume
 
             #save validation loss
             vloss_epoch  = loss_val.numpy()/val_batches
@@ -859,6 +937,7 @@ def main():
             vNRMSE_plot[epoch]= nrmse_val/val_batches
             vacc_plot[epoch]  = accuracy_val/val_batches
             vNRMSEpl_plot[epoch] = nrmse_plume_val/val_batches
+            vMSE_plot[epoch]  = mse_val/val_batches
 
             # Decreases the learning rate if the training loss is not going down with respect to
             # N_lr epochs before
@@ -913,21 +992,6 @@ def main():
                   '; Val_Loss', vloss_plot[epoch],  '; Ratio', (vloss_plot[epoch])/(tloss_plot[epoch]))
             print('Time per epoch', (time.time()-t)/N_check)
 
-            wandb.log(
-                     {"Train Loss": tloss_plot[epoch],
-                      "Val Loss": vloss_plot[epoch],
-                      "epoch": epoch,
-                      "SSIM train": tssim_plot[epoch],
-                      "SSIM val": vssim_plot[epoch],
-                      "Plume Acc": vacc_plot[epoch],
-                      "NRMSE_val": vNRMSE_plot[epoch],
-                      "NRMSE_train": tNRMSE_plot[epoch],
-                      "Plume NRMSE val": vNRMSEpl_plot[epoch],
-                      "Plume NRMSE train": tNRMSEpl_plot[epoch],
-                      "EVR_val": vEVR_plot[epoch],
-                      "EVR_train": tEVR_plot[epoch]
-                      })
-
             print('')
 
             t = time.time()
@@ -963,8 +1027,17 @@ def main():
             ax.legend()
             fig.savefig(images_dir +'/Accuracy.png')
 
+            fig, ax =plt.subplots(1, figsize=(6,4), tight_layout=True)
+            ax.set_title('EVR')
+            ax.grid(True, axis="both", which='both', ls="-", alpha=0.3)
+            ax.plot(tEVR_plot, 'y', label='Train EVR')
+            ax.plot(np.arange(0,n_epochs,N_check),vEVR_plot[::N_check], label='Val SSIM')
+            ax.set_xlabel('epochs')
+            ax.legend()
+            fig.savefig(images_dir +'/EVR.png')
+
 
     print('finished job')
 
-wandb.agent(sweep_id=sweep_id, function=main)
+main()
 
