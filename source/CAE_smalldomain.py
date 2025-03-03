@@ -123,7 +123,7 @@ sweep_configuration = {
     "name": "sweep",
     "metric": {"goal": "minimize", "name": "Val Loss"},
     "parameters": {
-        "lat_dep":{"values": [1]},
+        "lat_dep":{"values": [1, 2]},
         "n_epochs": {"values": [151]},
         "l_rate": {"values": [0.002]},
         "b_size": {"values": [32]},
@@ -131,11 +131,11 @@ sweep_configuration = {
         "N_lr": {"values": [50]},
         "N_layers": {"values": [4]},
         "N_parallel": {"values": [1]},
-        "kernel_choice": {"values": [2]}
+        "kernel_choice": {"values": [0,1,2]}
     },
 }
 
-sweep_id = wandb.sweep(sweep=sweep_configuration, project="autoencoder_Ra2e8_new")
+#sweep_id = wandb.sweep(sweep=sweep_configuration, project="autoencoder_Ra2e8_new")
 
 job = 0
 
@@ -839,9 +839,11 @@ def main():
     "lrate_mult": lrate_mult,
     "N_lr": N_lr,
     "n_parallel": N_parallel,
-    "N_check:": N_check,
+    "N_check": N_check,
     "lat_dep": lat_dep, 
     "ker_size": str(ker_size),
+    "job id": str(wandb.run.id),
+    "sweep id": str(wandb.run.sweep_id)
     }
 
     with open(output_path_hyp, "w") as file:
@@ -1025,6 +1027,7 @@ def main():
                      {"Train Loss": tloss_plot[epoch],
                       "Val Loss": vloss_plot[epoch],
                       "epoch": epoch,
+                      "Latent Space": N_latent,
                       "SSIM train": tssim_plot[epoch],
                       "SSIM val": vssim_plot[epoch],
                       "Plume Acc": vacc_plot[epoch],
@@ -1085,5 +1088,5 @@ def main():
 
     print('finished job')
 
-wandb.agent(sweep_id=sweep_id, function=main)
+wandb.agent(sweep_id="i3t1pwzd", function=main, entity="mm17ktn-university-of-leeds", project="autoencoder_Ra2e8_new")
 
