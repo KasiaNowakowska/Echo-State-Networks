@@ -135,7 +135,7 @@ sweep_configuration = {
     },
 }
 
-#sweep_id = wandb.sweep(sweep=sweep_configuration, project="autoencoder_Ra2e8_new")
+sweep_id = wandb.sweep(sweep=sweep_configuration, project="autoencoder_Ra2e8_new")
 
 job = 0
 
@@ -1088,5 +1088,5 @@ def main():
 
     print('finished job')
 
-wandb.agent(sweep_id="i3t1pwzd", function=main, entity="mm17ktn-university-of-leeds", project="autoencoder_Ra2e8_new")
+wandb.agent(sweep_id=sweep_id, function=main, entity="mm17ktn-university-of-leeds", project="autoencoder_Ra2e8_new")
 
