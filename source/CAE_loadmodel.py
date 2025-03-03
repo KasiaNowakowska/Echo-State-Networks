@@ -84,7 +84,7 @@ names = ['q', 'w', 'u', 'b']
 num_variables = 4
 x = np.load(input_path+'/x.npy')
 z = np.load(input_path+'/z.npy')
-snapshots =2500
+snapshots =10000
 data_set, time_vals = load_data_set(input_path+'/data_4var_5000_30000.h5', variables, snapshots)
 print('shape of dataset', np.shape(data_set))
 
@@ -98,7 +98,7 @@ if reduce_domain:
     print('reduced x domain', len(x))
     print(x[0], x[-1])
 
-U = data_all
+U = data_set
 dt = time_vals[1]-time_vals[0]
 print('dt:', dt)
 
@@ -353,7 +353,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, fi
             for v in range(2):
                 ax[v].set_ylabel('z')
             ax[-1].set_xlabel('x')
-            fig.savefig(output_path+file_str+name+'_hovmoller_recon_error.png')
+            fig.savefig(output_path+file_str+name+f"_snapshot_recon_error_{i}.png")
             plt.close()
 
             fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
@@ -376,7 +376,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, fi
             for v in range(2):
                 ax[v].set_ylabel('x')
             ax[-1].set_xlabel('time')
-            fig.savefig(output_path+file_str+name+'_snapshot_recon_error.png')
+            fig.savefig(output_path+file_str+name+'_hovmoller_recon_error.png')
             plt.close()
 
 #### Metrics ####
@@ -564,9 +564,9 @@ def ss_inverse_transform(data, scaler):
     return data_unscaled
 
 #### load in data ###
-n_batches   = int((U.shape[0]/b_size) *0.7)  #number of batches #20
-val_batches = int((U.shape[0]/b_size) *0.2)    #int(n_batches*0.2) # validation set size is 0.2 the size of the training set #2
-test_batches = int((U.shape[0]/b_size) *0.1)
+n_batches   = int((2500/b_size) *0.7)  #number of batches #20
+val_batches = int((2500/b_size) *0.2)    #int(n_batches*0.2) # validation set size is 0.2 the size of the training set #2
+test_batches = 2500 # int((10000/b_size) *0.1)
 skip        = 1
 print(n_batches, val_batches, test_batches)
 
@@ -789,6 +789,14 @@ start   = b_size*n_batches*skip+b_size*val_batches*skip  #b_size*n_batches*skip+
 skips = 10
 for i in range(n):
     index = 0 + skips*i
+    time_value = test_times[index]
 
-    plot_reconstruction(truth_unscaled, decoded_unscaled, 32, index, name)
-    plot_reconstruction_and_error(truth_unscaled, decoded_unscaled, 32, index, name)
+    #plot_reconstruction(truth_unscaled, decoded_unscaled, 32, index, f"/test_{index}_")
+    plot_reconstruction_and_error(truth_unscaled, decoded_unscaled, 32, index, f"/test")
+
+skips = 250
+for i in range(n):
+    index = 0 + skips*i
+    time_value = test_times[index]
+    
+    plot_reconstruction_and_error(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], 32, index, f"/test_diff_{index}")

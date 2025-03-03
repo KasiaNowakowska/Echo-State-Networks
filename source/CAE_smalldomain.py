@@ -96,16 +96,20 @@ names = ['q', 'w', 'u', 'b']
 num_variables = 4
 x = np.load(input_path+'/x.npy')
 z = np.load(input_path+'/z.npy')
-snapshots =2500
+snapshots = 10000
 data_set, time_vals = load_data_set(input_path+'/data_4var_5000_30000.h5', variables, snapshots)
 print('shape of dataset', np.shape(data_set))
 
-data_set = data_set[:, 32:96, :, :]
-x = x[32:96]
-print('reduced domain shape', np.shape(data_set))
-print('reduced x domain', np.shape(x))
-print('reduced x domain', len(x))
-print(x[0], x[-1])
+reduce_domain = True
+
+if reduce_domain:
+    data_set = data_set[:, 32:96, :, :]
+    x = x[32:96]
+    print('reduced domain shape', np.shape(data_set))
+    print('reduced x domain', np.shape(x))
+    print('reduced x domain', len(x))
+    print(x[0], x[-1])
+
 
 fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
 c1 = ax.pcolormesh(time_vals, x, data_set[:,:,32,0].T)
