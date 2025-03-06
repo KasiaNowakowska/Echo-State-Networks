@@ -1,11 +1,13 @@
 """
 python script for convolutional autoencoder.
 
-Usage: CAE.py [--input_path=<input_path> --output_path=<output_path>]
+Usage: CAE.py [--input_path=<input_path> --output_path=<output_path> --hyperparam_config=<hyperparam_config> --sweep_id=<sweep_id>]
 
 Options:
-    --input_path=<input_path>          file path to use for data
-    --output_path=<output_path>        file path to save images output [default: ./images]
+    --input_path=<input_path>                 file path to use for data
+    --output_path=<output_path>               file path to save images output [default: ./images]
+    --hyperparam_config=<hyperparam_config>   hyperparameter config file for search
+    --sweep_id=<sweep_id>                     sweep_id for restarting sweep [default: None]
 """
 
 # import packages
@@ -53,6 +55,9 @@ wandb.login()
 
 input_path = args['--input_path']
 output_path = args['--output_path']
+hyperparam_config = args['--hyperparam_config']
+sweep_id = args['--sweep_id']
+print('sweep id', sweep_id)
 
 if not os.path.exists(output_path):
     os.makedirs(output_path)
@@ -120,26 +125,14 @@ U = data_set
 dt = time_vals[1]-time_vals[0]
 print('dt:', dt)
 
-#### Hyperparmas #####
-# WandB hyperparams settings
-sweep_configuration = {
-    "method": "grid",
-    "name": "sweep",
-    "metric": {"goal": "minimize", "name": "Val Loss"},
-    "parameters": {
-        "lat_dep":{"values": [1, 2]},
-        "n_epochs": {"values": [151]},
-        "l_rate": {"values": [0.002]},
-        "b_size": {"values": [32]},
-        "lrate_mult": {"values": [0.8]},
-        "N_lr": {"values": [50]},
-        "N_layers": {"values": [4]},
-        "N_parallel": {"values": [1]},
-        "kernel_choice": {"values": [0,1,2]}
-    },
-}
+# Load the config from file
+with open(hyperparam_config, "r") as f:
+    sweep_configuration = json.load(f)
 
-sweep_id = wandb.sweep(sweep=sweep_configuration, project="autoencoder_Ra2e8_new")
+if sweep_id == 'None':
+    sweep_id = wandb.sweep(sweep=sweep_configuration, project="autoencoder_Ra2e8_new")
+else:
+    print('restarting sweep with sweep_id', sweep_id)
 
 job = 0
 
@@ -592,6 +585,9 @@ def main():
             
         return data_unscaled
 
+    output_path = os.path.join(output_path, f'/sweep_{str(wandb.run.sweep_id)}')
+    os.makedirs(output_path, exist_ok=True)
+
     #### load in data ###
     b_size      = wandb.config.b_size   #batch_size
     n_batches   = int((U.shape[0]/b_size) *0.7)  #number of batches #20
@@ -815,7 +811,8 @@ def main():
     t            = 1 # initial (not important value) to monitor the time of the training
 
     #### make directory to save ###
-    job_name = 'job{0:}_batch_size{1:}_learning_rate{2:}_num_epochs{3:}_lrate_mult{4:}_N_lr{5:}_n_parallel{6:}_lat_dep{7:}_N_layers{8:}'.format(job, b_size, l_rate, n_epochs, lrate_mult, N_lr, N_parallel, lat_dep, N_layers)
+    #job_name = 'job{0:}_batch_size{1:}_learning_rate{2:}_num_epochs{3:}_lrate_mult{4:}_N_lr{5:}_n_parallel{6:}_lat_dep{7:}_N_layers{8:}'.format(job, b_size, l_rate, n_epochs, lrate_mult, N_lr, N_parallel, lat_dep, N_layers)
+    job_name = f"job_{str(wandb.run.id)}"
     job_path = os.path.join(output_path, job_name)
     os.makedirs(job_path, exist_ok=True)
 
@@ -900,7 +897,7 @@ def main():
                     original_unscaled = ss_inverse_transform(original, scaler)
         
                     fig, ax =plt.subplots(1, figsize=(6,4), tight_layout=True)
-                    plot_reconstruction_and_error(original_unscaled, decoded_unscaled, 32, 20, '/train')
+                    plot_reconstruction_and_error(original_unscaled, decoded_unscaled, 32, 8, '/train')
 
             active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(original_unscaled, decoded_unscaled, z)
             accuracy                = np.mean(active_array == active_array_reconstructed)
@@ -953,7 +950,7 @@ def main():
                     original_unscaled = ss_inverse_transform(original, scaler)
 
                     fig, ax =plt.subplots(1, figsize=(6,4), tight_layout=True)
-                    plot_reconstruction_and_error(original_unscaled, decoded_unscaled, 32, 20, '/test')
+                    plot_reconstruction_and_error(original_unscaled, decoded_unscaled, 32, 8, '/test')
 
                 active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(original_unscaled, decoded_unscaled, z)
                 accuracy                = np.mean(active_array == active_array_reconstructed)
