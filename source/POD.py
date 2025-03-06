@@ -1,3 +1,13 @@
+"""
+python script for POD.
+
+Usage: lyapunov.py [--input_path=<input_path> --output_path=<output_path>]
+
+Options:
+    --input_path=<input_path>          file path to use for data
+    --output_path=<output_path>        file path to save images output [default: ./images]
+"""
+
 import os
 import time
 import sys
@@ -15,8 +25,12 @@ import json
 import sys
 sys.stdout.reconfigure(line_buffering=True)
 
-input_path='./input_data/' #'./ToyData/'
-output_path='./Ra2e8/4var/small_domain/mode_analysis/'
+from docopt import docopt
+args = docopt(__doc__)
+
+input_path = args['--input_path']
+output_path = args['--output_path']
+
 
 def load_data(file, name):
     with h5py.File(file, 'r') as hf:
@@ -87,7 +101,7 @@ def POD(data, c,  file_str, Plotting=True):
         plt.close()
 
         # Plot the time coefficients and mode structures
-        indexes_to_plot = np.array([1, 2, 3, 4, 5] ) -1
+        indexes_to_plot = np.array([1, 2, 10, 50, 100] ) -1
         indexes_to_plot = indexes_to_plot[indexes_to_plot <= (c-1)]
         print('plotting for modes', indexes_to_plot)
         print('number of modes', len(indexes_to_plot))
@@ -524,11 +538,11 @@ variables = ['q_all', 'w_all', 'u_all', 'b_all']
 names = ['q', 'w', 'u', 'b']
 x = np.load(input_path+'/x.npy')
 z = np.load(input_path+'/z.npy')
-snapshots =1000
-data_set, time_vals = load_data_set(input_path+'/data_4var_5000_30000.h5', variables, 1000)
+snapshots = 2500
+data_set, time_vals = load_data_set(input_path+'/data_4var_5000_30000.h5', variables, snapshots)
 print('shape of dataset', np.shape(data_set))
 
-reduce_data_set = True
+reduce_data_set = False
 if reduce_data_set:
     data_set = data_set[:, 147:211, :, :]
     x = x[147:211]
@@ -573,7 +587,7 @@ n_modes_list = [10, 16, 32, 64, 100]
 c_names = ['Ra2e8_c10', 'Ra2e8_c16', 'Ra2e8_c32', 'Ra2e8_c64', 'Ra2e8_c100']
 index=0
 
-nrmse_list, evr_list, ssim_list, cumEV_list = [], [], [], []
+nrmse_list, evr_list, ssim_list, cumEV_list, nrmse_plume_list = [], [], [], [], []
 for n_modes in n_modes_list:
     data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_, cev = POD(data_scaled, n_modes, c_names[index])
     data_reconstructed = ss_inverse_transform(data_reconstructed, scaler)
@@ -584,11 +598,12 @@ for n_modes in n_modes_list:
     evr   = EVR_recon(data_set, data_reconstructed)
     SSIM  = compute_ssim_for_4d(data_set, data_reconstructed)
 
-    if variables == 4:
+    if len(variables) == 4:
         active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(data_set, data_reconstructed, z)
         print(np.shape(active_array))
         print(np.shape(mask))
-                    
+        nrmse_plume             = NRMSE(data_set[:,:,:,:][mask], data_reconstructed[:,:,:,:][mask])
+
         fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
         c1 = ax[0].contourf(time_vals, x, active_array[:,:, 32].T, cmap='Reds')
         fig.colorbar(c1, ax=ax[0])
@@ -599,13 +614,16 @@ for n_modes in n_modes_list:
         for v in range(2):
             ax[v].set_xlabel('time')
             ax[v].set_ylabel('x')
-        fig.savefig(output_path+'/active_plumes.png')
+        fig.savefig(output_path+f"/active_plumes_{c_names[index]}.png")
         plt.close()
+    else:
+        nrmse_plume = np.inf
 
     print('NRMSE', nrmse)
     print('MSE', mse)
     print('EVR_recon', evr)
     print('SSIM', SSIM)
+    print('NRMSE plume', nrmse_plume)
 
     # Full path for saving the file
     output_file = c_names[index] + '_metrics.json' 
@@ -619,6 +637,7 @@ for n_modes in n_modes_list:
     "NRMSE": nrmse,
     "SSIM": SSIM,
     "cumEV from POD": cev,
+    "NRMSE plume": nrmse_plume,
     }
 
     with open(output_path_met, "w") as file:
@@ -628,6 +647,7 @@ for n_modes in n_modes_list:
     ssim_list.append(SSIM)
     evr_list.append(evr)
     cumEV_list.append(cev)
+    nrmse_plume_list.append(nrmse_plume)
 
     index +=1
 
@@ -635,6 +655,7 @@ np.save(output_path+'/ssim_list.npy', ssim_list)
 np.save(output_path+'/evr_list.npy', evr_list)
 np.save(output_path+'/nrmse_list.npy', nrmse_list)
 np.save(output_path+'/cumEV_list.npy', cumEV_list)
+np.save(output_path+'/nrmse_plume_list.npy', nrmse_plume_list)
 
 fig, ax =plt.subplots(1, figsize=(8,6), tight_layout=True)
 ax.plot(n_modes_list, ssim_list)
@@ -666,4 +687,12 @@ ax.set_xlabel('modes')
 ax.set_ylabel('cumulative equivalence ratio')
 ax.grid()
 fig.savefig(output_path+'/cumEV_list.png')
+plt.close()
+
+fig, ax =plt.subplots(1, figsize=(8,6), tight_layout=True)
+ax.plot(n_modes_list, nrmse_plume_list)
+ax.set_xlabel('modes')
+ax.set_ylabel('NRMSE in plume')
+ax.grid()
+fig.savefig(output_path+'/nrmse_plume_list.png')
 plt.close()

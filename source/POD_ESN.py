@@ -1,5 +1,16 @@
+"""
+python script for POD.
+
+Usage: lyapunov.py [--input_path=<input_path> --output_path=<output_path> --modes=<modes> --hyperparam_file=<hyperparam_file>]
+
+Options:
+    --input_path=<input_path>            file path to use for data
+    --output_path=<output_path>          file path to save images output [default: ./images]
+    --modes=<modes>                      number of modes for POD 
+    --hyperparam_file=<hyperparam_file>  hyperparameters for ESN
+"""
+
 import os
-import time
 import sys
 sys.path.append(os.getcwd())
 import matplotlib
@@ -10,7 +21,9 @@ import numpy as np
 import h5py
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
+
 sys.stdout.reconfigure(line_buffering=True)
+
 from scipy.sparse import csr_matrix, csc_matrix, lil_matrix
 from scipy.sparse.linalg import eigs as sparse_eigs
 import skopt
@@ -19,17 +32,39 @@ from skopt.learning import GaussianProcessRegressor as GPR
 from skopt.learning.gaussian_process.kernels import Matern, WhiteKernel, Product, ConstantKernel
 from scipy.io import loadmat, savemat
 from skopt.plots import plot_convergence
-import sys
-sys.stdout.reconfigure(line_buffering=True)
+
 import json
 import time as time
+
+from docopt import docopt
+args = docopt(__doc__)
 
 exec(open("Val_Functions.py").read())
 exec(open("Functions.py").read())
 print('run functions files')
 
-input_path='./InputData/'
-output_path='./Ra2e8/'
+input_path = args['--input_path']
+output_path = args['--output_path']
+modes = int(args['--modes'])
+hyperparam_file = args['--hyperparam_file']
+
+with open(hyperparam_file, "r") as f:
+    hyperparams = json.load(f)
+    Nr = hyperparams["Nr"]
+    train_len = hyperparams["N_train"]
+    val_len = hyperparams["N_val"]
+    test_len = hyperparams["N_test"]
+    washout_len = hyperparams["N_washout"]
+    t_lyap = hyperparams["t_lyap"]
+    normalisation = hyperparams["normalisation"]
+    ens = hyperparams["ens"]
+    ensemble_test = hyperparams["ensemble_test"]
+    n_tests = hyperparams["n_tests"]
+    grid_x = hyperparams["grid_x"]
+    grid_y = hyperparams["grid_y"]
+    added_points = hyperparams["added_points"]
+    val = hyperparams["val"]
+    noise = hyperparams["noise"]
 
 def load_data(file, name):
     with h5py.File(file, 'r') as hf:
@@ -62,7 +97,10 @@ def load_data_set(file, names, snapshots):
     return data, time_vals
 
 def POD(data, c,  file_str, Plotting=True):
-    data_matrix = data.reshape(data.shape[0], data.shape[1]*data.shape[2])
+    if data.ndim == 3: #len(time_vals), len(x), len(z)
+            data_matrix = data.reshape(data.shape[0], data.shape[1]*data.shape[2])
+    elif data.ndim == 4: #len(time_vals), len(x), len(z), len(var)
+            data_matrix = data.reshape(data.shape[0], data.shape[1]*data.shape[2]*data.shape[3])
     print('shape of data for POD:', np.shape(data_matrix))
     pca = PCA(n_components=c, svd_solver='randomized', random_state=42)
     pca.fit(data_matrix)
@@ -70,8 +108,9 @@ def POD(data, c,  file_str, Plotting=True):
     print('shape of reduced_data:', np.shape(data_reduced))
     data_reconstructed_reshaped = pca.inverse_transform(data_reduced)
     print('shape of data reconstructed flattened:', np.shape(data_reconstructed_reshaped))
-    data_reconstructed = data_reconstructed_reshaped.reshape(data.shape[0], data.shape[1], data.shape[2])
+    data_reconstructed = data_reconstructed_reshaped.reshape(data.shape)
     print('shape of data reconstructed:', np.shape(data_reconstructed))
+    np.save(output_path+file_str+'_data_reduced.npy', data_reduced)
 
     components = pca.components_
     print(np.shape(components))
@@ -96,7 +135,7 @@ def POD(data, c,  file_str, Plotting=True):
         plt.close()
 
         # Plot the time coefficients and mode structures
-        indexes_to_plot = np.array([1, 2, 3, 4] ) -1
+        indexes_to_plot = np.array([1, 2, 10, 50, 100] ) -1
         indexes_to_plot = indexes_to_plot[indexes_to_plot <= (c-1)]
         print('plotting for modes', indexes_to_plot)
         print('number of modes', len(indexes_to_plot))
@@ -118,25 +157,56 @@ def POD(data, c,  file_str, Plotting=True):
         # Visualize the modes
         minm = components.min()
         maxm = components.max()
-        fig, ax =plt.subplots(len(indexes_to_plot), figsize=(12,6), tight_layout=True, sharex=True)
-        for i in range(len(indexes_to_plot)):
-            mode = components[indexes_to_plot[i]].reshape(data.shape[1], data.shape[2])  # Reshape to original dimensions for visualization
-            c1 = ax[i].pcolormesh(x, z, mode[:, :].T, cmap='viridis', vmin=minm, vmax=maxm)  # Visualizing the first variable
-            #ax[i].axis('off')
-            ax[i].set_title('mode % i' % (indexes_to_plot[i]+1))
-            fig.colorbar(c1, ax=ax[i])
-            ax[i].set_ylabel('z')
-        ax[-1].set_xlabel('x')
-        fig.savefig(output_path+file_str+'_modes.png')
-        #plt.show()
-        plt.close()
+        if data.ndim == 3:
+            fig, ax =plt.subplots(len(indexes_to_plot), figsize=(12,6), tight_layout=True, sharex=True)
+            for i in range(len(indexes_to_plot)):
+                if len(indexes_to_plot) == 1:
+                    mode = components[indexes_to_plot[i]].reshape(data.shape[1], data.shape[2])  # Reshape to original dimensions for visualization
+                    c1 = ax.pcolormesh(x, z, mode[:, :].T, cmap='viridis', vmin=minm, vmax=maxm)  # Visualizing the first variable
+                    ax.set_title('mode % i' % (indexes_to_plot[i]+1))
+                    fig.colorbar(c1, ax=ax)
+                    ax.set_ylabel('z')
+                    ax.set_xlabel('x')
+                else:
+                    mode = components[indexes_to_plot[i]].reshape(data.shape[1], data.shape[2])  # Reshape to original dimensions for visualization              
+                    c1 = ax[i].pcolormesh(x, z, mode[:, :].T, cmap='viridis', vmin=minm, vmax=maxm)  # Visualizing the first variable
+                    #ax[i].axis('off')
+                    ax[i].set_title('mode % i' % (indexes_to_plot[i]+1))
+                    fig.colorbar(c1, ax=ax[i])
+                    ax[i].set_ylabel('z')
+                    ax[-1].set_xlabel('x')
+            fig.savefig(output_path+file_str+'_modes.png')
+            #plt.show()
+            plt.close()
+        elif data.ndim == 4:
+            for v in range(len(variables)):
+                fig, ax =plt.subplots(len(indexes_to_plot), figsize=(12,6), tight_layout=True, sharex=True)
+                for i in range(len(indexes_to_plot)):
+                    if len(indexes_to_plot) == 1:
+                        mode = components[indexes_to_plot[i]].reshape(data.shape[1], data.shape[2], data.shape[3])  # Reshape to original dimensions for visualization
+                        c1 = ax.pcolormesh(x, z, mode[:, :, v].T, cmap='viridis')  # Visualizing the first variable
+                        ax.set_title('mode % i' % (indexes_to_plot[i]+1))
+                        fig.colorbar(c1, ax=ax)
+                        ax.set_ylabel('z')
+                        ax.set_xlabel('x')
+                    else:
+                        mode = components[indexes_to_plot[i]].reshape(data.shape[1], data.shape[2], data.shape[3])  # Reshape to original dimensions for visualization              
+                        c1 = ax[i].pcolormesh(x, z, mode[:, :, v].T, cmap='viridis')  # Visualizing the first variable
+                        #ax[i].axis('off')
+                        ax[i].set_title('mode % i' % (indexes_to_plot[i]+1))
+                        fig.colorbar(c1, ax=ax[i])
+                        ax[i].set_ylabel('z')
+                        ax[-1].set_xlabel('x')
+                fig.savefig(output_path+file_str+names[v]+'_modes.png')
+                #plt.show()
+                plt.close()
 
-    return data_reduced, data_reconstructed_reshaped, data_reconstructed, pca
+    return data_reduced, data_reconstructed_reshaped, data_reconstructed, pca, cumulative_explained_variance[-1]
 
 def inverse_POD(data_reduced, pca_):
     data_reconstructed_reshaped = pca_.inverse_transform(data_reduced)
     print('shape of data reconstructed flattened:', np.shape(data_reconstructed_reshaped))
-    data_reconstructed = data_reconstructed_reshaped.reshape(data_reconstructed_reshaped.shape[0], len(x), len(z))
+    data_reconstructed = data_reconstructed_reshaped.reshape(data_reconstructed_reshaped.shape[0], len(x), len(z), len(variables))
     print('shape of data reconstructed:', np.shape(data_reconstructed))
     return data_reconstructed_reshaped, data_reconstructed 
 
@@ -171,13 +241,103 @@ def plot_reconstruction(original, reconstruction, z_value, t_value, time_vals, f
     ax[-1].set_xlabel('time')
     fig.savefig(output_path+'/hovmoller_recon'+file_str+'.png')
 
+def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, time_vals, file_str):
+    abs_error = np.abs(original-reconstruction)
+    if original.ndim == 3: #len(time_vals), len(x), len(z)
+
+        fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+        minm = min(np.min(original[t_value, :, :]), np.min(reconstruction[t_value, :, :]))
+        maxm = max(np.max(original[t_value, :, :]), np.max(reconstruction[t_value, :, :]))
+        c1 = ax[0].pcolormesh(x, z, original[t_value,:,:].T, vmin=minm, vmax=maxm)
+        fig.colorbar(c1, ax=ax[0])
+        ax[0].set_title('true')
+        c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:].T, vmin=minm, vmax=maxm)
+        fig.colorbar(c1, ax=ax[1])
+        ax[1].set_title('reconstruction')
+        c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:].T, cmap='Reds')
+        fig.colorbar(c3, ax=ax[2])
+        ax[2].set_title('error')
+        for v in range(3):
+            ax[v].set_ylabel('z')
+        ax[-1].set_xlabel('x')
+        fig.savefig(output_path+file_str+'_hovmoller_recon_error.png')
+
+        fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+        minm = min(np.min(original[:, :, z_value]), np.min(reconstruction[:, :, z_value]))
+        maxm = max(np.max(original[:, :, z_value]), np.max(reconstruction[:, :, z_value]))
+        print(np.max(original[:, :, z_value]))
+        print(minm, maxm)
+        c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value].T)
+        fig.colorbar(c1, ax=ax[0])
+        ax[0].set_title('true')
+        c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value].T)
+        fig.colorbar(c1, ax=ax[1])
+        ax[1].set_title('reconstruction')
+        c3 = ax[2].pcolormesh(time_vals, x, abs_error[:, :, z_value].T, cmap='Reds')
+        fig.colorbar(c3, ax=ax[2])
+        ax[2].set_title('error')
+        for v in range(2):
+            ax[v].set_ylabel('x')
+        ax[-1].set_xlabel('time')
+        fig.savefig(output_path+file_str+'_snapshot_recon_error.png')
+    
+    elif original.ndim == 4: #len(time_vals), len(x), len(z), var
+        for i in range(original.shape[3]):
+            name = names[i]
+            print(name)
+            fig, ax = plt.subplots(3, figsize=(12,6), tight_layout=True, sharex=True)
+            minm = min(np.min(original[t_value, :, :, i]), np.min(reconstruction[t_value, :, :, i]))
+            maxm = max(np.max(original[t_value, :, :, i]), np.max(reconstruction[t_value, :, :, i]))
+            c1 = ax[0].pcolormesh(x, z, original[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:, i].T, cmap='Reds')
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('z')
+            ax[-1].set_xlabel('x')
+            fig.savefig(output_path+file_str+name+'_hovmoller_recon_error.png')
+            plt.close()
+
+            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+            minm = min(np.min(original[:, :, z_value,i]), np.min(reconstruction[:, :, z_value,i]))
+            maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
+            print(np.max(original[:, :, z_value,i]))
+            print(minm, maxm)
+            print("time shape:", np.shape(time_vals))
+            print("x shape:", np.shape(x))
+            print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
+            c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(time_vals, x,  abs_error[:,:,z_value, i].T, cmap='Reds')
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('x')
+            ax[-1].set_xlabel('time')
+            fig.savefig(output_path+file_str+name+'_snapshot_recon_error.png')
+            plt.close()
+
+
 #### Metrics ####
 from sklearn.metrics import mean_squared_error
 def NRMSE(original_data, reconstructed_data):
     if original_data.ndim == 3:
         original_data = original_data.reshape(original_data.shape[0], original_data.shape[1]*original_data.shape[2])
+    elif original_data.ndim == 4:
+        original_data = original_data.reshape(original_data.shape[0], original_data.shape[1]*original_data.shape[2]*original_data.shape[3])
     if reconstructed_data.ndim == 3:
         reconstructed_data = reconstructed_data.reshape(reconstructed_data.shape[0], reconstructed_data.shape[1]*reconstructed_data.shape[2])
+    elif reconstructed_data.ndim == 4:
+        reconstructed_data = reconstructed_data.reshape(reconstructed_data.shape[0], reconstructed_data.shape[1]*reconstructed_data.shape[2]*reconstructed_data.shape[3])
 
     # Check if both data arrays have the same dimensions and the dimension is 2
     if original_data.ndim == reconstructed_data.ndim == 2:
@@ -231,9 +391,13 @@ def compute_ssim_for_4d(original, decoded):
 def EVR_recon(original_data, reconstructed_data):
     if original_data.ndim == 3:
         original_data = original_data.reshape(original_data.shape[0], original_data.shape[1]*original_data.shape[2])
+    elif original_data.ndim == 4:
+        original_data = original_data.reshape(original_data.shape[0], original_data.shape[1]*original_data.shape[2]*original_data.shape[3])
     if reconstructed_data.ndim == 3:
         reconstructed_data = reconstructed_data.reshape(reconstructed_data.shape[0], reconstructed_data.shape[1]*reconstructed_data.shape[2])
-
+    elif reconstructed_data.ndim == 4:
+        reconstructed_data = reconstructed_data.reshape(reconstructed_data.shape[0], reconstructed_data.shape[1]*reconstructed_data.shape[2]*reconstructed_data.shape[3])
+    
     # Check if both data arrays have the same dimensions and the dimension is 2
     if original_data.ndim == reconstructed_data.ndim == 2:
         print("Both data arrays have the same dimensions and are 2D.")
@@ -243,14 +407,17 @@ def EVR_recon(original_data, reconstructed_data):
     numerator = np.sum((original_data - reconstructed_data) **2)
     denominator = np.sum(original_data ** 2)
     evr_reconstruction = 1 - (numerator/denominator)
-    print('num', numerator, 'den', denominator)
     return evr_reconstruction
 
 def MSE(original_data, reconstructed_data):
     if original_data.ndim == 3:
         original_data = original_data.reshape(original_data.shape[0], original_data.shape[1]*original_data.shape[2])
+    elif original_data.ndim == 4:
+        original_data = original_data.reshape(original_data.shape[0], original_data.shape[1]*original_data.shape[2]*original_data.shape[3])
     if reconstructed_data.ndim == 3:
         reconstructed_data = reconstructed_data.reshape(reconstructed_data.shape[0], reconstructed_data.shape[1]*reconstructed_data.shape[2])
+    elif reconstructed_data.ndim == 4:
+        reconstructed_data = reconstructed_data.reshape(reconstructed_data.shape[0], reconstructed_data.shape[1]*reconstructed_data.shape[2]*reconstructed_data.shape[3])
 
     # Check if both data arrays have the same dimensions and the dimension is 2
     if original_data.ndim == reconstructed_data.ndim == 2:
@@ -260,29 +427,120 @@ def MSE(original_data, reconstructed_data):
     mse = mean_squared_error(original_data, reconstructed_data)
     return mse
 
+def active_array_calc(original_data, reconstructed_data, z):
+    beta = 1.201
+    alpha = 3.0
+    T = original_data[:,:,:,3] - beta*z
+    T_reconstructed = reconstructed_data[:,:,:,3] - beta*z
+    q_s = np.exp(alpha*T)
+    q_s_reconstructed = np.exp(alpha*T)
+    rh = original_data[:,:,:,0]/q_s
+    rh_reconstructed = reconstructed_data[:,:,:,0]/q_s_reconstructed
+    mean_b = np.mean(original_data[:,:,:,3], axis=1, keepdims=True)
+    mean_b_reconstructed= np.mean(reconstructed_data[:,:,:,3], axis=1, keepdims=True)
+    b_anom = original_data[:,:,:,3] - mean_b
+    b_anom_reconstructed = reconstructed_data[:,:,:,3] - mean_b_reconstructed
+    w = original_data[:,:,:,1]
+    w_reconstructed = reconstructed_data[:,:,:,1]
+    
+    mask = (rh[:, :, :] >= 1) & (w[:, :, :] > 0) & (b_anom[:, :, :] > 0)
+    mask_reconstructed = (rh_reconstructed[:, :, :] >= 1) & (w_reconstructed[:, :, :] > 0) & (b_anom_reconstructed[:, :, :] > 0)
+    
+    active_array = np.zeros((original_data.shape[0], len(x), len(z)))
+    active_array[mask] = 1
+    active_array_reconstructed = np.zeros((original_data.shape[0], len(x), len(z)))
+    active_array_reconstructed[mask_reconstructed] = 1
+    
+    # Expand the mask to cover all features (optional, depending on use case)
+    mask_expanded       =  np.repeat(mask[:, :, :, np.newaxis], 4, axis=-1)  # Shape: (256, 64, 1)
+    mask_expanded_recon =  np.repeat(mask_reconstructed[:, :, :, np.newaxis], 4, axis=-1) # Shape: (256, 64, 1)
+    
+    return active_array, active_array_reconstructed, mask_expanded, mask_expanded_recon
+
+def ss_transform(data, scaler):
+    if data.ndim == 4: #len(time_vals), len(x), len(z), len(var)
+        data_reshape = data.reshape(-1, data.shape[-1])
+    if data_reshape.ndim == 2:
+        print("data array is 2D.")
+    else:
+        print("data array is not 2D")
+        
+    data_scaled = scaler.transform(data_reshape)
+    data_scaled = data_scaled.reshape(data.shape)
+    
+    if data_scaled.ndim == 4:
+        print('scaled and reshaped to 4 dimensions')
+    else:
+        print('not scaled properly')
+        
+    return data_scaled
+    
+def ss_inverse_transform(data, scaler):
+    if data.ndim == 4: #len(time_vals), len(x), len(z), len(var)
+        data_reshape = data.reshape(-1, data.shape[-1])
+    if data_reshape.ndim == 2:
+        print("data array is 2D.")
+    else:
+        print("data array is not 2D")
+        
+    print('shape before inverse scaling', np.shape(data_reshape))
+
+    data_unscaled = scaler.inverse_transform(data_reshape)
+    data_unscaled = data_unscaled.reshape(data.shape)
+    
+    if data_unscaled.ndim == 4:
+        print('unscaled and reshaped to 4 dimensions')
+    else:
+        print('not unscaled properly')
+        
+    return data_unscaled
+
 #### LOAD DATA AND POD ####
 variables = ['q_all', 'w_all', 'u_all', 'b_all']
 names = ['q', 'w', 'u', 'b']
 x = np.load(input_path+'/x.npy')
 z = np.load(input_path+'/z.npy')
-snapshots =1000
-data_set, time_vals = load_data_set(input_path+'/data_4var_5000_30000.h5', variables, 1000)
+snapshots = 2500
+data_set, time_vals = load_data_set(input_path+'/data_4var_5000_30000.h5', variables, snapshots)
 print(np.shape(data_set))
 
-n_components = 100
+reduce_data_set = False
+if reduce_data_set:
+    data_set = data_set[:, 147:211, :, :]
+    x = x[147:211]
+    print('reduced domain shape', np.shape(data_set))
+    print('reduced x domain', np.shape(x))
+    print('reduced x domain', len(x))
+    print(x[0], x[-1])
 
-data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_ = POD(data_set, n_components, 'Ra2e8')
+data_reshape = data_set.reshape(-1, data_set.shape[-1])
+print('shape of data reshaped', data_reshape)
+
+# fit the scaler
+scaler = StandardScaler()
+scaler.fit(data_reshape)
+print('means', scaler.mean_)
+
+print('shape of data before scaling', np.shape(data_reshape))
+data_scaled_reshape = scaler.transform(data_reshape)
+#reshape 
+data_scaled = data_scaled_reshape.reshape(data_set.shape)
+
+n_components = modes
+data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_, cev = POD(data_scaled, n_components, f"modes{n_components}")
 
 U = data_reduced 
 print('shape of data for ESN', np.shape(U))
 
 # number of time steps for washout, train, validation, test
-N_lyap    = int((2/3) // 0.05 )
+t_lyap    = t_lyap
+dt        = 2
+N_lyap    = int(t_lyap//dt)
 print('N_lyap', N_lyap)
-N_washout = 5*N_lyap #65
-N_train   = 40*N_lyap #520
-N_val     = 3*N_lyap #39
-N_test    = 2*N_lyap
+N_washout = washout_len*N_lyap #75
+N_train   = train_len*N_lyap #600
+N_val     = val_len*N_lyap #45
+N_test    = test_len*N_lyap #45
 dim       = n_components
 
 # compute normalization factor (range component-wise)
@@ -294,7 +552,7 @@ u_mean = U_data.mean(axis=0)
 
 # standardisation 
 norm_std = U_data.std(axis=0)
-normalisation = 'standard' #on, off, standard
+normalisation = normalisation #on, off, standard
 
 print('norm', norm)
 print('u_mean', u_mean)
@@ -306,7 +564,7 @@ U_washout = U[:N_washout].copy()
 U_tv  = U[N_washout:N_washout+N_train-1].copy() #inputs
 Y_tv  = U[N_washout+1:N_washout+N_train].copy() #data to match at next timestep
 
-indexes_to_plot = np.array([1, 2, 3] ) -1
+indexes_to_plot = np.array([1, 2, 10, 50, 100] ) -1
 
 # adding noise to training set inputs with sigma_n the noise of the data
 # improves performance and regularizes the error as a function of the hyperparameters
@@ -319,7 +577,7 @@ rnd1  = np.random.RandomState(seed)
 noisy = True
 if noisy:
     data_std = np.std(U,axis=0)
-    sigma_n = 1e-3     #change this to increase/decrease noise in training inputs (up to 1e-1)
+    sigma_n = noise #1e-3     #change this to increase/decrease noise in training inputs (up to 1e-1)
     for i in range(n_components):
         U_tv[:,i] = U_tv[:,i] \
                         + rnd1.normal(0, sigma_n*data_std[i], N_train-1)
@@ -341,7 +599,7 @@ elif normalisation == 'off':
     bias_in   = np.array([np.mean(np.abs(U_data))]) #input bias (average absolute value of the inputs)
 bias_out  = np.array([1.]) #output bias
 
-N_units      = 200 #neurons
+N_units      = Nr #neurons
 connectivity = 3
 sparseness   = 1 - connectivity/(N_units-1)
 
@@ -360,9 +618,9 @@ in_scal_in  = np.log10(0.05)
 in_scal_end = np.log10(5.0)
 
 # In case we want to start from a grid_search, the first n_grid_x*n_grid_y points are from grid search
-n_grid_x = 6 
-n_grid_y = 6
-n_bo     = 4  #number of points to be acquired through BO after grid search
+n_grid_x = grid_x
+n_grid_y = grid_y
+n_bo     = added_points  #number of points to be acquired through BO after grid search
 n_tot    = n_grid_x*n_grid_y + n_bo #Total Number of Function Evaluatuions
 
 
@@ -415,7 +673,7 @@ print(search_space)
 #Number of Networks in the ensemble
 ensemble = 3
 
-data_dir = '/Run_n_units{0:}_ensemble{1:}_normalisation{2:}/'.format(N_units, ensemble, normalisation)
+data_dir = '/Run_n_units{0:}_ensemble{1:}_normalisation{2:}_washout{3:}/'.format(N_units, ensemble, normalisation, washout_len)
 output_path = output_path+data_dir
 print(output_path)
 if not os.path.exists(output_path):
@@ -430,13 +688,16 @@ if not os.path.exists(output_path):
     print('made directory')
 
 # Which validation strategy (implemented in Val_Functions.ipynb)
-val      = RVC_Noise
-N_fo     = 17                     # number of validation intervals
+val      = eval(val)
+N_fw     = 1*N_lyap
+N_fo     = (N_train-N_val-N_washout)//N_fw + 1 
+#N_fo     = 33                     # number of validation intervals
 N_in     = N_washout                 # timesteps before the first validation interval (can't be 0 due to implementation)
-N_fw     = (N_train-N_val-N_washout)//(N_fo-1) # how many steps forward the validation interval is shifted (in this way they are evenly spaced)
+#N_fw     = (N_train-N_val-N_washout)//(N_fo-1) # how many steps forward the validation interval is shifted (in this way they are evenly spaced)
 N_splits = 4                         # reduce memory requirement by increasing N_splits
 print('Number of folds', N_fo)
 print('how many steps forward validation interval moves', N_fw)
+print('how many LTs forward validation interval moves', N_fw//N_lyap)
 
 #Quantities to be saved
 par      = np.zeros((ensemble, 4))      # GP parameters
@@ -511,7 +772,7 @@ for i in range(ensemble):
     print('Best Results: x', minimum[i,0], 10**minimum[i,1], minimum[i,2],
           'f', -minimum[i,-1])
     # Full path for saving the file
-    hyp_file = name + '_ESN_hyperparams_ens%i.json' % i
+    hyp_file = '_ESN_hyperparams_ens%i.json' % i
 
     output_path_hyp = os.path.join(output_path, hyp_file)
 
@@ -580,15 +841,15 @@ for i in range(ensemble):
 np.save(output_path + '/f_iters.npy', f_iters)
 
 ##### quick test #####
-N_test   = 2                    #number of intervals in the test set
+N_test   = n_tests                    #number of intervals in the test set
 N_tstart = N_washout + N_train   #where the first test interval starts
-N_intt   = 2*N_lyap             #length of each test set interval
+N_intt   = test_len*N_lyap             #length of each test set interval
 
 # #prediction horizon normalization factor and threshold
 sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
 threshold_ph = 0.2
 
-ensemble_test = 3
+ensemble_test = ensemble_test
 
 ens_pred = np.zeros((N_intt, dim, ensemble_test))
 ens_PH = np.zeros((N_test, ensemble_test))
@@ -683,19 +944,33 @@ for j in range(ensemble_test):
                     ##### reconstructions ####
                     _, reconstructed_truth       = inverse_POD(Y_t, pca_)
                     _, reconstructed_predictions = inverse_POD(Yh_t, pca_)
-                    plot_reconstruction(reconstructed_truth, reconstructed_predictions, 32, 20, xx, 'ens%i_test%i' %(j,i))
+
+                    # these are calculated before scaling '
                     nrmse = NRMSE(reconstructed_truth, reconstructed_predictions)
                     mse   = MSE(reconstructed_truth, reconstructed_predictions)
                     evr   = EVR_recon(reconstructed_truth, reconstructed_predictions)
                     SSIM  = compute_ssim_for_4d(reconstructed_truth, reconstructed_predictions)
+                    
+                    if len(variables) == 4:
+                        active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(reconstructed_truth, reconstructed_predictions, z)
+                        nrmse_plume             = NRMSE(reconstructed_truth[:,:,:,:][mask], reconstructed_predictions[:,:,:,:][mask])
+                    else:
+                        nrmse_plume = np.inf
+
+                    # reconstruction after scaling
+                    reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
+                    reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
+                    print('reconstruction and error plot')
+                    plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 2*N_lyap, xx, 'ESN_ens%i_test%i' %(j,i))
 
                     print('NRMSE', nrmse)
                     print('MSE', mse)
                     print('EVR_recon', evr)
                     print('SSIM', SSIM)
+                    print('NRMSE plume', nrmse_plume)
 
                     # Full path for saving the file
-                    output_file = name + '_ESN_test_metrics_ens%i_test%i.json' % (j,i)
+                    output_file = 'ESN_test_metrics_ens%i_test%i.json' % (j,i)
 
                     output_path_met = os.path.join(output_path, output_file)
 
@@ -706,6 +981,7 @@ for j in range(ensemble_test):
                     "MSE": mse,
                     "NRMSE": nrmse,
                     "SSIM": SSIM,
+                    "NRMSE plume": nrmse_plume,
                     }
 
                     with open(output_path_met, "w") as file:
@@ -723,4 +999,12 @@ with open(fln,'wb') as f:  # need 'wb' in Python3
     savemat(f, {'W': Ws})
     savemat(f, {"Wout": Woutt})
 
+# Full path for saving the file
+hyp2_file = '_ESN_parameters.json'
+
+output_path_hyp2 = os.path.join(output_path, hyp2_file)
+
+with open(output_path_hyp2, "w") as f:
+    json.dump(hyperparams, f, indent=4)
+    print(f"Config file saved to {output_path_hyp2}")
 
