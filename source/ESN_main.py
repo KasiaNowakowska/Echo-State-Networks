@@ -1,3 +1,14 @@
+"""
+python script for ESN.
+
+Usage: ESN.py [--input_path=<input_path> --output_path=<output_path> --hyperparam_file=<hyperparam_file>]
+
+Options:
+    --input_path=<input_path>            file path to use for data
+    --output_path=<output_path>          file path to save images output [default: ./images]
+    --hyperparam_file=<hyperparam_file>  hyperparameters for ESN
+"""
+
 print('load packages')
 import os
 os.environ["OMP_NUM_THREADS"] = '1' # imposes cores
@@ -19,14 +30,120 @@ from sklearn.preprocessing import StandardScaler
 import sys
 sys.stdout.reconfigure(line_buffering=True)
 
-input_path = '/nobackup/mm17ktn/ESN/Echo-State-Networks/source/input_data/'
-output_path = '/nobackup/mm17ktn/ESN/Echo-State-Networks/source/'
+from docopt import docopt
+args = docopt(__doc__)
+
+import json
 
 #global tikh_opt, k, ti, tikh, U_washout, U_tv, Y_tv, U, N_in, N_fw, N_washout, N_val, N_units
 
 exec(open("Val_Functions.py").read())
 exec(open("Functions.py").read())
 print('run functions files')
+
+input_path = args['--input_path']
+output_path = args['--output_path']
+hyperparam_file = args['--hyperparam_file']
+
+with open(hyperparam_file, "r") as f:
+    hyperparams = json.load(f)
+    Nr = hyperparams["Nr"]
+    train_len = hyperparams["N_train"]
+    val_len = hyperparams["N_val"]
+    test_len = hyperparams["N_test"]
+    washout_len = hyperparams["N_washout"]
+    t_lyap = hyperparams["t_lyap"]
+    normalisation = hyperparams["normalisation"]
+    ens = hyperparams["ens"]
+    ensemble_test = hyperparams["ensemble_test"]
+    n_tests = hyperparams["n_tests"]
+    grid_x = hyperparams["grid_x"]
+    grid_y = hyperparams["grid_y"]
+    added_points = hyperparams["added_points"]
+    val = hyperparams["val"]
+    noise = hyperparams["noise"]
+    N_forward = hyperparams["N_forward"]
+
+from sklearn.metrics import mean_squared_error
+def NRMSE(original_data, reconstructed_data):
+    if original_data.ndim == 3:
+        original_data = original_data.reshape(original_data.shape[0], original_data.shape[1]*original_data.shape[2])
+    elif original_data.ndim == 4:
+        original_data = original_data.reshape(original_data.shape[0], original_data.shape[1]*original_data.shape[2]*original_data.shape[3])
+    if reconstructed_data.ndim == 3:
+        reconstructed_data = reconstructed_data.reshape(reconstructed_data.shape[0], reconstructed_data.shape[1]*reconstructed_data.shape[2])
+    elif reconstructed_data.ndim == 4:
+        reconstructed_data = reconstructed_data.reshape(reconstructed_data.shape[0], reconstructed_data.shape[1]*reconstructed_data.shape[2]*reconstructed_data.shape[3])
+
+    # Check if both data arrays have the same dimensions and the dimension is 2
+    if original_data.ndim == reconstructed_data.ndim == 2:
+        print("Both data arrays have the same dimensions and are 2D.")
+    else:
+        print("The data arrays either have different dimensions or are not 2D.")
+    rmse = np.sqrt(mean_squared_error(original_data, reconstructed_data))
+    
+    variance = np.var(original_data)
+    std_dev  = np.sqrt(variance)
+    
+    nrmse = (rmse/std_dev)
+    
+    return nrmse
+
+def MSE(original_data, reconstructed_data):
+    if original_data.ndim == 3:
+        original_data = original_data.reshape(original_data.shape[0], original_data.shape[1]*original_data.shape[2])
+    elif original_data.ndim == 4:
+        original_data = original_data.reshape(original_data.shape[0], original_data.shape[1]*original_data.shape[2]*original_data.shape[3])
+    if reconstructed_data.ndim == 3:
+        reconstructed_data = reconstructed_data.reshape(reconstructed_data.shape[0], reconstructed_data.shape[1]*reconstructed_data.shape[2])
+    elif reconstructed_data.ndim == 4:
+        reconstructed_data = reconstructed_data.reshape(reconstructed_data.shape[0], reconstructed_data.shape[1]*reconstructed_data.shape[2]*reconstructed_data.shape[3])
+
+    # Check if both data arrays have the same dimensions and the dimension is 2
+    if original_data.ndim == reconstructed_data.ndim == 2:
+        print("Both data arrays have the same dimensions and are 2D.")
+    else:
+        print("The data arrays either have different dimensions or are not 2D.")
+    mse = mean_squared_error(original_data, reconstructed_data)
+    return mse
+
+def ss_transform(data, scaler):
+    if data.ndim == 4: #len(time_vals), len(x), len(z), len(var)
+        data_reshape = data.reshape(-1, data.shape[-1])
+    if data_reshape.ndim == 2:
+        print("data array is 2D.")
+    else:
+        print("data array is not 2D")
+        
+    data_scaled = scaler.transform(data_reshape)
+    data_scaled = data_scaled.reshape(data.shape)
+    
+    if data_scaled.ndim == 4:
+        print('scaled and reshaped to 4 dimensions')
+    else:
+        print('not scaled properly')
+        
+    return data_scaled
+    
+def ss_inverse_transform(data, scaler):
+    if data.ndim == 4: #len(time_vals), len(x), len(z), len(var)
+        data_reshape = data.reshape(-1, data.shape[-1])
+    if data_reshape.ndim == 2:
+        print("data array is 2D.")
+    else:
+        print("data array is not 2D")
+        
+    print('shape before inverse scaling', np.shape(data_reshape))
+
+    data_unscaled = scaler.inverse_transform(data_reshape)
+    data_unscaled = data_unscaled.reshape(data.shape)
+    
+    if data_unscaled.ndim == 4:
+        print('unscaled and reshaped to 4 dimensions')
+    else:
+        print('not unscaled properly')
+        
+    return data_unscaled
 
 #### Load Data ####
 q = np.load(input_path + 'q5000_30000.npy')
@@ -47,11 +164,14 @@ U = data
 
 #### dataset generation ####
 # number of time steps for washout, train, validation, test
-N_lyap    = 400
-N_washout = 400
-N_train   = 31*N_lyap # 46
-N_val     = 3*N_lyap
-N_test    = 3*N_lyap
+t_lyap    = t_lyap
+dt        = 1
+N_lyap    = int(t_lyap//dt)
+print('N_lyap', N_lyap)
+N_washout = washout_len*N_lyap #75
+N_train   = train_len*N_lyap #600
+N_val     = val_len*N_lyap #45
+N_test    = test_len*N_lyap #45
 dim       = 2
 
 # compute normalization factor (range component-wise)
@@ -60,16 +180,14 @@ m = U_data.min(axis=0)
 M = U_data.max(axis=0)
 norm = M-m 
 u_mean = U_data.mean(axis=0)
-print('mean', u_mean)
+
+# standardisation 
+norm_std = U_data.std(axis=0)
+normalisation = normalisation #on, off, standard
+
 print('norm', norm)
-normalisation = 'on'
-standardisation = 'off'
-if standardisation == 'on':
-    ss = StandardScaler()
-    U = ss.fit_transform(U)
-    #data = data[::5]
-    #time_vals = time_vals[::5]
-    print(np.shape(U))
+print('u_mean', u_mean)
+print('norm_std', norm_std)
 
 # washout
 U_washout = U[:N_washout].copy()
@@ -89,7 +207,7 @@ rnd1  = np.random.RandomState(seed)
 noisy = True
 if noisy:
     data_std = np.std(data,axis=0)
-    sigma_n = 1e-3     #change this to increase/decrease noise in training inputs (up to 1e-1)
+    sigma_n = noise #1e-3     #change this to increase/decrease noise in training inputs (up to 1e-1)
     for i in range(dim):
         U_tv[:,i] = U_tv[:,i] \
                         + rnd1.normal(0, sigma_n*data_std[i], N_train-1)
@@ -101,14 +219,19 @@ fig.savefig(output_path + '/noise_addition_sigman%.2f.png' % sigma_n)
 plt.close()
 
 #### ESN hyperparameters #####
-bias_in   = np.array([np.mean(np.abs((U_data-u_mean)/norm))]) #input bias (average absolute value of the inputs)
+if normalisation == 'on':
+    bias_in   = np.array([np.mean(np.abs((U_data-u_mean)/norm))]) #input bias (average absolute value of the inputs)
+elif normalisation == 'standard':
+    bias_in   = np.array([np.mean(np.abs((U_data-u_mean)/norm_std))]) #input bias (average absolute value of the inputs)
+elif normalisation == 'off':
+    bias_in   = np.array([np.mean(np.abs(U_data))]) #input bias (average absolute value of the inputs)
 bias_out  = np.array([1.]) #output bias
 
-N_units      = 2000 #neurons
+N_units      = Nr #neurons
 connectivity = 3
 sparseness   = 1 - connectivity/(N_units-1)
 
-tikh = np.array([1e-3,1e-6,1e-9,1e-12])  # Tikhonov factor (optimize among the values in this list)
+tikh = np.array([1e-6,1e-9,1e-12])  # Tikhonov factor (optimize among the values in this list)
 
 print('tikh:', tikh)
 print('N_r:', N_units, 'sparsity:', sparseness)
@@ -123,9 +246,9 @@ in_scal_in  = np.log10(0.05)
 in_scal_end = np.log10(5.)
 
 # In case we want to start from a grid_search, the first n_grid_x*n_grid_y points are from grid search
-n_grid_x = 6 
-n_grid_y = 6
-n_bo     = 4  #number of points to be acquired through BO after grid search
+n_grid_x = grid_x
+n_grid_y = grid_y
+n_bo     = added_points  #number of points to be acquired through BO after grid search
 n_tot    = n_grid_x*n_grid_y + n_bo #Total Number of Function Evaluatuions
 
 
@@ -175,23 +298,28 @@ def g(val):
 print(search_space)
 
 #Number of Networks in the ensemble
-ensemble = 100
+ensemble = ens
 
 
 # Which validation strategy (implemented in Val_Functions.ipynb)
-val      = RVC_Noise
-N_fo     = 10 # 10,15 (non-chaotic) # 28,43 (chaotic)                        # number of validation intervals
+val      = eval(val)
+N_fw     = N_forward*N_lyap
+N_fo     = (N_train-N_val-N_washout)//N_fw + 1 
+#N_fo     = 33                     # number of validation intervals
 N_in     = N_washout                 # timesteps before the first validation interval (can't be 0 due to implementation)
-N_fw     = (N_train-N_val-N_in)//(N_fo-1) # how many steps forward the validation interval is shifted (in this way they are evenly spaced)
-N_splits = 4   
-print(N_fw, N_fo)                      # reduce memory requirement by increasing N_splits
+#N_fw     = (N_train-N_val-N_washout)//(N_fo-1) # how many steps forward the validation interval is shifted (in this way they are evenly spaced)
+N_splits = 4                         # reduce memory requirement by increasing N_splits
+print('Number of folds', N_fo)
+print('how many steps forward validation interval moves', N_fw)
+print('how many LTs forward validation interval moves', N_fw//N_lyap)
 
-data_dir = '/Run_gp_hedge_2_n_units{0:}_ensemble{1:}_n_tot{2:}_normalisation{3:}_standardisation{4:}_sigma_n{5:.1e}_{6:}LTs_{7:}folds/'.format(N_units, ensemble, n_tot, normalisation, standardisation, sigma_n, N_train, N_fo)
+data_dir = '/Run_n_units{0:}_ensemble{1:}_normalisation{2:}_washout{3:}/'.format(N_units, ensemble, normalisation, washout_len)
 output_path = output_path+data_dir
 print(output_path)
 if not os.path.exists(output_path):
     os.makedirs(output_path)
     print('made directory')
+
 
 #Quantities to be saved
 par      = np.zeros((ensemble, 4))      # GP parameters
@@ -270,6 +398,22 @@ for i in range(ensemble):
     fig.savefig(output_path+'/convergence_realisation%i.png' % i)
     plt.close()
 
+    # Full path for saving the file
+    hyp_file = '_ESN_hyperparams_ens%i.json' % i
+
+    output_path_hyp = os.path.join(output_path, hyp_file)
+
+    hyps = {
+    "test": i,
+    "spec rad": minimum[i,0],
+    "input scaling": 10**minimum[i,1],
+    "tikh": minimum[i,2],
+    "min f": minimum[i,-1],
+    }
+
+    with open(output_path_hyp, "w") as file:
+        json.dump(hyps, file, indent=4)
+
 ##### visualise grid search #####
 # Plot Gaussian Process reconstruction for each network in the ensemble after n_tot evaluations
 # The GP reconstruction is based on the n_tot function evaluations decided in the search
@@ -318,17 +462,20 @@ for i in range(ensemble):
 np.save(output_path + '/f_iters.npy', f_iters)
 
 ##### quick test #####
-N_test   = 3                     #number of intervals in the test set
+print('TESTING')
+N_test   = n_tests                     #number of intervals in the test set
 N_tstart = N_washout + N_train     #where the first test interval starts
-N_intt   = 3*N_lyap                #length of each test set interval
+N_intt   = test_len*N_lyap                #length of each test set interval
 
 # #prediction horizon normalization factor and threshold
 sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
 threshold_ph = 0.2
 
-ensemble_test = 3
+ensemble_test = ensemble_test
 
-ens_pred = np.zeros((N_intt, dim, ensemble_test))
+ens_pred  = np.zeros((N_intt, dim, N_test, ensemble_test))
+ens_truth = np.zeros((N_intt, dim, N_test))
+
 ens_PH = np.zeros((N_test, ensemble_test))
 for j in range(ensemble_test):
 
@@ -344,6 +491,7 @@ for j in range(ensemble_test):
 
     # to store prediction horizon in the test set
     PH       = np.zeros(N_test)
+    nrmse_error    = np.zeros((N_test, N_intt))
 
     # to plot results
     plot = True
@@ -364,12 +512,15 @@ for j in range(ensemble_test):
 
         # Prediction Horizon
         Yh_t        = closed_loop(N_intt-1, Xa1[-1], Wout, sigma_in, rho)[0]
-        if i == 1:
-            ens_Y_t = Y_t
-            ens_pred[:, :, j] = Yh_t
+        # save predictions
+        ens_truth[:, :, i] = Y_t
+        ens_pred[:, :, i, j] = Yh_t
+
         Y_err       = np.sqrt(np.mean((Y_t-Yh_t)**2,axis=1))/sigma_ph
         PH[i]       = np.argmax(Y_err>threshold_ph)/N_lyap
         if PH[i] == 0 and Y_err[0]<threshold_ph: PH[i] = N_intt/N_lyap #(in case PH is larger than interval)
+        ens_PH[i,j] = PH[i]
+        nrmse_error[i, :] = Y_err
 
         if plot:
             #left column has the washout (open-loop) and right column the prediction (closed-loop)
@@ -401,25 +552,66 @@ for j in range(ensemble_test):
                 fig.savefig(output_path+'/prediction_ens%i_test%i.png' % (j,i))
                 plt.close()
 
+                fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
+                xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
+                ax.plot(xx,Y_err, 'b')
+                ax.axhline(y=threshold_ph, xmin=xx[0], xmax=xx[-1])
+                ax.grid()
+                ax.set_ylabel('PH')
+                ax.set_xlabel('Time')
+                fig.savefig(output_path+'/PH_ens%i_test%i.png' % (j,i))
+                plt.close()
+
+                nrmse = NRMSE(Y_t, Yh_t)
+                mse   = MSE(Y_t, Yh_t)
+                print('NRMSE', nrmse)
+                print('MSE', mse)
+
+                # Full path for saving the file
+                output_file = 'ESN_test_metrics_ens%i_test%i.json' % (j,i)
+
+                output_path_met = os.path.join(output_path, output_file)
+
+                metrics = {
+                "test": i,
+                "MSE": mse,
+                "NRMSE": nrmse,
+                "PH": PH[i],
+                }
+
+                with open(output_path_met, "w") as file:
+                    json.dump(metrics, file, indent=4)
+
     # Percentiles of the prediction horizon
     print('PH quantiles [Lyapunov Times]:',
           np.quantile(PH,.75), np.median(PH), np.quantile(PH,.25))
     ens_PH[:,j] = PH
     print('')
 
-fig, ax =plt.subplots(2, figsize=(12,6), sharex=True)
-xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-mean_ens = np.mean(ens_pred, axis=-1)
-lower = np.percentile(ens_pred, 5, axis=-1)
-upper = np.percentile(ens_pred, 95, axis=-1)
-for i in range(dim):
-    ax[i].plot(xx, ens_Y_t[:,i], color='tab:blue')
-    ax[i].plot(xx, mean_ens[:,i], color='tab:orange')
-    ax[i].fill_between(xx, lower[:,i], upper[:,i], color='tab:orange', alpha=0.3)
-    ax[i].grid()
-    ax[i].legend()
-fig.savefig(output_path+'/ens_pred_test1.png')
-plt.close()
+    mean_nrmse_error = np.mean(nrmse_error, axis=0)
+    fig, ax = plt.subplots(1, figsize=(8,6))
+    ax.plot(xx, mean_nrmse_error)
+    ax.grid()
+    ax.set_xlabel('LT')
+    ax.set_ylabel('mean nrmse error for ensemble')
+    fig.savefig(output_path+f"meanerror_ensemble{j}.png")
+
+for j in range(N_test):
+    Y_t = ens_truth[:,:,j]
+    Y_ht = ens_pred[:,:,j,:]
+    fig, ax =plt.subplots(2, figsize=(12,6), sharex=True)
+    xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
+    mean_ens = np.mean(Y_ht, axis=-1)
+    lower = np.percentile(Y_ht, 5, axis=-1)
+    upper = np.percentile(Y_ht, 95, axis=-1)
+    for i in range(dim):
+        ax[i].plot(xx, Y_t[:,i], color='tab:blue')
+        ax[i].plot(xx, mean_ens[:,i], color='tab:orange')
+        ax[i].fill_between(xx, lower[:,i], upper[:,i], color='tab:orange', alpha=0.3)
+        ax[i].grid()
+        ax[i].legend()
+    fig.savefig(output_path+'/ens_pred_test%i.png' % j)
+    plt.close()
 
 ###### SAVE RESULTS ######
 #Save the details and results of the search for post-process
@@ -488,17 +680,8 @@ for i in range(ensemble):
     ax[1].set_ylabel('q')
     fig.savefig(output_path+'/training_states_ens%i.png' % i)
 
-for i in range(ensemble):
-    Yh      = np.empty((N_train-1, 2))
-    xa      = Xa1_states[i]
-    var_xa  = np.var(xa)
-    mean_xa = np.mean(xa)
-    fig,ax =plt.subplots(2,sharex=True)
-    ax[0].plot(xx, var_xa, 'b')
-    ax[0].plot(xx, mean_xa, 'b')
-    ax[-1].set_xlabel('Time [Lyapunov Times]')
-    ax.set_xlim(0,5)
-    ax.set_ylabel('KE')
-    ax.set_ylabel('q')
-    fig.savefig(output_path+'/mean_var_states_ens%i.png' % i)
+ESN_params = 'ESN_params.json' 
 
+output_ESN_params = os.path.join(output_path, ESN_params)
+with open(output_ESN_params, "w") as f:
+    json.dump(hyperparams, f, indent=4) 
