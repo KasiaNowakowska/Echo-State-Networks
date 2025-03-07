@@ -587,7 +587,7 @@ if noisy:
         ax[m].grid()
         ax[m].set_title('mode %i' % (index+1))
 ax[0].legend()
-fig.savefig(output_path + '/noise_addition.png')
+fig.savefig(output_path + '/noise_addition_sigman%.2f.png' % sigma_n)
 plt.close()
 
 #### ESN hyperparameters #####
@@ -671,7 +671,7 @@ def g(val):
 print(search_space)
 
 #Number of Networks in the ensemble
-ensemble = 3
+ensemble = ens
 
 data_dir = '/Run_n_units{0:}_ensemble{1:}_normalisation{2:}_washout{3:}/'.format(N_units, ensemble, normalisation, washout_len)
 output_path = output_path+data_dir
@@ -841,6 +841,7 @@ for i in range(ensemble):
 np.save(output_path + '/f_iters.npy', f_iters)
 
 ##### quick test #####
+print('TESTING')
 N_test   = n_tests                    #number of intervals in the test set
 N_tstart = N_washout + N_train   #where the first test interval starts
 N_intt   = test_len*N_lyap             #length of each test set interval
@@ -866,7 +867,8 @@ for j in range(ensemble_test):
     print('Hyperparameters:',rho, sigma_in)
 
     # to store prediction horizon in the test set
-    PH       = np.zeros(N_test)
+    PH             = np.zeros(N_test)
+    nrmse_error    = np.zeros((N_test, N_intt))
 
     # to plot results
     plot = True
@@ -895,6 +897,8 @@ for j in range(ensemble_test):
         Y_err       = np.sqrt(np.mean((Y_t-Yh_t)**2,axis=1))/sigma_ph
         PH[i]       = np.argmax(Y_err>threshold_ph)/N_lyap
         if PH[i] == 0 and Y_err[0]<threshold_ph: PH[i] = N_intt/N_lyap #(in case PH is larger than interval)
+        ens_PH[i,j] = PH[i]
+        nrmse_error[i, :] = Y_err
 
         if plot:
             #left column has the washout (open-loop) and right column the prediction (closed-loop)
@@ -982,10 +986,36 @@ for j in range(ensemble_test):
                     "NRMSE": nrmse,
                     "SSIM": SSIM,
                     "NRMSE plume": nrmse_plume,
+                    "PH": PH[i],
                     }
 
                     with open(output_path_met, "w") as file:
                         json.dump(metrics, file, indent=4)
+
+        # Full path for saving the file
+        output_file_all = 'ESN_test_metrics_ens%i_all.json' % j
+
+        output_path_met_all = os.path.join(output_path, output_file_all)
+
+        metrics_ens = {
+        "ensemble": j,
+        "mean PH": np.mean(PH),
+        "lower PH": np.quantile(PH, 0.75),
+        "uppper PH": np.quantile(PH, 0.25),
+        "median PH": np.median(PH),
+        }
+
+        with open(output_path_met_all, "w") as file:
+            json.dump(metrics_ens, file, indent=4)
+
+        mean_nrmse_error = np.mean(nrmse_error, axis=0)
+        fig, ax = plt.subplots(1, figsize=(8,6))
+        ax.plot(xx, mean_nrmse_error)
+        ax.grid()
+        ax.set_xlabel('LT')
+        ax.set_ylabel('mean nrmse error for ensemble')
+        fig.savefig(output_path+f"meanerror_ensemble{j}.png")
+
                         
 #Save the details and results of the search for post-process
 opt_specs = [spec_in,spec_end,in_scal_in,in_scal_end]
@@ -1000,11 +1030,23 @@ with open(fln,'wb') as f:  # need 'wb' in Python3
     savemat(f, {"Wout": Woutt})
 
 # Full path for saving the file
-hyp2_file = '_ESN_parameters.json'
+output_file_ALL = 'ESN_test_metrics_all.json' 
 
-output_path_hyp2 = os.path.join(output_path, hyp2_file)
+output_path_met_ALL = os.path.join(output_path, output_file_ALL)
 
-with open(output_path_hyp2, "w") as f:
-    json.dump(hyperparams, f, indent=4)
-    print(f"Config file saved to {output_path_hyp2}")
+metrics_ens_ALL = {
+"mean PH": np.mean(ens_PH),
+"lower PH": np.quantile(ens_PH, 0.75),
+"uppper PH": np.quantile(ens_PH, 0.25),
+"median PH": np.median(ens_PH),
+}
 
+with open(output_path_met_ALL, "w") as file:
+    json.dump(metrics_ens_ALL, file, indent=4)
+
+
+ESN_params = 'ESN_params.json' 
+
+output_ESN_params = os.path.join(output_path, ESN_params)
+with open(output_ESN_params, "w") as f:
+    json.dump(hyperparams, f, indent=4) 
