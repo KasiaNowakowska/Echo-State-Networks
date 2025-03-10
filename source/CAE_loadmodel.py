@@ -761,8 +761,18 @@ print("mse:", mse)
 print("test_ssim:", test_ssim)
 print("EVR:", evr)
 
-import json
+decoded = decoded.numpy()
+decoded_unscaled = ss_inverse_transform(decoded, scaler)
+truth_unscaled = ss_inverse_transform(truth, scaler)
 
+#Plume NRMSE
+if len(variables) == 4:
+    active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(truth_unscaled, decoded_unscaled, z)
+    print(np.shape(active_array))
+    print(np.shape(mask))
+    nrmse_plume             = NRMSE(truth_unscaled[:,:,:,:][mask], decoded_unscaled[:,:,:,:][mask])
+
+import json
 # Full path for saving the file
 output_file = "test_metrics.json"
 
@@ -773,14 +783,11 @@ metrics = {
 "NRMSE": nrmse,
 "SSIM": test_ssim,
 "EVR": evr,
+"plume NRMSE": nrmse_plume,
 }
 
 with open(output_path_met, "w") as file:
     json.dump(metrics, file, indent=4)
-
-decoded = decoded.numpy()
-decoded_unscaled = ss_inverse_transform(decoded, scaler)
-truth_unscaled = ss_inverse_transform(truth, scaler)
 
 n       =  4
 
@@ -800,3 +807,19 @@ for i in range(n):
     time_value = test_times[index]
     
     plot_reconstruction_and_error(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], 32, index, f"/test_diff_{index}")
+
+    if len(variables) ==4:
+        active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], z)
+        time_zone = np.linspace(0, truth_unscaled[index:index+500].shape[0],  truth_unscaled[index:index+500].shape[0])
+        fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
+        c1 = ax[0].contourf(time_zone, x, active_array[:,:, 32].T, cmap='Reds')
+        fig.colorbar(c1, ax=ax[0])
+        ax[0].set_title('true')
+        c2 = ax[1].contourf(time_zone, x, active_array_reconstructed[:,:, 32].T, cmap='Reds')
+        fig.colorbar(c1, ax=ax[1])
+        ax[1].set_title('reconstruction')
+        for v in range(2):
+            ax[v].set_xlabel('time')
+            ax[v].set_ylabel('x')
+        fig.savefig(output_path+f"/active_plumes_{index}.png")
+        plt.close()

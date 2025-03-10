@@ -1,4 +1,3 @@
-hi 
 """
 python script for convolutional autoencoder.
 
@@ -506,7 +505,7 @@ def main():
                 #print(t, c)
                 # Extract the 2D slice for each timestep and channel
                 orig_slice = original[t, :, :, c]
-                dec_slice = decoded[t, :, :, c].numpy()
+                dec_slice = decoded[t, :, :, c]
                 #print(orig_slice, dec_slice)
                 
                 # Compute SSIM for the current slice
@@ -880,36 +879,50 @@ def main():
             loss, decoded    = train_step(U_train[j], enc_mods, dec_mods)
             loss_0          += loss
 
-            # Compute SSIM
+            
             original = U_train[j]  # Validation input
+            
+            decoded_unscaled = ss_inverse_transform(decoded.numpy(), scaler)
+            original_unscaled = ss_inverse_transform(original, scaler)
+
+            # Compute SSIM
             #print(np.shape(original), np.shape(decoded))
             #print(f"Type of original: {type(original)}")
             #print(f"Type of decoded: {type(decoded)}")
-            batch_ssim = compute_ssim_for_4d(original, decoded)
+            batch_ssim = compute_ssim_for_4d(original_unscaled, decoded_unscaled)
             ssim_0 += batch_ssim
 
             ### new metrics from POD ###
-            evr_value          = EVR_recon(original, decoded.numpy())
+            evr_value          = EVR_recon(original_unscaled, decoded_unscaled)
             evr_0             += evr_value
-            nrmse_value        = NRMSE(original, decoded.numpy())
+            nrmse_value        = NRMSE(original_unscaled, decoded_unscaled)
             nrmse_0           += nrmse_value
-            mse_value          = MSE(original, decoded.numpy())
-            mse_0             += mse_value    
-            print('metrics saved')
-            if j == 0:
-                if (epoch % N_check == 0):
-                    decoded = decoded.numpy()
-                    decoded_unscaled = ss_inverse_transform(decoded, scaler)
-                    original_unscaled = ss_inverse_transform(original, scaler)
-        
-                    fig, ax =plt.subplots(1, figsize=(6,4), tight_layout=True)
-                    plot_reconstruction_and_error(original_unscaled, decoded_unscaled, 32, 8, '/train')
+            mse_value          = MSE(original_unscaled, decoded_unscaled)
+            mse_0             += mse_value  
 
             active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(original_unscaled, decoded_unscaled, z)
-            accuracy                = np.mean(active_array == active_array_reconstructed)
-            nrmse_plume             = NRMSE(original_unscaled[:,:,:,:][mask], decoded_unscaled[:,:,:,:][mask])
+            accuracy = np.mean(active_array == active_array_reconstructed)
+            if np.any(mask):  # Check if plumes exist
+                masked_truth = reconstructed_truth[mask]
+                masked_pred = reconstructed_predictions[mask]
+                
+                print("Shape truth after mask:", masked_truth.shape)
+                print("Shape pred after mask:", masked_pred.shape)
+
+                # Compute NRMSE only if mask is not empty
+                nrmse_plume = NRMSE(masked_truth, masked_pred)
+            else:
+                print("Mask is empty, no plumes detected.")
+                nrmse_plume = 0  # Simply add 0 to maintain shape
+
             accuracy_0             += accuracy
             nrmse_plume_0          += nrmse_plume
+
+            print('metrics saved')
+            if j == 0:
+                if (epoch % N_check == 0):        
+                    fig, ax =plt.subplots(1, figsize=(6,4), tight_layout=True)
+                    plot_reconstruction_and_error(original_unscaled, decoded_unscaled, 32, 8, '/train')
 
         #save train loss
         tloss_plot[epoch]        = loss_0.numpy()/n_batches
@@ -939,30 +952,42 @@ def main():
 
                 # Compute SSIM
                 original = U_val[j]  # Validation input
-                batch_ssim = compute_ssim_for_4d(original, decoded)
+
+                decoded_unscaled = ss_inverse_transform(decoded.numpy(), scaler)
+                original_unscaled = ss_inverse_transform(original, scaler)
+            
+                batch_ssim = compute_ssim_for_4d(original_unscaled, decoded_unscaled)
                 ssim_val += batch_ssim
 
                 ### new metrics from POD ###
-                evr_value            = EVR_recon(original, decoded.numpy())
+                evr_value            = EVR_recon(original_unscaled, decoded_unscaled)
                 evr_val             += evr_value
-                nrmse_value          = NRMSE(original, decoded.numpy())
+                nrmse_value          = NRMSE(original_unscaled, decoded_unscaled)
                 nrmse_val           += nrmse_value
-                mse_value            = MSE(original, decoded.numpy())
+                mse_value            = MSE(original_unscaled, decoded_unscaled)
                 mse_val             += mse_value
 
-                if j == 0:
-                    decoded = decoded.numpy()
-                    decoded_unscaled = ss_inverse_transform(decoded, scaler)
-                    original_unscaled = ss_inverse_transform(original, scaler)
+                active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(original_unscaled, decoded_unscaled, z)
+                accuracy = np.mean(active_array == active_array_reconstructed)
+                if np.any(mask):  # Check if plumes exist
+                    masked_truth = reconstructed_truth[mask]
+                    masked_pred = reconstructed_predictions[mask]
+                    
+                    print("Shape truth after mask:", masked_truth.shape)
+                    print("Shape pred after mask:", masked_pred.shape)
 
+                    # Compute NRMSE only if mask is not empty
+                    nrmse_plume = NRMSE(masked_truth, masked_pred)
+                else:
+                    print("Mask is empty, no plumes detected.")
+                    nrmse_plume = 0  # Simply add 0 to maintain shape
+
+                accuracy_val             += accuracy
+                nrmse_plume_val          += nrmse_plume
+
+                if j == 0:
                     fig, ax =plt.subplots(1, figsize=(6,4), tight_layout=True)
                     plot_reconstruction_and_error(original_unscaled, decoded_unscaled, 32, 8, '/test')
-
-                active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(original_unscaled, decoded_unscaled, z)
-                accuracy                = np.mean(active_array == active_array_reconstructed)
-                nrmse_plume             = NRMSE(original_unscaled[:,:,:,:][mask], decoded_unscaled[:,:,:,:][mask])
-                accuracy_val           += accuracy
-                nrmse_plume_val        += nrmse_plume
 
             #save validation loss
             vloss_epoch  = loss_val.numpy()/val_batches

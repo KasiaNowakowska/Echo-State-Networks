@@ -65,6 +65,7 @@ with open(hyperparam_file, "r") as f:
     added_points = hyperparams["added_points"]
     val = hyperparams["val"]
     noise = hyperparams["noise"]
+    alpha = hyperparams["alpha"]
 
 def load_data(file, name):
     with h5py.File(file, 'r') as hf:
@@ -689,6 +690,7 @@ if not os.path.exists(output_path):
 
 # Which validation strategy (implemented in Val_Functions.ipynb)
 val      = eval(val)
+alpha = alpha
 N_fw     = 1*N_lyap
 N_fo     = (N_train-N_val-N_washout)//N_fw + 1 
 #N_fo     = 33                     # number of validation intervals
@@ -949,23 +951,38 @@ for j in range(ensemble_test):
                     _, reconstructed_truth       = inverse_POD(Y_t, pca_)
                     _, reconstructed_predictions = inverse_POD(Yh_t, pca_)
 
-                    # these are calculated before scaling '
+                    # rescale
+                    reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
+                    reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
+
+                    # metrics
                     nrmse = NRMSE(reconstructed_truth, reconstructed_predictions)
                     mse   = MSE(reconstructed_truth, reconstructed_predictions)
                     evr   = EVR_recon(reconstructed_truth, reconstructed_predictions)
                     SSIM  = compute_ssim_for_4d(reconstructed_truth, reconstructed_predictions)
-                    
+
+                    # reconstruction after scaling
+                    print('reconstruction and error plot')
+                    plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 2*N_lyap, xx, 'ESN_ens%i_test%i' %(j,i))
+
                     if len(variables) == 4:
                         active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(reconstructed_truth, reconstructed_predictions, z)
                         nrmse_plume             = NRMSE(reconstructed_truth[:,:,:,:][mask], reconstructed_predictions[:,:,:,:][mask])
+                        
+                        fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
+                        c1 = ax[0].contourf(xx, x, active_array[:,:, 32].T, cmap='Reds')
+                        fig.colorbar(c1, ax=ax[0])
+                        ax[0].set_title('true')
+                        c2 = ax[1].contourf(xx, x, active_array_reconstructed[:,:, 32].T, cmap='Reds')
+                        fig.colorbar(c1, ax=ax[1])
+                        ax[1].set_title('reconstruction')
+                        for v in range(2):
+                            ax[v].set_xlabel('time')
+                            ax[v].set_ylabel('x')
+                        fig.savefig(output_path+f"/active_plumes_ens{j}_test{i}.png")
+                        plt.close()
                     else:
                         nrmse_plume = np.inf
-
-                    # reconstruction after scaling
-                    reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
-                    reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
-                    print('reconstruction and error plot')
-                    plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 2*N_lyap, xx, 'ESN_ens%i_test%i' %(j,i))
 
                     print('NRMSE', nrmse)
                     print('MSE', mse)

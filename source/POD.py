@@ -1,11 +1,12 @@
 """
 python script for POD.
 
-Usage: lyapunov.py [--input_path=<input_path> --output_path=<output_path>]
+Usage: lyapunov.py [--input_path=<input_path> --output_path=<output_path> --snapshots=<snapshots> ]
 
 Options:
     --input_path=<input_path>          file path to use for data
     --output_path=<output_path>        file path to save images output [default: ./images]
+    --snapshots=<snapshots>            number of snapshots 
 """
 
 import os
@@ -30,7 +31,13 @@ args = docopt(__doc__)
 
 input_path = args['--input_path']
 output_path = args['--output_path']
+snapshots = int(args['--snapshots'])
 
+output_path = output_path+f"/snapshots{snapshots}/"
+print(output_path)
+if not os.path.exists(output_path):
+    os.makedirs(output_path)
+    print('made directory')
 
 def load_data(file, name):
     with h5py.File(file, 'r') as hf:
@@ -538,7 +545,7 @@ variables = ['q_all', 'w_all', 'u_all', 'b_all']
 names = ['q', 'w', 'u', 'b']
 x = np.load(input_path+'/x.npy')
 z = np.load(input_path+'/z.npy')
-snapshots = 2500
+snapshots = snapshots
 data_set, time_vals = load_data_set(input_path+'/data_4var_5000_30000.h5', variables, snapshots)
 print('shape of dataset', np.shape(data_set))
 
