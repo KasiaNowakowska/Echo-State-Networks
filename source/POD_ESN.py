@@ -1,13 +1,14 @@
 """
 python script for POD.
 
-Usage: lyapunov.py [--input_path=<input_path> --output_path=<output_path> --modes=<modes> --hyperparam_file=<hyperparam_file>]
+Usage: lyapunov.py [--input_path=<input_path> --output_path=<output_path> --modes=<modes> --hyperparam_file=<hyperparam_file> --config_number=<config_number>]
 
 Options:
     --input_path=<input_path>            file path to use for data
     --output_path=<output_path>          file path to save images output [default: ./images]
     --modes=<modes>                      number of modes for POD 
     --hyperparam_file=<hyperparam_file>  hyperparameters for ESN
+    --config_number=<config_number>      config_number [default: 0]
 """
 
 import os
@@ -47,6 +48,7 @@ input_path = args['--input_path']
 output_path = args['--output_path']
 modes = int(args['--modes'])
 hyperparam_file = args['--hyperparam_file']
+config_number = int(args['--config_number'])
 
 with open(hyperparam_file, "r") as f:
     hyperparams = json.load(f)
@@ -588,7 +590,7 @@ if noisy:
         ax[m].grid()
         ax[m].set_title('mode %i' % (index+1))
 ax[0].legend()
-fig.savefig(output_path + '/noise_addition_sigman%.2f.png' % sigma_n)
+fig.savefig(output_path + '/noise_addition_sigman%.4f.png' % sigma_n)
 plt.close()
 
 #### ESN hyperparameters #####
@@ -674,7 +676,7 @@ print(search_space)
 #Number of Networks in the ensemble
 ensemble = ens
 
-data_dir = '/Run_n_units{0:}_ensemble{1:}_normalisation{2:}_washout{3:}/'.format(N_units, ensemble, normalisation, washout_len)
+data_dir = '/Run_n_units{0:}_ensemble{1:}_normalisation{2:}_washout{3:}_config{4:}/'.format(N_units, ensemble, normalisation, washout_len, config_number)
 output_path = output_path+data_dir
 print(output_path)
 if not os.path.exists(output_path):
@@ -966,9 +968,21 @@ for j in range(ensemble_test):
                     plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 2*N_lyap, xx, 'ESN_ens%i_test%i' %(j,i))
 
                     if len(variables) == 4:
-                        active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(reconstructed_truth, reconstructed_predictions, z)
-                        nrmse_plume             = NRMSE(reconstructed_truth[:,:,:,:][mask], reconstructed_predictions[:,:,:,:][mask])
-                        
+                        active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(reconstructed_truth, reconstructed_predictions, z)
+                        accuracy = np.mean(active_array == active_array_reconstructed)
+                        if np.any(mask):  # Check if plumes exist
+                            masked_truth = reconstructed_truth[mask]
+                            masked_pred = reconstructed_predictions[mask]
+                            
+                            print("Shape truth after mask:", masked_truth.shape)
+                            print("Shape pred after mask:", masked_pred.shape)
+
+                            # Compute NRMSE only if mask is not empty
+                            nrmse_plume = NRMSE(masked_truth, masked_pred)
+                        else:
+                            print("Mask is empty, no plumes detected.")
+                            nrmse_plume = 0  # Simply add 0 to maintain shape
+
                         fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
                         c1 = ax[0].contourf(xx, x, active_array[:,:, 32].T, cmap='Reds')
                         fig.colorbar(c1, ax=ax[0])

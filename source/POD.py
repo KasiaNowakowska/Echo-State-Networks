@@ -183,6 +183,15 @@ def inverse_POD(data_reduced, pca_):
     print('shape of data reconstructed:', np.shape(data_reconstructed))
     return data_reconstructed_reshaped, data_reconstructed 
 
+def transform_POD(data, pca_):
+    if data.ndim == 3: #len(time_vals), len(x), len(z)
+            data_matrix = data.reshape(data.shape[0], data.shape[1]*data.shape[2])
+    elif data.ndim == 4: #len(time_vals), len(x), len(z), len(var)
+            data_matrix = data.reshape(data.shape[0], data.shape[1]*data.shape[2]*data.shape[3])
+    data_reduced = pca_.transform(data_matrix)
+    print('shape of reduced_data:', np.shape(data_reduced))
+    return data_reduced
+
 def plot_reconstruction(original, reconstruction, z_value, t_value, file_str):
     if original.ndim == 3: #len(time_vals), len(x), len(z)
 
@@ -558,6 +567,17 @@ if reduce_data_set:
     print('reduced x domain', len(x))
     print(x[0], x[-1])
 
+projection = True
+if projection:
+    data_proj = data_set[500:, :, :, :]
+    data_set = data_set[:500, :, :, :]
+    time_vals_proj = time_vals[500:]
+    time_vals = time_vals[:500]
+    print('reduced dataset', np.shape(data_set))
+    print('reduced time', np.shape(time))
+    print('proejction dataset', np.shape(data_proj))
+    print(x[0], x[-1])
+
 fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
 c1 = ax.pcolormesh(time_vals, x, data_set[:,:,32,0].T)
 fig.colorbar(c1, ax=ax)
@@ -595,6 +615,7 @@ c_names = ['Ra2e8_c10', 'Ra2e8_c16', 'Ra2e8_c32', 'Ra2e8_c64', 'Ra2e8_c100']
 index=0
 
 nrmse_list, evr_list, ssim_list, cumEV_list, nrmse_plume_list = [], [], [], [], []
+pnrmse_list, pevr_list, pssim_list, pnrmse_plume_list = [], [], [], [], []
 for n_modes in n_modes_list:
     data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_, cev = POD(data_scaled, n_modes, c_names[index])
     data_reconstructed = ss_inverse_transform(data_reconstructed, scaler)
@@ -626,6 +647,40 @@ for n_modes in n_modes_list:
     else:
         nrmse_plume = np.inf
 
+    if projection:
+        data_reduced_proj          = transform_POD(data_proj, pca_)
+        _, data_reconstructed_proj = inverse_POD(data_reduced_proj, pca_)
+        data_reconstructed_proj     = ss_inverse_transform(data_reconstructed_proj, scaler)
+
+        plot_reconstruction_and_error(data_proj, data_reconstructed_proj, 32, 20, 'proj_'+c_names[index])
+        nrmse_proj = NRMSE(data_proj, data_reconstructed_proj)
+        mse_proj   = MSE(data_proj, data_reconstructed_proj)
+        evr_proj   = EVR_recon(data_proj, data_reconstructed_proj)
+        SSIM_proj  = compute_ssim_for_4d(data_proj, data_reconstructed_proj)
+
+        if len(variables) == 4:
+            active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(data_proj, data_reconstructed_proj, z)
+            print(np.shape(active_array))
+            print(np.shape(mask))
+            nrmse_plume_proj             = NRMSE(data_proj[:,:,:,:][mask], data_reconstructed_proj[:,:,:,:][mask])
+
+            fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
+            c1 = ax[0].contourf(time_vals_proj, x, active_array[:,:, 32].T, cmap='Reds')
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].contourf(time_vals_proj, x, active_array_reconstructed[:,:, 32].T, cmap='Reds')
+            fig.colorbar(c1, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            for v in range(2):
+                ax[v].set_xlabel('time')
+                ax[v].set_ylabel('x')
+            fig.savefig(output_path+f"/proj_active_plumes_{c_names[index]}.png")
+            plt.close()
+        else:
+            nrmse_plume_proj = np.inf
+
+
+
     print('NRMSE', nrmse)
     print('MSE', mse)
     print('EVR_recon', evr)
@@ -655,6 +710,30 @@ for n_modes in n_modes_list:
     evr_list.append(evr)
     cumEV_list.append(cev)
     nrmse_plume_list.append(nrmse_plume)
+
+
+    if projection:
+        # Full path for saving the file
+        output_file = c_names[index] + '_proj_metrics.json' 
+
+        output_path_met = os.path.join(output_path, output_file)
+
+        metrics = {
+        "no. modes": n_modes,
+        "EVR": evr_proj,
+        "MSE": mse_proj,
+        "NRMSE": nrmse_proj,
+        "SSIM": SSIM_proj,
+        "NRMSE plume": nrmse_plume_proj,
+        }
+
+        with open(output_path_met, "w") as file:
+            json.dump(metrics, file, indent=4)
+
+        pnrmse_list.append(nrmse_proj)
+        pssim_list.append(SSIM_proj)
+        pevr_list.append(evr_proj)
+        pnrmse_plume_list.append(nrmse_plume_proj)
 
     index +=1
 
@@ -703,3 +782,42 @@ ax.set_ylabel('NRMSE in plume')
 ax.grid()
 fig.savefig(output_path+'/nrmse_plume_list.png')
 plt.close()
+
+if projection:
+    np.save(output_path+'/proj_ssim_list.npy', pssim_list)
+    np.save(output_path+'/proj_evr_list.npy', pevr_list)
+    np.save(output_path+'/proj_nrmse_list.npy', pnrmse_list)
+    np.save(output_path+'/proj_nrmse_plume_list.npy', pnrmse_plume_list)
+
+    fig, ax =plt.subplots(1, figsize=(8,6), tight_layout=True)
+    ax.plot(n_modes_list, pssim_list)
+    ax.set_xlabel('modes')
+    ax.set_ylabel('SSIM')
+    ax.grid()
+    fig.savefig(output_path+'/pSSIM_list.png')
+    plt.close()
+
+    fig, ax =plt.subplots(1, figsize=(8,6), tight_layout=True)
+    ax.plot(n_modes_list, pnrmse_list)
+    ax.set_xlabel('modes')
+    ax.set_ylabel('NRMSE')
+    ax.grid()
+    fig.savefig(output_path+'/pNRMSE_list.png')
+    plt.close()
+
+    fig, ax =plt.subplots(1, figsize=(8,6), tight_layout=True)
+    ax.plot(n_modes_list, pevr_list)
+    ax.set_xlabel('modes')
+    ax.set_ylabel('EVR')
+    ax.grid()
+    fig.savefig(output_path+'/pEVR_list.png')
+    plt.close()
+
+    fig, ax =plt.subplots(1, figsize=(8,6), tight_layout=True)
+    ax.plot(n_modes_list, pnrmse_plume_list)
+    ax.set_xlabel('modes')
+    ax.set_ylabel('NRMSE in plume')
+    ax.grid()
+    fig.savefig(output_path+'/pnrmse_plume_list.png')
+    plt.close()
+

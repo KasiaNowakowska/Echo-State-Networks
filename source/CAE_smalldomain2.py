@@ -130,7 +130,7 @@ with open(hyperparam_config, "r") as f:
     sweep_configuration = json.load(f)
 
 if sweep_id == 'None':
-    sweep_id = wandb.sweep(sweep=sweep_configuration, project="autoencoder_Ra2e8_new")
+    sweep_id = wandb.sweep(sweep=sweep_configuration, project="Ra2e8_new")
     print('new sweep with sweep id', sweep_id)
 else:
     print('restarting sweep with sweep_id', sweep_id)
@@ -903,8 +903,8 @@ def main():
             active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(original_unscaled, decoded_unscaled, z)
             accuracy = np.mean(active_array == active_array_reconstructed)
             if np.any(mask):  # Check if plumes exist
-                masked_truth = reconstructed_truth[mask]
-                masked_pred = reconstructed_predictions[mask]
+                masked_truth = original_unscaled[mask]
+                masked_pred = decoded_unscaled[mask]
                 
                 print("Shape truth after mask:", masked_truth.shape)
                 print("Shape pred after mask:", masked_pred.shape)
@@ -970,8 +970,8 @@ def main():
                 active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(original_unscaled, decoded_unscaled, z)
                 accuracy = np.mean(active_array == active_array_reconstructed)
                 if np.any(mask):  # Check if plumes exist
-                    masked_truth = reconstructed_truth[mask]
-                    masked_pred = reconstructed_predictions[mask]
+                    masked_truth = original_unscaled[mask]
+                    masked_pred = decoded_unscaled[mask]
                     
                     print("Shape truth after mask:", masked_truth.shape)
                     print("Shape pred after mask:", masked_pred.shape)
@@ -1120,4 +1120,4 @@ def main():
 
     print('finished job')
 
-wandb.agent(sweep_id=sweep_id, function=main, entity="mm17ktn-university-of-leeds", project="autoencoder_Ra2e8_new")
+wandb.agent(sweep_id=sweep_id, function=main, entity="mm17ktn-university-of-leeds", project="Ra2e8_new")
