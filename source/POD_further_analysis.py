@@ -66,6 +66,7 @@ def load_data_set(file, names, snapshots):
 
     return data, time_vals
 
+'''
 snapshots = [500, 2500, 5000]
 modes = [10, 16, 32, 64, 100]
 
@@ -118,3 +119,54 @@ ax.set_ylabel('cumulative equivalence ratio')
 ax.legend()
 ax.grid()
 fig.savefig(output_path+'/cumEV.png')
+'''
+
+snapshots = 1000
+labels = ['POD', 'Projection']
+modes = [10, 16, 32, 64, 100]
+
+NRMSE_vals = np.zeros((len(modes), len(labels)))
+ssim_vals  = np.zeros((len(modes), len(labels)))
+NRMSE_plume_vals = np.zeros((len(modes), len(labels)))
+
+for s in range(len(labels)):
+    no_snaps         = snapshots
+    if s == 0:
+        input_path_snaps = input_path+f"/snapshots{no_snaps}/"
+
+        NRMSE_vals[:, s] = np.load(input_path_snaps + '/nrmse_list.npy')
+        ssim_vals[:, s]  = np.load(input_path_snaps + '/ssim_list.npy')
+        NRMSE_plume_vals[:, s]  = np.load(input_path_snaps + '/nrmse_plume_list.npy')
+    if s == 1:
+        input_path_snaps = input_path+f"/snapshots{no_snaps}/"
+        
+        NRMSE_vals[:, s] = np.load(input_path_snaps + '/proj_nrmse_list.npy')
+        ssim_vals[:, s]  = np.load(input_path_snaps + '/proj_ssim_list.npy')
+        NRMSE_plume_vals[:, s]  = np.load(input_path_snaps + '/proj_nrmse_plume_list.npy')
+
+fig, ax = plt.subplots(1, figsize=(8,6))
+for s in range(len(labels)):
+    ax.plot(modes, NRMSE_vals[:, s], label=f"{labels[s]}")
+ax.set_xlabel('modes')
+ax.set_ylabel('NRMSE')
+ax.legend()
+ax.grid()
+fig.savefig(output_path+'/NRMSE_proj.png')
+
+fig, ax = plt.subplots(1, figsize=(8,6))
+for s in range(len(labels)):
+    ax.plot(modes, NRMSE_plume_vals[:, s], label=f"{labels[s]}")
+ax.set_xlabel('modes')
+ax.set_ylabel('NRMSE in plume')
+ax.legend()
+ax.grid()
+fig.savefig(output_path+'/NRMSE_plume_proj.png')
+
+fig, ax = plt.subplots(1, figsize=(8,6))
+for s in range(len(labels)):
+    ax.plot(modes, ssim_vals[:, s],label=f"{labels[s]}")
+ax.set_xlabel('modes')
+ax.set_ylabel('SSIM')
+ax.legend()
+ax.grid()
+fig.savefig(output_path+'/SSIM_proj.png')

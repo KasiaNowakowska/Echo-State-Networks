@@ -68,6 +68,7 @@ with open(hyperparam_file, "r") as f:
     val = hyperparams["val"]
     noise = hyperparams["noise"]
     alpha = hyperparams["alpha"]
+    n_forward = hyperparams["n_forward"]
 
 def load_data(file, name):
     with h5py.File(file, 'r') as hf:
@@ -693,7 +694,7 @@ if not os.path.exists(output_path):
 # Which validation strategy (implemented in Val_Functions.ipynb)
 val      = eval(val)
 alpha = alpha
-N_fw     = 1*N_lyap
+N_fw     = n_forward*N_lyap
 N_fo     = (N_train-N_val-N_washout)//N_fw + 1 
 #N_fo     = 33                     # number of validation intervals
 N_in     = N_washout                 # timesteps before the first validation interval (can't be 0 due to implementation)
@@ -856,8 +857,13 @@ threshold_ph = 0.2
 
 ensemble_test = ensemble_test
 
-ens_pred = np.zeros((N_intt, dim, ensemble_test))
-ens_PH = np.zeros((N_test, ensemble_test))
+ens_pred        = np.zeros((N_intt, dim, ensemble_test))
+ens_PH          = np.zeros((N_intt, ensemble_test))
+ens_nrmse       = np.zeros((ensemble_test))
+ens_ssim        = np.zeros((ensemble_test))
+ens_evr         = np.zeros((ensemble_test))
+ens_nrmse_plume = np.zeros((ensemble_test))
+
 for j in range(ensemble_test):
 
     print('Realization    :',j+1)
@@ -876,6 +882,7 @@ for j in range(ensemble_test):
 
     # to plot results
     plot = True
+    Plotting = True
     if plot:
         n_plot = 3
         plt.rcParams["figure.figsize"] = (15,3*n_plot)
@@ -904,12 +911,74 @@ for j in range(ensemble_test):
         ens_PH[i,j] = PH[i]
         nrmse_error[i, :] = Y_err
 
+        ##### reconstructions ####
+        _, reconstructed_truth       = inverse_POD(Y_t, pca_)
+        _, reconstructed_predictions = inverse_POD(Yh_t, pca_)
+
+        # rescale
+        reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
+        reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
+
+        # metrics
+        nrmse = NRMSE(reconstructed_truth, reconstructed_predictions)
+        mse   = MSE(reconstructed_truth, reconstructed_predictions)
+        evr   = EVR_recon(reconstructed_truth, reconstructed_predictions)
+        SSIM  = compute_ssim_for_4d(reconstructed_truth, reconstructed_predictions)
+
+        if len(variables) == 4:
+            active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(reconstructed_truth, reconstructed_predictions, z)
+            accuracy = np.mean(active_array == active_array_reconstructed)
+            if np.any(mask):  # Check if plumes exist
+                masked_truth = reconstructed_truth[mask]
+                masked_pred = reconstructed_predictions[mask]
+                
+                print("Shape truth after mask:", masked_truth.shape)
+                print("Shape pred after mask:", masked_pred.shape)
+
+                # Compute NRMSE only if mask is not empty
+                nrmse_plume = NRMSE(masked_truth, masked_pred)
+            else:
+                print("Mask is empty, no plumes detected.")
+                nrmse_plume = 0  # Simply add 0 to maintain shape
+        else:
+            nrmse_plume = np.inf
+
+        print('NRMSE', nrmse)
+        print('MSE', mse)
+        print('EVR_recon', evr)
+        print('SSIM', SSIM)
+        print('NRMSE plume', nrmse_plume)
+
+        # Full path for saving the file
+        output_file = 'ESN_test_metrics_ens%i_test%i.json' % (j,i)
+
+        output_path_met = os.path.join(output_path, output_file)
+
+        metrics = {
+        "test": i,
+        "no. modes": n_components,
+        "EVR": evr,
+        "MSE": mse,
+        "NRMSE": nrmse,
+        "SSIM": SSIM,
+        "NRMSE plume": nrmse_plume,
+        "PH": PH[i],
+        }
+
+        with open(output_path_met, "w") as file:
+            json.dump(metrics, file, indent=4)
+
+        ens_nrmse[j]       += nrmse
+        ens_ssim[j]        += SSIM
+        ens_nrmse_plume[j] += nrmse_plume
+        ens_evr[j]         += evr
+
         if plot:
             #left column has the washout (open-loop) and right column the prediction (closed-loop)
             # only first n_plot test set intervals are plotted
             if i<n_plot:
                 if ensemble_test % 1 == 0:
-                
+                    
                     #### modes prediction ####
                     fig,ax =plt.subplots(len(indexes_to_plot),sharex=True, tight_layout=True)
                     xx = np.arange(U_wash[:,-2].shape[0])/N_lyap
@@ -949,40 +1018,11 @@ for j in range(ensemble_test):
                     fig.savefig(output_path+'/PH_ens%i_test%i.png' % (j,i))
                     plt.close()
 
-                    ##### reconstructions ####
-                    _, reconstructed_truth       = inverse_POD(Y_t, pca_)
-                    _, reconstructed_predictions = inverse_POD(Yh_t, pca_)
-
-                    # rescale
-                    reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
-                    reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
-
-                    # metrics
-                    nrmse = NRMSE(reconstructed_truth, reconstructed_predictions)
-                    mse   = MSE(reconstructed_truth, reconstructed_predictions)
-                    evr   = EVR_recon(reconstructed_truth, reconstructed_predictions)
-                    SSIM  = compute_ssim_for_4d(reconstructed_truth, reconstructed_predictions)
-
                     # reconstruction after scaling
                     print('reconstruction and error plot')
                     plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 2*N_lyap, xx, 'ESN_ens%i_test%i' %(j,i))
 
                     if len(variables) == 4:
-                        active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(reconstructed_truth, reconstructed_predictions, z)
-                        accuracy = np.mean(active_array == active_array_reconstructed)
-                        if np.any(mask):  # Check if plumes exist
-                            masked_truth = reconstructed_truth[mask]
-                            masked_pred = reconstructed_predictions[mask]
-                            
-                            print("Shape truth after mask:", masked_truth.shape)
-                            print("Shape pred after mask:", masked_pred.shape)
-
-                            # Compute NRMSE only if mask is not empty
-                            nrmse_plume = NRMSE(masked_truth, masked_pred)
-                        else:
-                            print("Mask is empty, no plumes detected.")
-                            nrmse_plume = 0  # Simply add 0 to maintain shape
-
                         fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
                         c1 = ax[0].contourf(xx, x, active_array[:,:, 32].T, cmap='Reds')
                         fig.colorbar(c1, ax=ax[0])
@@ -996,32 +1036,8 @@ for j in range(ensemble_test):
                         fig.savefig(output_path+f"/active_plumes_ens{j}_test{i}.png")
                         plt.close()
                     else:
-                        nrmse_plume = np.inf
+                        print('no image')
 
-                    print('NRMSE', nrmse)
-                    print('MSE', mse)
-                    print('EVR_recon', evr)
-                    print('SSIM', SSIM)
-                    print('NRMSE plume', nrmse_plume)
-
-                    # Full path for saving the file
-                    output_file = 'ESN_test_metrics_ens%i_test%i.json' % (j,i)
-
-                    output_path_met = os.path.join(output_path, output_file)
-
-                    metrics = {
-                    "test": i,
-                    "no. modes": n_components,
-                    "EVR": evr,
-                    "MSE": mse,
-                    "NRMSE": nrmse,
-                    "SSIM": SSIM,
-                    "NRMSE plume": nrmse_plume,
-                    "PH": PH[i],
-                    }
-
-                    with open(output_path_met, "w") as file:
-                        json.dump(metrics, file, indent=4)
 
         # Full path for saving the file
         output_file_all = 'ESN_test_metrics_ens%i_all.json' % j
@@ -1034,6 +1050,10 @@ for j in range(ensemble_test):
         "lower PH": np.quantile(PH, 0.75),
         "uppper PH": np.quantile(PH, 0.25),
         "median PH": np.median(PH),
+        "mean NRMSE": ens_nrmse[j]/n_plot,
+        "mean NRMSE plume": ens_nrmse_plume[j]/n_plot,
+        "mean EVR": ens_evr[j]/n_plot,
+        "mean ssim": ens_ssim[j]/n_plot,
         }
 
         with open(output_path_met_all, "w") as file:
@@ -1070,6 +1090,10 @@ metrics_ens_ALL = {
 "lower PH": np.quantile(ens_PH, 0.75),
 "uppper PH": np.quantile(ens_PH, 0.25),
 "median PH": np.median(ens_PH),
+"mean NRMSE": np.sum(ens_nrmse)/(n_plot*ensemble_test),
+"mean NRMSE plume": np.sum(ens_nrmse_plume)/(n_plot*ensemble_test),
+"mean EVR": np.sum(ens_evr)/(n_plot*ensemble_test),
+"mean ssim": np.sum(ens_ssim)/(n_plot*ensemble_test),
 }
 
 with open(output_path_met_ALL, "w") as file:

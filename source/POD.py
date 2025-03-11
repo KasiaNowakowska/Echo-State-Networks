@@ -1,12 +1,13 @@
 """
 python script for POD.
 
-Usage: lyapunov.py [--input_path=<input_path> --output_path=<output_path> --snapshots=<snapshots> ]
+Usage: lyapunov.py [--input_path=<input_path> --output_path=<output_path> --snapshots=<snapshots> --projection=<projection>]
 
 Options:
     --input_path=<input_path>          file path to use for data
     --output_path=<output_path>        file path to save images output [default: ./images]
     --snapshots=<snapshots>            number of snapshots 
+    --projection=<projection>          projection of POD [default: False]
 """
 
 import os
@@ -32,6 +33,7 @@ args = docopt(__doc__)
 input_path = args['--input_path']
 output_path = args['--output_path']
 snapshots = int(args['--snapshots'])
+projection = args['--projection']
 
 output_path = output_path+f"/snapshots{snapshots}/"
 print(output_path)
@@ -179,7 +181,7 @@ def POD(data, c,  file_str, Plotting=True):
 def inverse_POD(data_reduced, pca_):
     data_reconstructed_reshaped = pca_.inverse_transform(data_reduced)
     print('shape of data reconstructed flattened:', np.shape(data_reconstructed_reshaped))
-    data_reconstructed = data_reconstructed_reshaped.reshape(data.shape)
+    data_reconstructed = data_reconstructed_reshaped.reshape(data_reconstructed_reshaped.shape[0], len(x), len(z), len(variables))
     print('shape of data reconstructed:', np.shape(data_reconstructed))
     return data_reconstructed_reshaped, data_reconstructed 
 
@@ -262,7 +264,7 @@ def plot_reconstruction(original, reconstruction, z_value, t_value, file_str):
             ax[-1].set_xlabel('time')
             fig.savefig(output_path+name+'_snapshot_recon.png')
 
-def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, file_str):
+def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, time_vals, file_str):
     abs_error = np.abs(original-reconstruction)
     if original.ndim == 3: #len(time_vals), len(x), len(z)
 
@@ -567,7 +569,7 @@ if reduce_data_set:
     print('reduced x domain', len(x))
     print(x[0], x[-1])
 
-projection = True
+projection = projection
 if projection:
     data_proj = data_set[500:, :, :, :]
     data_set = data_set[:500, :, :, :]
@@ -615,12 +617,12 @@ c_names = ['Ra2e8_c10', 'Ra2e8_c16', 'Ra2e8_c32', 'Ra2e8_c64', 'Ra2e8_c100']
 index=0
 
 nrmse_list, evr_list, ssim_list, cumEV_list, nrmse_plume_list = [], [], [], [], []
-pnrmse_list, pevr_list, pssim_list, pnrmse_plume_list = [], [], [], [], []
+pnrmse_list, pevr_list, pssim_list, pnrmse_plume_list = [], [], [], []
 for n_modes in n_modes_list:
     data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_, cev = POD(data_scaled, n_modes, c_names[index])
     data_reconstructed = ss_inverse_transform(data_reconstructed, scaler)
     #plot_reconstruction(data_set, data_reconstructed, 32, 20, 'Ra2e7')
-    plot_reconstruction_and_error(data_set, data_reconstructed, 32, 20, c_names[index])
+    plot_reconstruction_and_error(data_set, data_reconstructed, 32, 20, time_vals, c_names[index])
     nrmse = NRMSE(data_set, data_reconstructed)
     mse   = MSE(data_set, data_reconstructed)
     evr   = EVR_recon(data_set, data_reconstructed)
@@ -652,7 +654,7 @@ for n_modes in n_modes_list:
         _, data_reconstructed_proj = inverse_POD(data_reduced_proj, pca_)
         data_reconstructed_proj     = ss_inverse_transform(data_reconstructed_proj, scaler)
 
-        plot_reconstruction_and_error(data_proj, data_reconstructed_proj, 32, 20, 'proj_'+c_names[index])
+        plot_reconstruction_and_error(data_proj, data_reconstructed_proj, 32, 20, time_vals_proj, 'proj_'+c_names[index])
         nrmse_proj = NRMSE(data_proj, data_reconstructed_proj)
         mse_proj   = MSE(data_proj, data_reconstructed_proj)
         evr_proj   = EVR_recon(data_proj, data_reconstructed_proj)
