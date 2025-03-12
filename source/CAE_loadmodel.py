@@ -1,25 +1,25 @@
 """
 python script for convolutional autoencoder.
 
-Usage: CAE.py [--input_path=<input_path> --output_path=<output_path> --model_path=<model_path> --hyperparam_file=<hyperparam_file>]
+Usage: CAE.py [--input_path=<input_path> --output_path=<output_path> --model_path=<model_path> --hyperparam_file=<hyperparam_file> --job_id=<job_id> --sweep_id=<sweep_id>]
 
 Options:
     --input_path=<input_path>            file path to use for data
     --output_path=<output_path>          file path to save images output [default: ./images]
     --model_path=<model_path>            file path to location of job 
     --hyperparam_file=<hyperparam_file>  file with hyperparmas
+    --job_id=<job_id>                    job_id
+    --sweep_id=<sweep_id>                sweep_id
 """
 
 # import packages
 import time
 
 import sys
-sys.path.append('/nobackup/mm17ktn/ENS/skesn/skesn/')
 
 import time
 
 import os
-sys.path.append(os.getcwd())
 import matplotlib
 matplotlib.use('Agg')  # Set the backend to Agg
 import matplotlib.pyplot as plt
@@ -55,7 +55,20 @@ input_path = args['--input_path']
 output_path = args['--output_path']
 model_path = args['--model_path']
 hyperparam_file = args['--hyperparam_file']
+job_id = args['--job_id']
+sweep_id = args['--sweep_id']
 
+### make output_directories ###
+if not os.path.exists(output_path):
+    os.makedirs(output_path)
+    print('made directory')
+
+output_path = output_path+f"/sweep_{sweep_id}"
+if not os.path.exists(output_path):
+    os.makedirs(output_path)
+    print('made directory')
+
+output_path = output_path+f"/job_{job_id}"
 if not os.path.exists(output_path):
     os.makedirs(output_path)
     print('made directory')
@@ -476,7 +489,7 @@ def compute_ssim_for_4d(original, decoded):
             #print(t, c)
             # Extract the 2D slice for each timestep and channel
             orig_slice = original[t, :, :, c]
-            dec_slice = decoded[t, :, :, c].numpy()
+            dec_slice = decoded[t, :, :, c]
             #print(orig_slice, dec_slice)
             
             # Compute SSIM for the current slice
@@ -615,7 +628,6 @@ del U_vv, U_tt, U_vv_scaled, U_tt_scaled
 
 # define the model
 # we do not have pooling and upsampling, instead we use stride=2
-
 #global lat_dep                 #latent space depth
 #global N_parallel                       #number of parallel CNNs for multiscale
 #global kernel_choice
@@ -744,26 +756,27 @@ test_times = time_vals[b_size*n_batches*skip+b_size*val_batches*skip:
                             b_size*n_batches*skip+b_size*val_batches*skip+b_size*test_batches*skip] 
 print(test_times[0], test_times[-1])
 
+decoded = decoded.numpy()
+
+decoded_unscaled = ss_inverse_transform(decoded, scaler)
+truth_unscaled = ss_inverse_transform(truth, scaler)
+
 #SSIM
-test_ssim = compute_ssim_for_4d(truth, decoded)
+test_ssim = compute_ssim_for_4d(truth_unscaled, decoded_unscaled)
 
 #MSE
-mse = MSE(truth, decoded.numpy())
+mse = MSE(truth_unscaled, decoded_unscaled)
 
 #NRMSE
-nrmse = NRMSE(truth, decoded.numpy())
+nrmse = NRMSE(truth_unscaled, decoded_unscaled)
 
 #EVR 
-evr = EVR_recon(truth, decoded.numpy())
+evr = EVR_recon(truth_unscaled, decoded_unscaled)
 
 print("nrmse:", nrmse)
 print("mse:", mse)
 print("test_ssim:", test_ssim)
 print("EVR:", evr)
-
-decoded = decoded.numpy()
-decoded_unscaled = ss_inverse_transform(decoded, scaler)
-truth_unscaled = ss_inverse_transform(truth, scaler)
 
 #Plume NRMSE
 if len(variables) == 4:
@@ -789,7 +802,7 @@ metrics = {
 with open(output_path_met, "w") as file:
     json.dump(metrics, file, indent=4)
 
-n       =  4
+n       =  2
 
 start   = b_size*n_batches*skip+b_size*val_batches*skip  #b_size*n_batches*skip+b_size*val_batches*skip #start after validation set
 
@@ -823,3 +836,61 @@ for i in range(n):
             ax[v].set_ylabel('x')
         fig.savefig(output_path+f"/active_plumes_{index}.png")
         plt.close()
+
+#### all data ####
+U_scaled = ss_transform(U, scaler)
+truth = U_scaled
+decoded = model(U_scaled,a,b)[1]
+
+decoded = decoded.numpy()
+decoded_unscaled = ss_inverse_transform(decoded, scaler)
+truth_unscaled = ss_inverse_transform(truth, scaler)
+
+#SSIM
+test_ssim = compute_ssim_for_4d(truth_unscaled, decoded_unscaled)
+#MSE
+mse = MSE(truth_unscaled, decoded_unscaled)
+#NRMSE
+nrmse = NRMSE(truth_unscaled, decoded_unscaled)
+#EVR 
+evr = EVR_recon(truth_unscaled, decoded_unscaled)
+
+print("nrmse:", nrmse)
+print("mse:", mse)
+print("test_ssim:", test_ssim)
+print("EVR:", evr)
+
+#Plume NRMSE
+if len(variables) == 4:
+    active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(truth_unscaled, decoded_unscaled, z)
+    print(np.shape(active_array))
+    print(np.shape(mask))
+    nrmse_plume             = NRMSE(truth_unscaled[:,:,:,:][mask], decoded_unscaled[:,:,:,:][mask])
+
+import json
+# Full path for saving the file
+output_file = "test_metrics_all_data.json"
+
+output_path_met = os.path.join(output_path, output_file)
+
+metrics = {
+"MSE": mse,
+"NRMSE": nrmse,
+"SSIM": test_ssim,
+"EVR": evr,
+"plume NRMSE": nrmse_plume,
+}
+
+with open(output_path_met, "w") as file:
+    json.dump(metrics, file, indent=4)
+
+print('shape of truth', np.shape(truth_unscaled))
+print('shape of prediction', np.shape(decoded_unscaled))
+
+n = 2
+skips = 250
+for i in range(n):
+    index = 0 + skips*i
+
+    #plot_reconstruction(truth_unscaled, decoded_unscaled, 32, index, f"/test_{index}_")
+    plot_reconstruction_and_error(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], 32, index, f"/test_all")
