@@ -1172,7 +1172,7 @@ for j in range(ensemble_test):
 
         metrics = {
         "test": i,
-        "no. modes": n_components,
+        "latent space": int(n_components),
         "EVR": evr,
         "MSE": mse,
         "NRMSE": nrmse,
