@@ -54,6 +54,7 @@ from scipy.sparse.linalg import eigs as sparse_eigs
 from skopt.plots import plot_convergence
 from skopt.learning import GaussianProcessRegressor as GPR
 from skopt.learning.gaussian_process.kernels import Matern, WhiteKernel, Product, ConstantKernel
+from scipy.io import loadmat, savemat
 import sys
 sys.stdout.reconfigure(line_buffering=True)
 
@@ -336,7 +337,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, ti
             fig.colorbar(c1, ax=ax[0])
             ax[0].set_title('true')
             c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm)
-            fig.colorbar(c1, ax=ax[1])
+            fig.colorbar(c2, ax=ax[1])
             ax[1].set_title('reconstruction')
             c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:, i].T, cmap='Reds')
             fig.colorbar(c3, ax=ax[2])
@@ -359,7 +360,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, ti
             fig.colorbar(c1, ax=ax[0])
             ax[0].set_title('true')
             c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
-            fig.colorbar(c1, ax=ax[1])
+            fig.colorbar(c2, ax=ax[1])
             ax[1].set_title('reconstruction')
             c3 = ax[2].pcolormesh(time_vals, x,  abs_error[:,:,z_value, i].T, cmap='Reds')
             fig.colorbar(c3, ax=ax[2])
@@ -544,7 +545,7 @@ variables = ['q_all', 'w_all', 'u_all', 'b_all']
 names = ['q', 'w', 'u', 'b']
 x = np.load(input_path+'/x.npy')
 z = np.load(input_path+'/z.npy')
-snapshots = 2500
+snapshots = 10000
 data_set, time_vals = load_data_set(input_path+'/data_4var_5000_30000.h5', variables, snapshots)
 print(np.shape(data_set))
 dt = time_vals[1]-time_vals[0]
@@ -839,7 +840,7 @@ tikh = np.array([1e-6,1e-9,1e-12])  # Tikhonov factor (optimize among the values
 #### hyperparamter search ####
 n_in  = 0           #Number of Initial random points
 
-spec_in     = 0.6    #range for hyperparameters (spectral radius and input scaling)
+spec_in     = 0.1    #range for hyperparameters (spectral radius and input scaling)
 spec_end    = 1.1
 in_scal_in  = np.log10(0.001)
 in_scal_end = np.log10(5.)
@@ -1102,7 +1103,7 @@ for j in range(ensemble_test):
     # to plot results
     plot = True
     if plot:
-        n_plot = 1
+        n_plot = 3
     
     
     #run different test intervals
@@ -1111,6 +1112,12 @@ for j in range(ensemble_test):
         # data for washout and target in each interval
         U_wash    = U[N_tstart - N_washout +i*N_intt : N_tstart + i*N_intt].copy()
         Y_t       = U[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt].copy() 
+
+        fig, ax =plt.subplots(4, figsize=(12,12))
+        for v in range(len(variables)):
+            C1=ax[v].contourf(time_vals[N_tstart + i*N_intt: N_tstart + i*N_intt + N_intt], x, data_set[N_tstart + i*N_intt: N_tstart + i*N_intt + N_intt, :, 32, v].T)
+            fig.colorbar(C1, ax=ax[v])
+        fig.savefig(output_path+f"/hovmoller_test{i}.png")
                 
         #washout for each interval
         Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
@@ -1182,7 +1189,7 @@ for j in range(ensemble_test):
         }
 
         with open(output_path_met, "w") as file:
-            json.dump(metrics, file, indent=4)
+            json.dump(metrics, file, indent=4, default=str)
 
         ens_nrmse[j]       += nrmse
         ens_ssim[j]        += SSIM
@@ -1340,7 +1347,5 @@ parsed_hyperparams = {
 # Save to JSON file
 with open(CAE_params, 'w') as json_file:
     json.dump(parsed_hyperparams, json_file, indent=4)
-
-print(f"Hyperparameters saved to {output_json_file}")
 
 print('script finished')
