@@ -1,12 +1,13 @@
 """
 python script for ESN.
 
-Usage: ESN.py [--input_path=<input_path> --output_path=<output_path> --hyperparam_file=<hyperparam_file>]
+Usage: ESN.py [--input_path=<input_path> --output_path=<output_path> --hyperparam_file=<hyperparam_file> --config_number=<config_number>]
 
 Options:
     --input_path=<input_path>            file path to use for data
     --output_path=<output_path>          file path to save images output [default: ./images]
     --hyperparam_file=<hyperparam_file>  hyperparameters for ESN
+    --config_number=<config_number>      config number file
 """
 
 print('load packages')
@@ -29,6 +30,7 @@ from skopt.plots import plot_convergence
 from sklearn.preprocessing import StandardScaler
 import sys
 sys.stdout.reconfigure(line_buffering=True)
+from scipy.sparse.linalg.eigen.arpack import ArpackNoConvergence  # Import the exception
 
 from docopt import docopt
 args = docopt(__doc__)
@@ -44,6 +46,12 @@ print('run functions files')
 input_path = args['--input_path']
 output_path = args['--output_path']
 hyperparam_file = args['--hyperparam_file']
+config_number= args['--config_number']
+
+if not os.path.exists(output_path):
+    os.makedirs(output_path)
+    print('made directory')
+
 
 with open(hyperparam_file, "r") as f:
     hyperparams = json.load(f)
@@ -63,6 +71,7 @@ with open(hyperparam_file, "r") as f:
     val = hyperparams["val"]
     noise = hyperparams["noise"]
     N_forward = hyperparams["N_forward"]
+    alpha0 = hyperparams["alpha0"]
 
 from sklearn.metrics import mean_squared_error
 def NRMSE(original_data, reconstructed_data):
@@ -242,7 +251,7 @@ n_in  = 0           #Number of Initial random points
 
 spec_in     = .5    #range for hyperparameters (spectral radius and input scaling)
 spec_end    = 1.2   #1
-in_scal_in  = np.log10(0.05)
+in_scal_in  = np.log10(0.1)
 in_scal_end = np.log10(5.)
 
 # In case we want to start from a grid_search, the first n_grid_x*n_grid_y points are from grid search
@@ -299,7 +308,8 @@ print(search_space)
 
 #Number of Networks in the ensemble
 ensemble = ens
-
+alpha0 = alpha0
+print('alpha=', alpha0)
 
 # Which validation strategy (implemented in Val_Functions.ipynb)
 val      = eval(val)
@@ -313,7 +323,7 @@ print('Number of folds', N_fo)
 print('how many steps forward validation interval moves', N_fw)
 print('how many LTs forward validation interval moves', N_fw//N_lyap)
 
-data_dir = '/Run_n_units{0:}_ensemble{1:}_normalisation{2:}_washout{3:}/'.format(N_units, ensemble, normalisation, washout_len)
+data_dir = '/Run_n_units{0:}_ensemble{1:}_normalisation{2:}_washout{3:}_config{4:}/'.format(N_units, ensemble, normalisation, washout_len, config_number)
 output_path = output_path+data_dir
 print(output_path)
 if not os.path.exists(output_path):
@@ -342,14 +352,16 @@ print_flag = False
 
 
 # optimize ensemble networks (to account for the random initialization of the input and state matrices)
-for i in range(ensemble):
+i = 0
+attempt = 0
 
-    print('Realization    :',i+1)
+while i < ensemble: 
+    print(f'Attempting Realization: {attempt+1} (Successful so far: {i})')
 
     k   = 0
 
     # Win and W generation
-    seed= i+1
+    seed= attempt+1
     rnd = np.random.RandomState(seed)
 
     #sparse syntax for the input and state matrices
@@ -361,8 +373,18 @@ for i in range(ensemble):
     W = csr_matrix( #on average only connectivity elements different from zero
         rnd.uniform(-1, 1, (N_units, N_units)) * (rnd.rand(N_units, N_units) < (1-sparseness)))
 
-    spectral_radius = np.abs(sparse_eigs(W, k=1, which='LM', return_eigenvectors=False))[0]
-    W = (1/spectral_radius)*W #scaled to have unitary spec radius
+    try:
+        # Compute spectral radius
+        spectral_radius = np.abs(sparse_eigs(W, k=1, which='LM', return_eigenvectors=False))[0]
+        W = (1 / spectral_radius) * W  # Scale to have unitary spectral radius
+    except ArpackNoConvergence as e:
+        print(f"Skipping realization {attempt+1} due to eigenvalue convergence error: {e}")
+        attempt += 1  # Move to the next attempt (ensure new seed)
+        continue  # Skip to the next attempt
+    except Exception as e:
+        print(f"Skipping realization {attempt+1} due to unexpected error: {e}")
+        attempt += 1  # Move to the next attempt (ensure new seed)
+        continue  # Skip to the next attempt
 
     # Bayesian Optimization
     tt       = time.time()
@@ -413,6 +435,10 @@ for i in range(ensemble):
 
     with open(output_path_hyp, "w") as file:
         json.dump(hyps, file, indent=4)
+
+    # Successfully completed, move to the next
+    i += 1
+    attempt += 1  # Always increase attempt count for new seeds
 
 ##### visualise grid search #####
 # Plot Gaussian Process reconstruction for each network in the ensemble after n_tot evaluations

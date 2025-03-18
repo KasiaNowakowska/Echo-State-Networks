@@ -23,7 +23,10 @@ def step(x_pre, u, sigma_in, rho):
     elif normalisation == 'off':
         u_augmented = np.hstack((u, bias_in))
     # reservoir update
-    x_post      = np.tanh(Win.dot(u_augmented*sigma_in) + W.dot(rho*x_pre))
+    x_post_part      = np.tanh(Win.dot(u_augmented*sigma_in) + W.dot(rho*x_pre))
+
+    x_post           = (1-alpha0) * x_pre + alpha0 * x_post_part
+
     # output bias added
     x_augmented = np.concatenate((x_post, bias_out))
 
