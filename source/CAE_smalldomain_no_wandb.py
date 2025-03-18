@@ -93,16 +93,41 @@ names = ['q', 'w', 'u', 'b']
 num_variables = 4
 x = np.load(input_path+'/x.npy')
 z = np.load(input_path+'/z.npy')
-snapshots =2000
+snapshots =10000
 data_set, time_vals = load_data_set(input_path+'/data_4var_5000_30000.h5', variables, snapshots)
 print('shape of dataset', np.shape(data_set))
 
-data_set = data_set[:, 32:96, :, :]
-x = x[32:96]
-print('reduced domain shape', np.shape(data_set))
-print('reduced x domain', np.shape(x))
-print('reduced x domain', len(x))
-print(x[0], x[-1])
+# data_set = data_set[:, 32:96, :, :]
+# x = x[32:96]
+# print('reduced domain shape', np.shape(data_set))
+# print('reduced x domain', np.shape(x))
+# print('reduced x domain', len(x))
+# print(x[0], x[-1])
+
+split_domain = True
+if split_domain:
+    n=256
+    data_split1 = data_set[:, :n//4, :, :]
+    data_split2 = data_set[:, n//4:2*n//4, :, :]
+    data_split3 = data_set[:, 2*n//4:3*n//4, :, :]
+    data_split4 = data_set[:, 3*n//4:, :, :]
+
+    data_interleaved = np.stack([data_split1, data_split2, data_split3, data_split4], axis=1)  
+    data_interleaved = data_interleaved.reshape(n * 4, h//4, w, c)  # Reshape to (40, 5, 5, 4)
+
+    print(data_interleaved.shape)  # Expected output: (40, 5, 5, 4)
+
+    # Reverse the reshape: (40, 5, 5, 4) → (10, 4, 5, 5, 4)
+    data_reconstructed = data_interleaved.reshape(n, 4, h//4, w, c)
+
+    # Reverse the stacking to reconstruct the original order
+    data_reconstructed = np.concatenate(np.split(data_reconstructed, 4, axis=1), axis=2).squeeze(1)
+
+    print("Reconstructed shape:", data_reconstructed.shape)  # Expected: (10, 20, 5, 4)
+
+    # Check if reconstruction is successful
+    assert np.allclose(data_set, data_reconstructed), "Reconstruction failed! ❌"
+    print("Reconstruction successful! 🎉")
 
 fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
 c1 = ax.pcolormesh(time_vals, x, data_set[:,:,32,0].T)

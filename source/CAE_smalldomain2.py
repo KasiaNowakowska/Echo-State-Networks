@@ -105,7 +105,7 @@ snapshots = 10000
 data_set, time_vals = load_data_set(input_path+'/data_4var_5000_30000.h5', variables, snapshots)
 print('shape of dataset', np.shape(data_set))
 
-reduce_domain = True
+reduce_domain = False
 
 if reduce_domain:
     data_set = data_set[:, 32:96, :, :]
@@ -130,7 +130,7 @@ with open(hyperparam_config, "r") as f:
     sweep_configuration = json.load(f)
 
 if sweep_id == 'None':
-    sweep_id = wandb.sweep(sweep=sweep_configuration, project="Ra2e8_new")
+    sweep_id = wandb.sweep(sweep=sweep_configuration, project="Ra2e8_new_full")
     print('new sweep with sweep id', sweep_id)
 else:
     print('restarting sweep with sweep_id', sweep_id)
@@ -1120,4 +1120,4 @@ def main():
 
     print('finished job')
 
-wandb.agent(sweep_id=sweep_id, function=main, entity="mm17ktn-university-of-leeds", project="Ra2e8_new")
+wandb.agent(sweep_id=sweep_id, function=main, entity="mm17ktn-university-of-leeds", project="Ra2e8_new_full")
