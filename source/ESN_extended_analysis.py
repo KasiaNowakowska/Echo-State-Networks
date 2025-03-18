@@ -143,6 +143,25 @@ def pearson_coef(original_data, reconstructed_data):
     
     return correlations
 
+def onset_truth(Y_t, PT, N_lyap, threshold_e):
+    result_truth = np.any(Y_t[PT:PT+N_lyap,0] > threshold_e)
+    return result_truth
+
+def onset_prediction(Yh_t, PT, N_lyap, threshold_e):
+    result_prediction = np.any(Yh_t[PT:PT+N_lyap,0] > threshold_e)
+    return result_prediction
+
+def onset_ensemble(true_onset, pred_onset):
+    if true_onset == True and pred_onset == True:
+        flag = 'TP'
+    elif true_onset == True and pred_onset == False:
+        flag = 'FN'
+    elif true_onset == False and pred_onset == True:
+        flag = 'FP'
+    elif true_onset == False and pred_onset == False:
+        flag = 'TN'
+    return flag
+
 def ss_transform(data, scaler):
     if data.ndim == 4: #len(time_vals), len(x), len(z), len(var)
         data_reshape = data.reshape(-1, data.shape[-1])
@@ -275,7 +294,7 @@ print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
 testing = True
-statistics = True
+statistics = False
 
 if testing:
     ##### quick test #####
@@ -290,20 +309,11 @@ if testing:
     print('N_intt:', N_intt)
     print('N_washout:', N_washout)
 
-    # #prediction horizon normalization factor and threshold
-    sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.05
-
-    ensemble_test = ensemble_test
-
-    ens_pred = np.zeros((N_intt, dim, N_test, ensemble_test))
-    true_data = np.zeros((N_intt, dim, N_test))
-    ens_PH          = np.zeros((N_test, ensemble_test))
-    ens_nrmse_global= np.zeros((ensemble_test))
-    ens_dtw         = np.zeros((ensemble_test))
-    ens_pearson     = np.zeros((ensemble_test))
-    Mean            = np.zeros((ensemble_test))
-    MSE_vals        = np.zeros((ensemble_test))
+    # Prediction Times
+    threshold_KE = 0.0001
+    PI           = 1*N_lyap
+    PTs          = [0,1,2] 
+    flag_pred = np.empty((len(PTs), N_test, ensemble_test), dtype=object)
 
     for j in range(ensemble_test):
 
@@ -337,7 +347,6 @@ if testing:
             # data for washout and target in each interval
             U_wash    = U[N_tstart - N_washout +i*N_gap: N_tstart + i*N_gap].copy()
             Y_t       = U[N_tstart + i*N_gap           : N_tstart + i*N_gap + N_intt].copy()
-            true_data[:,:,i] = Y_t
 
             #washout for each interval
             Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
@@ -346,22 +355,14 @@ if testing:
             # Prediction Horizon
             Yh_t        = closed_loop(N_intt-1, Xa1[-1], Wout, sigma_in, rho)[0]
             print(np.shape(Yh_t))
-            ens_pred[:,:,i,j] = Yh_t
-            Y_err       = np.sqrt(np.mean((Y_t-Yh_t)**2,axis=1))/sigma_ph
-            PH[i]       = np.argmax(Y_err>threshold_ph)/N_lyap
-            if PH[i] == 0 and Y_err[0]<threshold_ph: PH[i] = N_intt/N_lyap #(in case PH is larger than interval)
-            ens_PH[i,j] = PH[i]
-            Mean[j]     += np.log10(np.mean((Y_t-Yh_t)**2)) 
-            nrmse_global = NRMSE(Y_t, Yh_t)
-            DTW_val      = DTW(Y_t, Yh_t)
-            print('DTW', DTW_val)
-            pc           = pearson_coef(Y_t, Yh_t)
-            mean_pc      = np.mean(pc)
 
-
-            ens_nrmse_global[j] += nrmse_global
-            ens_dtw[j]          += DTW_val
-            ens_pearson[j]      += mean_pc
+            for p in range(len(PTs)):
+                PT = int(PTs[p]*N_lyap)
+                print('Prediction Time is from', PT, 'LTs for an interval of ', PI, 'LTs')
+                true_onset = onset_truth(Y_t, PT, N_lyap, threshold_KE)
+                pred_onset = onset_prediction(Yh_t, PT, N_lyap, threshold_KE)
+                flag = onset_ensemble(true_onset, pred_onset)
+                flag_pred[p,i,j] = flag
 
             if plot:
                 #left column has the washout (open-loop) and right column the prediction (closed-loop)
@@ -369,50 +370,8 @@ if testing:
                 if i<n_plot:
                     fig,ax =plt.subplots(2,sharex=True)
                     xx = np.arange(U_wash[:,-2].shape[0])/N_lyap
-                    for v in range(dim):
-                        ax[v].plot(xx,U_wash[:,v], color='tab:blue', label='True')
-                        ax[v].plot(xx,Uh_wash[:-1,v], color='tab:orange', label='ESN')
-                        ax[v].grid()
-                    #ax[1].set_ylim(Y_t.min()-.1, Y_t.max()+.1)
-                    ax[1].set_xlabel('Time[Lyapunov Times]')
-                    ax[0].set_ylabel('KE')
-                    ax[1].set_ylabel('q')
-                    if v==0:
-                        ax[v].legend(ncol=2)
-                    fig.savefig(output_path + '/washout_ens{:02d}_test{:02d}.png'.format(j, i))
-                    plt.close()
 
-                    fig,ax =plt.subplots(2,sharex=True)
-                    xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                    for v in range(dim):
-                        ax[v].plot(xx,Y_t[:,v], color='tab:blue', label='True')
-                        ax[v].plot(xx,Yh_t[:,v], color='tab:orange', label='ESN')
-                        ax[v].grid()
-                    #ax[1].set_ylim(Y_t.min()-.1, Y_t.max()+.1)
-                    ax[1].set_xlabel('Time [Lyapunov Times]')
-                    ax[0].set_ylabel('KE')
-                    ax[1].set_ylabel('q')
-                    if v==0:
-                        ax[v].legend(ncol=2)
-                    fig.savefig(output_path + '/prediction_ens{:02d}_test{:02d}.png'.format(j, i))
-                    plt.close()
 
-                    fig,ax =plt.subplots(1,sharex=True)
-                    xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                    ax.scatter(Y_t[:,1],Y_t[:,0], color='tab:blue', label='True', marker = '.')
-                    ax.scatter(Yh_t[:,1],Yh_t[:,0], color='tab:orange', label='ESN', marker='x')
-                    ax.grid()
-                    #ax[1].set_ylim(Y_t.min()-.1, Y_t.max()+.1)
-                    ax.set_ylabel('KE')
-                    ax.set_xlabel('q')
-                    ax.legend(ncol=2)
-                    fig.savefig(output_path + '/phasespace_ens{:02d}_test{:02d}.png'.format(j, i))
-                    plt.close()
-
-        # Percentiles of the prediction horizon
-        print('PH quantiles [Lyapunov Times]:',
-            np.quantile(ens_PH[i,:],.75), np.median(ens_PH[i,:]), np.quantile(ens_PH[i,:],.25))
-        print('')
 
     # Full path for saving the file
     output_file_ALL = 'ESN_test_metrics_all.json' 
@@ -433,212 +392,3 @@ if testing:
 
     with open(output_path_met_ALL, "w") as file:
         json.dump(metrics_ens_ALL, file, indent=4)
-
-    for i in range(N_test):
-        fig, ax =plt.subplots(2, figsize=(12,6), sharex=True)
-        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-        mean_ens = np.mean(ens_pred[:,:,i,:], axis=-1)
-        median_ens = np.percentile(ens_pred[:,:,i,:], 50, axis=-1)
-        lower = np.percentile(ens_pred[:,:,i,:], 5, axis=-1)
-        upper = np.percentile(ens_pred[:,:,i,:], 95, axis=-1)
-        print('shape of mean:', np.shape(mean_ens))
-        print('shape of truth:', np.shape(true_data[:,v,i]))
-        for v in range(2):
-            ax[v].plot(xx, true_data[:,v,i], color='tab:blue', label='truth')
-            ax[v].plot(xx, median_ens[:,v], color='tab:orange', label='ESN median prediction')
-            ax[v].fill_between(xx, lower[:,v], upper[:,v], color='tab:orange', alpha=0.3, label='ESN 90% confidence interval')
-            ax[v].grid()
-            ax[v].legend()
-        ax[1].set_xlabel('Lyapunov Time')
-        ax[0].set_ylabel('KE')
-        ax[1].set_ylabel('q')
-        fig.savefig(output_path+'/ens_pred_median_test%i.png' % i)
-        plt.close()
-
-    avg_PH = np.mean(ens_PH, axis=0)
-    np.save(output_path+'/avg_PH.npy', avg_PH)
-    fig, ax =plt.subplots(1, figsize=(3,6), constrained_layout=True)
-    #np.save(output_path+'/avg_PH{:.2f}.npy'.format(element), avg_PH[:,index])
-    # Create a violin plot
-    ax.violinplot(ens_PH[:,:].flatten(), showmeans=False, showmedians=True)
-    ax.set_ylabel('PH')
-    fig.savefig(output_path+'/violin_plot_flatten_test_{:.1f}.png'.format(N_test))
-
-
-if statistics:
-    ##### statistics  #####
-    print('STATISTICS')
-    output_path = output_path + '/statistics/'
-    if not os.path.exists(output_path):
-        os.makedirs(output_path)
-        print('made directory')
-
-    N_test   = 35                    #number of intervals in the test set
-    N_tstart = int(N_washout)   #where the first test interval starts
-    N_intt   = 30*N_lyap             #length of each test set interval
-    N_washout = int(N_washout)
-    N_gap = int(0.5*N_lyap)
-
-    print('N_tstart:', N_tstart)
-    print('N_intt:', N_intt)
-    print('N_washout:', N_washout)
-
-    # #prediction horizon normalization factor and threshold
-    sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.05
-
-    ensemble_test = ensemble_test
-
-    ens_pred = np.zeros((N_intt, dim, N_test, ensemble_test))
-    true_data = np.zeros((N_intt, dim, N_test))
-    ens_PH          = np.zeros((N_test, ensemble_test))
-    ens_nrmse_global= np.zeros((ensemble_test))
-
-    for j in range(ensemble_test):
-
-        print('Realization    :',j+1)
-
-        #load matrices and hyperparameters
-        Wout     = Woutt[j].copy()
-        Win      = Winn[j] #csr_matrix(Winn[j])
-        W        = Ws[j]   #csr_matrix(Ws[j])
-        rho      = opt_hyp[j,0].copy()
-        sigma_in = opt_hyp[j,1].copy()
-        print('Hyperparameters:',rho, sigma_in)
-
-        # to store prediction horizon in the test set
-        PH             = np.zeros(N_test)
-        nrmse_error    = np.zeros((N_test, N_intt))
-
-        # to plot results
-        plot = True
-        Plotting = True
-        if plot:
-            n_plot = 3
-            plt.rcParams["figure.figsize"] = (15,3*n_plot)
-            plt.figure()
-            plt.tight_layout()
-
-        #run different test intervals
-        for i in range(N_test):
-            print('test:', i)
-            print('start index:', N_tstart + i*N_gap)
-            # data for washout and target in each interval
-            U_wash    = U[N_tstart - N_washout +i*N_gap: N_tstart + i*N_gap].copy()
-            Y_t       = U[N_tstart + i*N_gap           : N_tstart + i*N_gap + N_intt].copy()
-            true_data[:,:,i] = Y_t
-
-            #washout for each interval
-            Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
-            Uh_wash = np.dot(Xa1, Wout)
-
-            # Prediction Horizon
-            Yh_t        = closed_loop(N_intt-1, Xa1[-1], Wout, sigma_in, rho)[0]
-            print(np.shape(Yh_t))
-            ens_pred[:,:,i,j] = Yh_t
-            Y_err        = np.sqrt(np.mean((Y_t-Yh_t)**2,axis=1))/sigma_ph
-            PH[i]        = np.argmax(Y_err>threshold_ph)/N_lyap
-            if PH[i] == 0 and Y_err[0]<threshold_ph: PH[i] = N_intt/N_lyap #(in case PH is larger than interval)
-            ens_PH[i,j]  = PH[i]
-            nrmse_global = NRMSE(Y_t, Yh_t)
-            ens_nrmse_global[j] += nrmse_global     
-            
-            if plot:
-                #left column has the washout (open-loop) and right column the prediction (closed-loop)
-                # only first n_plot test set intervals are plotted
-                if i<n_plot:
-                    fig,ax =plt.subplots(2,sharex=True)
-                    xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                    for v in range(dim):
-                        ax[v].plot(xx,Y_t[:,v], color='tab:blue', label='True')
-                        ax[v].plot(xx,Yh_t[:,v], color='tab:orange', label='ESN')
-                        ax[v].grid()
-                    #ax[1].set_ylim(Y_t.min()-.1, Y_t.max()+.1)
-                    ax[1].set_xlabel('Time [Lyapunov Times]')
-                    ax[0].set_ylabel('KE')
-                    ax[1].set_ylabel('q')
-                    if v==0:
-                        ax[v].legend(ncol=2)
-                    fig.savefig(output_path + '/prediction_ens{:02d}_test{:02d}.png'.format(j, i))
-                    plt.close()
-
-                    fig,ax =plt.subplots(1,sharex=True)
-                    xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                    ax.scatter(Y_t[:,1],Y_t[:,0], color='tab:blue', label='True', marker = '.')
-                    ax.scatter(Yh_t[:,1],Yh_t[:,0], color='tab:orange', label='ESN', marker='x')
-                    ax.grid()
-                    #ax[1].set_ylim(Y_t.min()-.1, Y_t.max()+.1)
-                    ax.set_ylabel('KE')
-                    ax.set_xlabel('q')
-                    ax.legend(ncol=2)
-                    fig.savefig(output_path + '/phasespace_ens{:02d}_test{:02d}.png'.format(j, i))
-                    plt.close()
-
-        # Percentiles of the prediction horizon
-        print('PH quantiles [Lyapunov Times]:',
-            np.quantile(ens_PH[i,:],.75), np.median(ens_PH[i,:]), np.quantile(ens_PH[i,:],.25))
-        print('')
-    
-    # Full path for saving the file
-    output_file_ALL = 'ESN_test_metrics_all.json' 
-
-    output_path_met_ALL = os.path.join(output_path, output_file_ALL)
-
-    metrics_ens_ALL = {
-    "threshold PH": threshold_ph,
-    "mean PH": np.mean(ens_PH),
-    "lower PH": np.round(np.quantile(ens_PH, 0.75), 5),
-    "uppper PH": np.round(np.quantile(ens_PH, 0.25),5),
-    "median PH": np.round(np.median(ens_PH),5),
-    "mean nrmse global": np.sum(ens_nrmse_global)/(N_test*ensemble_test),
-    }
-
-    with open(output_path_met_ALL, "w") as file:
-        json.dump(metrics_ens_ALL, file, indent=4)
-
-    from scipy.stats import gaussian_kde
-    for j in range(ensemble_test):
-        fig, ax =plt.subplots(1,2, figsize=(12,6))
-        for v in range(2):
-            ### pred ###
-            ens_pred_flat = ens_pred[:,v,:,j].flatten()
-            kde = gaussian_kde(ens_pred_flat)
-            var_vals = np.linspace(min(ens_pred_flat), max(ens_pred_flat), 1000)  # X range
-            pdf_vals = kde(var_vals)
-
-            ### true ###
-            true_flat = true_data[:,v,:].flatten()
-            kde_true = gaussian_kde(true_flat)
-            var_vals_true = np.linspace(min(true_flat), max(true_flat), 1000)  # X range
-            pdf_vals_true = kde_true(var_vals_true)
-
-            ax[v].plot(var_vals, pdf_vals, label="prediction")
-            ax[v].plot(var_vals_true, pdf_vals_true, label="true")
-            ax[v].grid()
-            ax[v].legend()
-            ax[v].set_ylabel(f"Density")
-            ax[v].set_xlabel(f"Value of {global_var[v]}")
-        fig.savefig(output_path+f"/pdfs_{j}.png")
-
-
-    fig, ax =plt.subplots(1,2, figsize=(12,6))
-    for v in range(2):
-        ### pred ###
-        ens_pred_flat = ens_pred[:,v,:,:].flatten()
-        kde = gaussian_kde(ens_pred_flat)
-        var_vals = np.linspace(min(ens_pred_flat), max(ens_pred_flat), 1000)  # X range
-        pdf_vals = kde(var_vals)
-
-        ### true ###
-        true_flat = true_data[:,v,:].flatten()
-        kde_true = gaussian_kde(true_flat)
-        var_vals_true = np.linspace(min(true_flat), max(true_flat), 1000)  # X range
-        pdf_vals_true = kde_true(var_vals_true)
-
-        ax[v].plot(var_vals, pdf_vals, label="prediction")
-        ax[v].plot(var_vals_true, pdf_vals_true, label="true")
-        ax[v].grid()
-        ax[v].legend()
-        ax[v].set_ylabel(f"Density")
-        ax[v].set_xlabel(f"Value of {global_var[v]}")
-    fig.savefig(output_path+f"/pdfs_all.png")
