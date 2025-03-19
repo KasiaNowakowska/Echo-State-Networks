@@ -281,7 +281,7 @@ if testing:
     ##### quick test #####
     print('TESTING')
     N_test   = number_of_tests                    #number of intervals in the test set
-    N_tstart = int(N_washout)   #where the first test interval starts
+    N_tstart = int(N_washout+N_train)   #where the first test interval starts
     N_intt   = test_len*N_lyap             #length of each test set interval
     N_washout = int(N_washout)
     N_gap = int(0.5*N_lyap)
@@ -294,7 +294,7 @@ if testing:
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
     threshold_ph = 0.05
 
-    ensemble_test = ensemble_test
+    ensemble_test = ens
 
     ens_pred = np.zeros((N_intt, dim, N_test, ensemble_test))
     true_data = np.zeros((N_intt, dim, N_test))
@@ -487,7 +487,7 @@ if statistics:
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
     threshold_ph = 0.05
 
-    ensemble_test = ensemble_test
+    ensemble_test = ens
 
     ens_pred = np.zeros((N_intt, dim, N_test, ensemble_test))
     true_data = np.zeros((N_intt, dim, N_test))

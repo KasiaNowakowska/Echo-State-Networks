@@ -53,7 +53,7 @@ number_of_tests = int(args['--number_of_tests'])
 
 model_path = output_path
 
-output_path = output_path + '/further_analysis/'
+output_path = output_path + '/further_analysis/extended/'
 if not os.path.exists(output_path):
     os.makedirs(output_path)
     print('made directory')
@@ -300,10 +300,12 @@ if testing:
     ##### quick test #####
     print('TESTING')
     N_test   = number_of_tests                    #number of intervals in the test set
-    N_tstart = int(N_washout)   #where the first test interval starts
+    N_tstart = int(N_washout+N_train)   #where the first test interval starts
     N_intt   = test_len*N_lyap             #length of each test set interval
     N_washout = int(N_washout)
     N_gap = int(0.5*N_lyap)
+
+    ensemble_test = ens
 
     print('N_tstart:', N_tstart)
     print('N_intt:', N_intt)
@@ -311,8 +313,8 @@ if testing:
 
     # Prediction Times
     threshold_KE = 0.0001
-    PI           = 1*N_lyap
-    PTs          = [0,1,2] 
+    PI           = int(0.5*N_lyap)
+    PTs          = [0,0.5,1,1.5,2] 
     flag_pred = np.empty((len(PTs), N_test, ensemble_test), dtype=object)
 
     for j in range(ensemble_test):
@@ -335,7 +337,7 @@ if testing:
         plot = True
         Plotting = True
         if plot:
-            n_plot = 3
+            n_plot = 2
             plt.rcParams["figure.figsize"] = (15,3*n_plot)
             plt.figure()
             plt.tight_layout()
@@ -358,37 +360,81 @@ if testing:
 
             for p in range(len(PTs)):
                 PT = int(PTs[p]*N_lyap)
-                print('Prediction Time is from', PT, 'LTs for an interval of ', PI, 'LTs')
+                print('Prediction Time is from', PT//N_lyap, 'LTs for an interval of ', PI//N_lyap, 'LTs')
                 true_onset = onset_truth(Y_t, PT, N_lyap, threshold_KE)
                 pred_onset = onset_prediction(Yh_t, PT, N_lyap, threshold_KE)
                 flag = onset_ensemble(true_onset, pred_onset)
                 flag_pred[p,i,j] = flag
 
             if plot:
-                #left column has the washout (open-loop) and right column the prediction (closed-loop)
-                # only first n_plot test set intervals are plotted
-                if i<n_plot:
-                    fig,ax =plt.subplots(2,sharex=True)
-                    xx = np.arange(U_wash[:,-2].shape[0])/N_lyap
+                print('plotting')
+                count=0
+                if j == 0:
+                    for l in PTs:
+                        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
+                        fig,ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
+                        ax.plot(xx, Y_t, color='tab:blue')
+                        ax.plot(xx, Yh_t, color='tab:orange')
+                        #ax.axhline(y=0.00010, linestyle='--', color='tab:red')
+                        #ax.fill_between((l,l+(PI/N_lyap)), y1=0, y2=0.0003, alpha=0.2, color='tab:green')
+                        ax.set_ylabel('$\overline{KE}$')
+                        ax.set_xlabel('LT')
+                        ax.grid()
+                        ax.text(l+(PI/(2*N_lyap)), 0.00025, flag_pred[count, i, j], fontsize=12, bbox=dict(facecolor='white', alpha=0.5))
+                        fig.savefig(output_path+'/PTs%i.png' %count)
 
+                        count+=1
 
+    TP_mask = flag_pred == 'TP'
+    FP_mask = flag_pred == 'FP'
+    FN_mask = flag_pred == 'FN'
+    TN_mask = flag_pred == 'TN'
 
-    # Full path for saving the file
-    output_file_ALL = 'ESN_test_metrics_all.json' 
+    TP_list = np.sum(TP_mask, axis=1)
+    FP_list = np.sum(FP_mask, axis=1)
+    FN_list = np.sum(FN_mask, axis=1)
+    TN_list = np.sum(TN_mask, axis=1)
 
-    output_path_met_ALL = os.path.join(output_path, output_file_ALL)
+    # Compute precision, recall, and F1-score safely
+    P = np.divide(TP_list, TP_list + FP_list, where=(TP_list + FP_list) != 0)
+    R = np.divide(TP_list, TP_list + FN_list, where=(TP_list + FN_list) != 0)
+    F = np.divide(2 * P * R, P + R, where=(P + R) != 0)
 
-    metrics_ens_ALL = {
-    "threshold PH": threshold_ph,
-    "mean PH": np.mean(ens_PH),
-    "lower PH": np.round(np.quantile(ens_PH, 0.75), 5),
-    "uppper PH": np.round(np.quantile(ens_PH, 0.25),5),
-    "median PH": np.round(np.median(ens_PH),5),
-    "mean nrmse global": np.sum(ens_nrmse_global)/(N_test*ensemble_test),
-    "Pearson Coeff": np.sum(ens_pearson)/(N_test*ensemble_test),
-    "DTW": np.sum(ens_dtw)/(N_test*ensemble_test),
-    "mean MSE": np.sum(Mean)/(N_test*ensemble_test),
-    }
+    print(np.shape(P))
 
-    with open(output_path_met_ALL, "w") as file:
-        json.dump(metrics_ens_ALL, file, indent=4)
+    # Handle cases where P or R is zero (avoid NaNs)
+    F[np.isnan(F)] = 0
+
+    P_median = np.median(P, axis=1)
+    R_median = np.median(R, axis=1)
+    F_median = np.median(F, axis=1)
+
+    # Compute 25th and 75th percentiles for error bars
+    P_25, P_75 = np.percentile(P, [25, 75], axis=1)
+    R_25, R_75 = np.percentile(R, [25, 75], axis=1)
+    F_25, F_75 = np.percentile(F, [25, 75], axis=1)
+
+    # Compute the error values (distance from median)
+    P_err_lower = P_median - P_25
+    P_err_upper = P_75 - P_median
+    R_err_lower = R_median - R_25
+    R_err_upper = R_75 - R_median
+    F_err_lower = F_median - F_25
+    F_err_upper = F_75 - F_median
+
+    print(P, P_median, P_25, P_75)
+
+    fig, ax = plt.subplots(1, 3, figsize=(12,3), constrained_layout=True)
+    ax[0].errorbar(PTs, P_median, yerr=[P_err_lower, P_err_upper], fmt='o--', capsize=5, capthick=2, elinewidth=1.5)
+    ax[1].errorbar(PTs, R_median, yerr=[R_err_lower, R_err_upper], fmt='o--', capsize=5, capthick=2, elinewidth=1.5)
+    ax[2].errorbar(PTs, F_median, yerr=[F_err_lower, F_err_upper], fmt='o--', capsize=5, capthick=2, elinewidth=1.5)
+
+    for v in range(3):
+        ax[v].set_xlabel('PT')
+        ax[v].grid()
+        ax[v].set_ylim(0.5,1.05)
+    ax[0].set_ylabel('Precision')
+    ax[1].set_ylabel('Recall')
+    ax[2].set_ylabel('F1')
+
+    fig.savefig(output_path+'/FPR_PI%i.png' % PI)
