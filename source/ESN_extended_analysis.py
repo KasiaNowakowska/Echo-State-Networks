@@ -312,9 +312,9 @@ if testing:
     print('N_washout:', N_washout)
 
     # Prediction Times
-    threshold_KE = 0.0001
+    threshold_KE = 0.00015
     PI           = int(0.5*N_lyap)
-    PTs          = [0,0.5,1,1.5,2] 
+    PTs          = [0,0.5,1,1.5,2,2.5] 
     flag_pred = np.empty((len(PTs), N_test, ensemble_test), dtype=object)
 
     for j in range(ensemble_test):
@@ -360,30 +360,43 @@ if testing:
 
             for p in range(len(PTs)):
                 PT = int(PTs[p]*N_lyap)
-                print('Prediction Time is from', PT//N_lyap, 'LTs for an interval of ', PI//N_lyap, 'LTs')
-                true_onset = onset_truth(Y_t, PT, N_lyap, threshold_KE)
-                pred_onset = onset_prediction(Yh_t, PT, N_lyap, threshold_KE)
+                print('PT is', PT, 'to', PT+N_lyap)
+                print('Prediction Time is from', PT/N_lyap, 'LTs for an interval of ', PI/N_lyap, 'LTs')
+                true_onset = onset_truth(Y_t, PT, PI, threshold_KE)
+                pred_onset = onset_prediction(Yh_t, PT, PI, threshold_KE)
                 flag = onset_ensemble(true_onset, pred_onset)
                 flag_pred[p,i,j] = flag
-
-            if plot:
-                print('plotting')
-                count=0
-                if j == 0:
-                    for l in PTs:
+                if i==0:
+                    if j==0:
+                        print(true_onset, pred_onset, flag)
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
                         fig,ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
-                        ax.plot(xx, Y_t, color='tab:blue')
-                        ax.plot(xx, Yh_t, color='tab:orange')
-                        #ax.axhline(y=0.00010, linestyle='--', color='tab:red')
-                        #ax.fill_between((l,l+(PI/N_lyap)), y1=0, y2=0.0003, alpha=0.2, color='tab:green')
+                        ax.plot(xx, Y_t[:,0], color='tab:blue', label='truth')
+                        ax.plot(xx, Yh_t[:,0], color='tab:orange', label='prediction')
                         ax.set_ylabel('$\overline{KE}$')
                         ax.set_xlabel('LT')
                         ax.grid()
-                        ax.text(l+(PI/(2*N_lyap)), 0.00025, flag_pred[count, i, j], fontsize=12, bbox=dict(facecolor='white', alpha=0.5))
-                        fig.savefig(output_path+'/PTs%i.png' %count)
+                        ax.legend()
+                        fig.savefig(output_path+'/plot%i.png')
 
-                        count+=1
+            if plot:
+                if j == 0:
+                    if i == 0:
+                        print(f"plotting test{i} ensemble{j}")
+                        for p in range(len(PTs)):
+                            PT = int(PTs[p]*N_lyap)
+                            xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
+                            fig,ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
+                            ax.plot(xx, Y_t[:,0], color='tab:blue', label='truth')
+                            ax.plot(xx, Yh_t[:,0], color='tab:orange', label='prediciton')
+                            ax.axhline(y=threshold_KE, linestyle='--', color='tab:red', label='threshold')
+                            ax.fill_between((PTs[p],PTs[p]+(PI/N_lyap)), y1=0, y2=0.0003, alpha=0.2, color='tab:green', label='prediction interval')
+                            ax.set_ylabel('$\overline{KE}$')
+                            ax.set_xlabel('LT')
+                            ax.grid()
+                            ax.legend()
+                            ax.text(PTs[p]+(PI/(2*N_lyap)), 0.00025, flag_pred[p, i, j], fontsize=12, bbox=dict(facecolor='white', alpha=0.5))
+                            fig.savefig(output_path+'/PTs%i.png' % p)
 
     TP_mask = flag_pred == 'TP'
     FP_mask = flag_pred == 'FP'
@@ -432,9 +445,9 @@ if testing:
     for v in range(3):
         ax[v].set_xlabel('PT')
         ax[v].grid()
-        ax[v].set_ylim(0.5,1.05)
+        ax[v].set_ylim(0,1.05)
     ax[0].set_ylabel('Precision')
     ax[1].set_ylabel('Recall')
     ax[2].set_ylabel('F1')
 
-    fig.savefig(output_path+'/FPR_PI%i.png' % PI)
+    fig.savefig(output_path+f"/FPR_PI{PI}_threshold{threshold_KE}.png")

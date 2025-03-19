@@ -406,6 +406,8 @@ if testing:
                     ax.set_ylabel('KE')
                     ax.set_xlabel('q')
                     ax.legend(ncol=2)
+                    ax.set_xlim(0.265, 0.300)
+                    ax.set_ylim(-0.00005, 0.0003)
                     fig.savefig(output_path + '/phasespace_ens{:02d}_test{:02d}.png'.format(j, i))
                     plt.close()
 
