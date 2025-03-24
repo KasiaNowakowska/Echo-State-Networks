@@ -131,7 +131,7 @@ def RVC_Noise_PH(x):
     Wout = train_n(U_washout, U_tv, Y_tv, tikh, sigma_in, rho)[0]
 
     sigma_ph     = np.sqrt(np.mean(np.var(U_tv,axis=1)))
-    threshold_ph = 0.2
+    threshold_ph = 0.05
 
     #Different Folds in the validation set
     t1   = time.time()
@@ -152,7 +152,7 @@ def RVC_Noise_PH(x):
             Y_err       = np.sqrt(np.mean((Y_val-Yh_val)**2, axis=1))/sigma_ph
             PH_val      = np.argmax(Y_err>threshold_ph)/N_lyap
             if PH_val == 0 and PH_val<threshold_ph: PH_val = N_val/N_lyap #(in case PH is larger than interval)
-            PH[j]      += PH_val
+            PH[j]      += -PH_val
 
                             
     if k==0: print('closed-loop time:', time.time() - t1)
