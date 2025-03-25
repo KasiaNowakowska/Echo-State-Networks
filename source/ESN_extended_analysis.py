@@ -303,7 +303,7 @@ if testing:
     N_tstart = int(N_washout+N_train)   #where the first test interval starts
     N_intt   = test_len*N_lyap             #length of each test set interval
     N_washout = int(N_washout)
-    N_gap = int(0.5*N_lyap)
+    N_gap = int(1*N_lyap)
 
     ensemble_test = ens
 

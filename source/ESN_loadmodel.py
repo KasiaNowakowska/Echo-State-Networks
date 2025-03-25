@@ -183,9 +183,9 @@ def ss_inverse_transform(data, scaler):
 
 
 #### Load Data ####
-q = np.load(input_path + 'q5000_33500.npy')
-ke = np.load(input_path + 'KE5000_33500.npy')
-total_time = np.load(input_path + 'total_time5000_33500.npy')
+q = np.load(input_path + 'q5000_40000.npy')
+ke = np.load(input_path + 'KE5000_40000.npy')
+total_time = np.load(input_path + 'total_time5000_40000.npy')
 global_var = ['KE', 'q']
 
 # Reshape the arrays into column vectors
@@ -274,8 +274,8 @@ print('norm:', norm)
 print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
-testing = False
-statistics = True
+testing = True
+statistics = False
 validation = False
 
 if testing:
@@ -285,7 +285,7 @@ if testing:
     N_tstart = int(N_washout+N_train)   #where the first test interval starts
     N_intt   = test_len*N_lyap             #length of each test set interval
     N_washout = int(N_washout)
-    N_gap = int(0.5*N_lyap)
+    N_gap = int(N_lyap)
 
     print('N_tstart:', N_tstart)
     print('N_intt:', N_intt)
@@ -299,6 +299,7 @@ if testing:
 
     ens_pred = np.zeros((N_intt, dim, N_test, ensemble_test))
     true_data = np.zeros((N_intt, dim, N_test))
+    errors          = np.zeros((N_intt, N_test, ensemble_test))
     ens_PH          = np.zeros((N_test, ensemble_test))
     ens_MSE         = np.zeros((N_test, ensemble_test))
     ens_nrmse_global= np.zeros((ensemble_test))
@@ -350,6 +351,7 @@ if testing:
             print(np.shape(Yh_t))
             ens_pred[:,:,i,j] = Yh_t
             Y_err       = np.sqrt(np.mean((Y_t-Yh_t)**2,axis=1))/sigma_ph
+            errors[:,i,j]= Y_err
             PH[i]       = np.argmax(Y_err>threshold_ph)/N_lyap
             if PH[i] == 0 and Y_err[0]<threshold_ph: PH[i] = N_intt/N_lyap #(in case PH is larger than interval)
             ens_PH[i,j] = PH[i]
@@ -419,6 +421,8 @@ if testing:
             np.quantile(ens_PH[i,:],.75), np.median(ens_PH[i,:]), np.quantile(ens_PH[i,:],.25))
         print('')
 
+    np.save(output_path+'/errors.npy', errors)
+
     # Full path for saving the file
     output_file_ALL = 'ESN_test_metrics_all.json' 
 
@@ -471,22 +475,31 @@ if testing:
 
     np.save(output_path+'/ens_PH.npy', ens_PH)
     np.save(output_path+'/ens_MSE.npy', ens_MSE)
-    med_PH   = np.median(ens_PH, axis=1)
-    lower_PH = np.percentile(ens_PH, 25, axis=1) 
-    upper_PH = np.percentile(ens_PH, 75, axis=1) 
-    np.save(output_path+'/med_ph.npy', med_PH)
-    np.save(output_path+'/lower_ph.npy', lower_PH)
-    np.save(output_path+'/uppper_ph.npy', upper_PH)
-    N_test_list = np.arange(1,N_test+1,1)
-    fig, ax =plt.subplots(1, figsize=(12,3), tight_layout=True)
-    ax.plot(N_test_list, med_PH, color='tab:orange')
-    ax.plot(N_test_list, lower_PH, color='tab:orange', linestyle='--')
-    ax.plot(N_test_list, upper_PH, color='tab:orange', linestyle='--')
+    N_tests_list = np.arange(1,N_test+1,1)
+    med_PH  = np.zeros((N_test))
+    lower_PH = np.zeros((N_test))
+    upper_PH = np.zeros((N_test))
+    PH_vals_all = []
+    for i in range(N_test):
+        PH_vals = ens_PH[i,:]
+        PH_vals_all.append(min_f)
+
+        med_PH[i]   = np.median(minm_f_vals)
+        lower_PH[i] = np.percentile(minm_f_vals, 25)
+        upper_PH[i] = np.percentile(minm_f_vals, 75)
+    fig, ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
+    ax.plot(N_tests_list, med_PH, color='tab:orange')
+    ax.plot(N_tests_list, lower_PH, color='tab:orange', linestyle='--')
+    ax.plot(N_tests_list, upper_PH, color='tab:orange', linestyle='--')
+    ax.fill_between(N_tests_list, lower_PH, upper_PH, color='tab:orange', alpha=0.2)
     ax.grid()
-    ax.set_ylabel('$\overline{PH}$')
-    ax.set_xlabel('LT')    
-    ax.fill_between(N_test_list, lower_PH, upper_PH, color='tab:orange', alpha=0.2)
-    fig.savefig(output_path+'/stats_test_points.png')
+    ax.set_xlabel('$N_{tests}$', fontsize=14)
+    ax.set_ylabel('$\overline{PH}$', fontsize=14)
+    ax.tick_params(axis='both', which='major', labelsize=12)
+    fig.savefig(output_path+'/startingpoints.png')
+
+
+
 
 if validation:
     ##### quick test #####
@@ -656,7 +669,7 @@ if validation:
         json.dump(metrics_ens_ALL, file, indent=4)
 
     for i in range(N_test):
-        fig, ax =plt.subplots(2, figsize=(12,6), sharex=True)
+        fig, ax =plt.subplots(2, figsize=(12,6), sharex=True, tight_layout=True)
         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
         mean_ens = np.mean(ens_pred[:,:,i,:], axis=-1)
         median_ens = np.percentile(ens_pred[:,:,i,:], 50, axis=-1)
@@ -669,10 +682,11 @@ if validation:
             ax[v].plot(xx, median_ens[:,v], color='tab:orange', label='ESN median prediction')
             ax[v].fill_between(xx, lower[:,v], upper[:,v], color='tab:orange', alpha=0.3, label='ESN 90% confidence interval')
             ax[v].grid()
-            ax[v].legend()
-        ax[1].set_xlabel('Lyapunov Time')
-        ax[0].set_ylabel('KE')
-        ax[1].set_ylabel('q')
+            ax[v].legend(fontsize=12)
+            ax[v].tick_params(axis='both', which='major', labelsize=12)
+        ax[1].set_xlabel('LT', fontsize=14)
+        ax[0].set_ylabel(r'$\overline{KE}$', fontsize=14)
+        ax[1].set_ylabel(r'$\overline{q}$', fontsize=14)
         fig.savefig(output_path+'/ens_pred_median_test%i.png' % i)
         plt.close()
 
@@ -713,9 +727,9 @@ if statistics:
         os.makedirs(output_path)
         print('made directory')
 
-    N_test   = 37                    #number of intervals in the test set
+    N_test   = 10                    #number of intervals in the test set
     N_tstart = int(N_washout)   #where the first test interval starts
-    N_intt   = 3*N_lyap             #length of each test set interval
+    N_intt   = 20*N_lyap             #length of each test set interval
     N_washout = int(N_washout)
     N_gap = int(1*N_lyap)
 
@@ -814,15 +828,16 @@ if statistics:
                     fig.savefig(output_path + '/prediction_ens{:02d}_test{:02d}.png'.format(j, i))
                     plt.close()
 
-                    fig,ax =plt.subplots(1,sharex=True)
+                    fig,ax =plt.subplots(1,figsize=(8,6), tight_layout=True)
                     xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
                     ax.scatter(Y_t[:,1],Y_t[:,0], color='tab:blue', label='True', marker = '.')
                     ax.scatter(Yh_t[:,1],Yh_t[:,0], color='tab:orange', label='ESN', marker='x')
                     ax.grid()
                     #ax[1].set_ylim(Y_t.min()-.1, Y_t.max()+.1)
-                    ax.set_ylabel('KE')
-                    ax.set_xlabel('q')
+                    ax.set_ylabel(r'$\overline{KE}$', fontsize=14)
+                    ax.set_xlabel(r'$\overline{q}$', fontsize=14)
                     ax.legend(ncol=2)
+                    ax.tick_params(axis='both', which='major', labelsize=12)
                     fig.savefig(output_path + '/phasespace_ens{:02d}_test{:02d}.png'.format(j, i))
                     plt.close()
 
