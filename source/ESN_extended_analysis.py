@@ -53,7 +53,7 @@ number_of_tests = int(args['--number_of_tests'])
 
 model_path = output_path
 
-output_path = output_path + '/further_analysis/extended/'
+output_path = output_path + '/further_analysis/300tests002LT'
 if not os.path.exists(output_path):
     os.makedirs(output_path)
     print('made directory')
@@ -202,9 +202,9 @@ def ss_inverse_transform(data, scaler):
 
 
 #### Load Data ####
-q = np.load(input_path + 'q5000_30000.npy')
-ke = np.load(input_path + 'KE5000_30000.npy')
-total_time = np.load(input_path + 'total_time5000_30000.npy')
+q = np.load(input_path + 'q5000_48000.npy')
+ke = np.load(input_path + 'KE5000_48000.npy')
+total_time = np.load(input_path + 'total_time5000_48000.npy')
 global_var = ['KE', 'q']
 
 # Reshape the arrays into column vectors
@@ -303,7 +303,7 @@ if testing:
     N_tstart = int(N_washout+N_train)   #where the first test interval starts
     N_intt   = test_len*N_lyap             #length of each test set interval
     N_washout = int(N_washout)
-    N_gap = int(1*N_lyap)
+    N_gap = int(0.05*N_lyap)
 
     ensemble_test = ens
 
@@ -381,22 +381,23 @@ if testing:
 
             if plot:
                 if j == 0:
-                    if i == 0:
-                        print(f"plotting test{i} ensemble{j}")
-                        for p in range(len(PTs)):
-                            PT = int(PTs[p]*N_lyap)
-                            xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                            fig,ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
-                            ax.plot(xx, Y_t[:,0], color='tab:blue', label='truth')
-                            ax.plot(xx, Yh_t[:,0], color='tab:orange', label='prediciton')
-                            ax.axhline(y=threshold_KE, linestyle='--', color='tab:red', label='threshold')
-                            ax.fill_between((PTs[p],PTs[p]+(PI/N_lyap)), y1=0, y2=0.0003, alpha=0.2, color='tab:green', label='prediction interval')
-                            ax.set_ylabel('$\overline{KE}$')
-                            ax.set_xlabel('LT')
-                            ax.grid()
-                            ax.legend()
-                            ax.text(PTs[p]+(PI/(2*N_lyap)), 0.00025, flag_pred[p, i, j], fontsize=12, bbox=dict(facecolor='white', alpha=0.5))
-                            fig.savefig(output_path+'/PTs%i.png' % p)
+                    print(f"plotting test{i} ensemble{j}")
+                    p = 0
+                    PT = int(PTs[p]*N_lyap)
+                    xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
+                    fig,ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
+                    ax.plot(xx, Y_t[:,0], color='tab:blue', label='truth')
+                    ax.plot(xx, Yh_t[:,0], color='tab:orange', label='prediciton')
+                    ax.axhline(y=threshold_KE, linestyle='--', color='tab:red', label='threshold')
+                    ax.fill_between((PTs[p],PTs[p]+(PI/N_lyap)), y1=0, y2=0.0003, alpha=0.2, color='tab:green', label='prediction interval')
+                    ax.set_ylabel('$\overline{KE}$')
+                    ax.set_xlabel('LT')
+                    ax.grid()
+                    ax.legend()
+                    ax.text(PTs[p]+(PI/(2*N_lyap)), 0.00025, flag_pred[p, i, j], fontsize=12, bbox=dict(facecolor='white', alpha=0.5))
+                    fig.savefig(output_path+'/PTs%i%i%i.png' % (p,i,j))
+
+    np.save(output_path+'/flag_pred.npy', flag_pred)
 
     TP_mask = flag_pred == 'TP'
     FP_mask = flag_pred == 'FP'
