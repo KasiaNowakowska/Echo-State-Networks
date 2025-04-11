@@ -32,7 +32,7 @@ import yaml
 from docopt import docopt
 args = docopt(__doc__)
 
-os.environ["OMP_NUM_THREADS"] = "1" #set cores for numpy
+os.environ["OMP_NUM_THREADS"] = "-1" #set cores for numpy
 import tensorflow as tf
 import json
 tf.get_logger().setLevel('ERROR') #no info and warnings are printed
@@ -47,6 +47,9 @@ for gpu in gpus:
 import time
 from pathlib import Path
 from sklearn.preprocessing import StandardScaler
+
+import sys
+sys.stdout.reconfigure(line_buffering=True)
 
 import wandb
 #wandb.login()
@@ -101,7 +104,7 @@ snapshots =10000
 data_set, time_vals = load_data_set(input_path+'/data_4var_5000_30000.h5', variables, snapshots)
 print('shape of dataset', np.shape(data_set))
 
-reduce_domain = True
+reduce_domain = False
 
 if reduce_domain:
     data_set = data_set[:, 32:96, :, :]
@@ -577,9 +580,9 @@ def ss_inverse_transform(data, scaler):
     return data_unscaled
 
 #### load in data ###
-n_batches   = int((2500/b_size) *0.7)  #number of batches #20
-val_batches = int((2500/b_size) *0.2)    #int(n_batches*0.2) # validation set size is 0.2 the size of the training set #2
-test_batches = 2500 # int((10000/b_size) *0.1)
+n_batches   = int((U.shape[0]/b_size) *0.7)  #number of batches #20
+val_batches = int((U.shape[0]/b_size) *0.2)    #int(n_batches*0.2) # validation set size is 0.2 the size of the training set #2
+test_batches = int((U.shape[0]/b_size) *0.1)
 skip        = 1
 print(n_batches, val_batches, test_batches)
 
@@ -747,150 +750,161 @@ for i in range(N_parallel):
     b[i] = tf.keras.models.load_model(models_dir + '/dec_mod'+str(ker_size[i])+'_'+str(N_latent)+'.h5',
                                             custom_objects={"PerPad2D": PerPad2D})
 
-#### NRMSE across x,z and averaged in time ####
-truth = U_tv_scaled
-decoded = model(truth,a,b)[1]
-print(np.shape(decoded), np.shape(truth))
+test_data = False
+all_data = True
 
-test_times = time_vals[b_size*n_batches*skip+b_size*val_batches*skip:
-                            b_size*n_batches*skip+b_size*val_batches*skip+b_size*test_batches*skip] 
-print(test_times[0], test_times[-1])
+#### TESTING UNSEEN DATA ####
+if test_data:
+    truth = U_tv_scaled
+    decoded = model(truth,a,b)[1]
+    print(np.shape(decoded), np.shape(truth))
 
-decoded = decoded.numpy()
+    test_times = time_vals[b_size*n_batches*skip+b_size*val_batches*skip:
+                                b_size*n_batches*skip+b_size*val_batches*skip+b_size*test_batches*skip] 
+    print(test_times[0], test_times[-1])
 
-decoded_unscaled = ss_inverse_transform(decoded, scaler)
-truth_unscaled = ss_inverse_transform(truth, scaler)
+    decoded = decoded.numpy()
 
-#SSIM
-test_ssim = compute_ssim_for_4d(truth_unscaled, decoded_unscaled)
+    decoded_unscaled = ss_inverse_transform(decoded, scaler)
+    truth_unscaled = ss_inverse_transform(truth, scaler)
 
-#MSE
-mse = MSE(truth_unscaled, decoded_unscaled)
+    #SSIM
+    test_ssim = compute_ssim_for_4d(truth_unscaled, decoded_unscaled)
 
-#NRMSE
-nrmse = NRMSE(truth_unscaled, decoded_unscaled)
+    #MSE
+    mse = MSE(truth_unscaled, decoded_unscaled)
 
-#EVR 
-evr = EVR_recon(truth_unscaled, decoded_unscaled)
+    #NRMSE
+    nrmse = NRMSE(truth_unscaled, decoded_unscaled)
 
-print("nrmse:", nrmse)
-print("mse:", mse)
-print("test_ssim:", test_ssim)
-print("EVR:", evr)
+    #EVR 
+    evr = EVR_recon(truth_unscaled, decoded_unscaled)
 
-#Plume NRMSE
-if len(variables) == 4:
-    active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(truth_unscaled, decoded_unscaled, z)
-    print(np.shape(active_array))
-    print(np.shape(mask))
-    nrmse_plume             = NRMSE(truth_unscaled[:,:,:,:][mask], decoded_unscaled[:,:,:,:][mask])
+    print("nrmse:", nrmse)
+    print("mse:", mse)
+    print("test_ssim:", test_ssim)
+    print("EVR:", evr)
 
-import json
-# Full path for saving the file
-output_file = "test_metrics.json"
+    #Plume NRMSE
+    if len(variables) == 4:
+        active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(truth_unscaled, decoded_unscaled, z)
+        print(np.shape(active_array))
+        print(np.shape(mask))
+        nrmse_plume             = NRMSE(truth_unscaled[:,:,:,:][mask], decoded_unscaled[:,:,:,:][mask])
 
-output_path_met = os.path.join(output_path, output_file)
+    import json
+    # Full path for saving the file
+    output_file = "test_metrics.json"
 
-metrics = {
-"MSE": mse,
-"NRMSE": nrmse,
-"SSIM": test_ssim,
-"EVR": evr,
-"plume NRMSE": nrmse_plume,
-}
+    output_path_met = os.path.join(output_path, output_file)
 
-with open(output_path_met, "w") as file:
-    json.dump(metrics, file, indent=4)
+    metrics = {
+    "MSE": mse,
+    "NRMSE": nrmse,
+    "SSIM": test_ssim,
+    "EVR": evr,
+    "plume NRMSE": nrmse_plume,
+    }
 
-n       =  2
+    with open(output_path_met, "w") as file:
+        json.dump(metrics, file, indent=4)
 
-start   = b_size*n_batches*skip+b_size*val_batches*skip  #b_size*n_batches*skip+b_size*val_batches*skip #start after validation set
+    n       =  2
 
-skips = 10
-for i in range(n):
-    index = 0 + skips*i
-    time_value = test_times[index]
+    start   = b_size*n_batches*skip+b_size*val_batches*skip  #b_size*n_batches*skip+b_size*val_batches*skip #start after validation set
 
-    #plot_reconstruction(truth_unscaled, decoded_unscaled, 32, index, f"/test_{index}_")
-    plot_reconstruction_and_error(truth_unscaled, decoded_unscaled, 32, index, f"/test")
+    skips = 10
+    for i in range(n):
+        index = 0 + skips*i
+        time_value = test_times[index]
 
-skips = 250
-for i in range(n):
-    index = 0 + skips*i
-    time_value = test_times[index]
-    
-    plot_reconstruction_and_error(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], 32, index, f"/test_diff_{index}")
+        #plot_reconstruction(truth_unscaled, decoded_unscaled, 32, index, f"/test_{index}_")
+        plot_reconstruction_and_error(truth_unscaled, decoded_unscaled, 32, index, f"/test")
 
-    if len(variables) ==4:
-        active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], z)
-        time_zone = np.linspace(0, truth_unscaled[index:index+500].shape[0],  truth_unscaled[index:index+500].shape[0])
-        fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
-        c1 = ax[0].contourf(time_zone, x, active_array[:,:, 32].T, cmap='Reds')
-        fig.colorbar(c1, ax=ax[0])
-        ax[0].set_title('true')
-        c2 = ax[1].contourf(time_zone, x, active_array_reconstructed[:,:, 32].T, cmap='Reds')
-        fig.colorbar(c1, ax=ax[1])
-        ax[1].set_title('reconstruction')
-        for v in range(2):
-            ax[v].set_xlabel('time')
-            ax[v].set_ylabel('x')
-        fig.savefig(output_path+f"/active_plumes_{index}.png")
-        plt.close()
+    skips = 250
+    for i in range(n):
+        index = 0 + skips*i
+        time_value = test_times[index]
+        
+        plot_reconstruction_and_error(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], 32, index, f"/test_diff_{index}")
 
-#### all data ####
-U_scaled = ss_transform(U, scaler)
-truth = U_scaled
-decoded = model(U_scaled,a,b)[1]
+        if len(variables) ==4:
+            active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], z)
+            time_zone = np.linspace(0, truth_unscaled[index:index+500].shape[0],  truth_unscaled[index:index+500].shape[0])
+            fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
+            c1 = ax[0].contourf(time_zone, x, active_array[:,:, 32].T, cmap='Reds')
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].contourf(time_zone, x, active_array_reconstructed[:,:, 32].T, cmap='Reds')
+            fig.colorbar(c1, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            for v in range(2):
+                ax[v].set_xlabel('time')
+                ax[v].set_ylabel('x')
+            fig.savefig(output_path+f"/active_plumes_{index}.png")
+            plt.close()
 
-decoded = decoded.numpy()
-decoded_unscaled = ss_inverse_transform(decoded, scaler)
-truth_unscaled = ss_inverse_transform(truth, scaler)
+if all_data:
+    #### all data ####
+    U_scaled = ss_transform(U, scaler)
+    truth = U_scaled
+    decoded = model(U_scaled,a,b)[1]
 
-#SSIM
-test_ssim = compute_ssim_for_4d(truth_unscaled, decoded_unscaled)
-#MSE
-mse = MSE(truth_unscaled, decoded_unscaled)
-#NRMSE
-nrmse = NRMSE(truth_unscaled, decoded_unscaled)
-#EVR 
-evr = EVR_recon(truth_unscaled, decoded_unscaled)
+    decoded = decoded.numpy()
+    decoded_unscaled = ss_inverse_transform(decoded, scaler)
+    truth_unscaled = ss_inverse_transform(truth, scaler)
 
-print("nrmse:", nrmse)
-print("mse:", mse)
-print("test_ssim:", test_ssim)
-print("EVR:", evr)
+    #SSIM
+    test_ssim = compute_ssim_for_4d(truth_unscaled, decoded_unscaled)
+    #MSE
+    mse = MSE(truth_unscaled, decoded_unscaled)
+    #NRMSE
+    nrmse = NRMSE(truth_unscaled, decoded_unscaled)
+    #EVR 
+    evr = EVR_recon(truth_unscaled, decoded_unscaled)
 
-#Plume NRMSE
-if len(variables) == 4:
-    active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(truth_unscaled, decoded_unscaled, z)
-    print(np.shape(active_array))
-    print(np.shape(mask))
-    nrmse_plume             = NRMSE(truth_unscaled[:,:,:,:][mask], decoded_unscaled[:,:,:,:][mask])
+    print("nrmse:", nrmse)
+    print("mse:", mse)
+    print("test_ssim:", test_ssim)
+    print("EVR:", evr)
 
-import json
-# Full path for saving the file
-output_file = "test_metrics_all_data.json"
+    #Plume NRMSE
+    if len(variables) == 4:
+        active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(truth_unscaled, decoded_unscaled, z)
+        print(np.shape(active_array))
+        print(np.shape(mask))
+        nrmse_plume             = NRMSE(truth_unscaled[:,:,:,:][mask], decoded_unscaled[:,:,:,:][mask])
 
-output_path_met = os.path.join(output_path, output_file)
+    import json
+    # Full path for saving the file
+    output_file = "test_metrics_all_data.json"
 
-metrics = {
-"MSE": mse,
-"NRMSE": nrmse,
-"SSIM": test_ssim,
-"EVR": evr,
-"plume NRMSE": nrmse_plume,
-}
+    output_path_met = os.path.join(output_path, output_file)
 
-with open(output_path_met, "w") as file:
-    json.dump(metrics, file, indent=4)
+    metrics = {
+    "MSE": mse,
+    "NRMSE": nrmse,
+    "SSIM": test_ssim,
+    "EVR": evr,
+    "plume NRMSE": nrmse_plume,
+    }
 
-print('shape of truth', np.shape(truth_unscaled))
-print('shape of prediction', np.shape(decoded_unscaled))
+    with open(output_path_met, "w") as file:
+        json.dump(metrics, file, indent=4)
 
-n = 2
-skips = 250
-for i in range(n):
-    index = 0 + skips*i
+    print('shape of truth', np.shape(truth_unscaled))
+    print('shape of prediction', np.shape(decoded_unscaled))
 
-    #plot_reconstruction(truth_unscaled, decoded_unscaled, 32, index, f"/test_{index}_")
-    plot_reconstruction_and_error(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], 32, index, f"/test_all")
+    n = 2
+    skips = 250
+    for i in range(n):
+        index = 0 + skips*i
+
+        #plot_reconstruction(truth_unscaled, decoded_unscaled, 32, index, f"/test_{index}_")
+        plot_reconstruction_and_error(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], 32, index, f"/test_all")
+
+        fig, ax = plt.subplots(1)
+        ax.plot(decoded_unscaled[index, :, 32, 0], label='dec')
+        ax.plot(truth_unscaled[index, :,32,0], label='true')
+        plt.legend()
+        fig.savefig(output_path+'/lines%i.png' % i)

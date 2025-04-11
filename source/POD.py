@@ -34,6 +34,11 @@ input_path = args['--input_path']
 output_path = args['--output_path']
 snapshots = int(args['--snapshots'])
 projection = args['--projection']
+print(projection)
+if projection == 'False':
+    projection = False
+elif projection == 'True':
+    projection = True
 
 output_path = output_path+f"/snapshots{snapshots}/"
 print(output_path)
@@ -571,6 +576,7 @@ if reduce_data_set:
 
 projection = projection
 if projection:
+    print('starting projection since projectiion', projection)
     data_proj = data_set[500:, :, :, :]
     data_set = data_set[:500, :, :, :]
     time_vals_proj = time_vals[500:]
@@ -612,8 +618,8 @@ data_scaled_reshape = scaler.transform(data_reshape)
 #reshape 
 data_scaled = data_scaled_reshape.reshape(data_set.shape)
 
-n_modes_list = [10, 16, 32, 64, 100]
-c_names = ['Ra2e8_c10', 'Ra2e8_c16', 'Ra2e8_c32', 'Ra2e8_c64', 'Ra2e8_c100']
+n_modes_list = [16, 32, 64, 100, 128, 256] #[10, 16, 32, 64, 100]
+c_names = ['Ra2e8_c16', 'Ra2e8_c32', 'Ra2e8_c64', 'Ra2e8_c100','Ra2e8_c128', 'Ra2e8_c256'] #['Ra2e8_c10', 'Ra2e8_c16', 'Ra2e8_c32', 'Ra2e8_c64', 'Ra2e8_c100']
 index=0
 
 nrmse_list, evr_list, ssim_list, cumEV_list, nrmse_plume_list = [], [], [], [], []
@@ -650,6 +656,7 @@ for n_modes in n_modes_list:
         nrmse_plume = np.inf
 
     if projection:
+        print('starting projection')
         data_reduced_proj          = transform_POD(data_proj, pca_)
         _, data_reconstructed_proj = inverse_POD(data_reduced_proj, pca_)
         data_reconstructed_proj     = ss_inverse_transform(data_reconstructed_proj, scaler)
