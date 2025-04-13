@@ -750,8 +750,8 @@ for i in range(N_parallel):
     b[i] = tf.keras.models.load_model(models_dir + '/dec_mod'+str(ker_size[i])+'_'+str(N_latent)+'.h5',
                                             custom_objects={"PerPad2D": PerPad2D})
 
-test_data = False
-all_data = True
+test_data = True
+all_data = False
 
 #### TESTING UNSEEN DATA ####
 if test_data:

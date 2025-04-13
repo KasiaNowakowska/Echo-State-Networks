@@ -464,6 +464,8 @@ def active_array_calc(original_data, reconstructed_data, z):
 def ss_transform(data, scaler):
     if data.ndim == 4: #len(time_vals), len(x), len(z), len(var)
         data_reshape = data.reshape(-1, data.shape[-1])
+    else:
+        print('data needs to be 4 dimensions')
     if data_reshape.ndim == 2:
         print("data array is 2D.")
     else:
@@ -482,6 +484,8 @@ def ss_transform(data, scaler):
 def ss_inverse_transform(data, scaler):
     if data.ndim == 4: #len(time_vals), len(x), len(z), len(var)
         data_reshape = data.reshape(-1, data.shape[-1])
+    else:
+        print('data needs to be 4 dimensions')
     if data_reshape.ndim == 2:
         print("data array is 2D.")
     else:
