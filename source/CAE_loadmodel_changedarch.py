@@ -1,7 +1,7 @@
 """
 python script for convolutional autoencoder.
 
-Usage: CAE.py [--input_path=<input_path> --output_path=<output_path> --model_path=<model_path> --hyperparam_file=<hyperparam_file> --job_id=<job_id> --sweep_id=<sweep_id>]
+Usage: CAE.py [--input_path=<input_path> --output_path=<output_path> --model_path=<model_path> --hyperparam_file=<hyperparam_file> --job_id=<job_id> --sweep_id=<sweep_id> --reduce_domain=<reduce_domain>]
 
 Options:
     --input_path=<input_path>            file path to use for data
@@ -10,6 +10,7 @@ Options:
     --hyperparam_file=<hyperparam_file>  file with hyperparmas
     --job_id=<job_id>                    job_id
     --sweep_id=<sweep_id>                sweep_id
+    --reduce_domain=<reduce_domain>      domain reduced True or False [default: False]
 """
 
 # import packages
@@ -61,6 +62,14 @@ hyperparam_file = args['--hyperparam_file']
 job_id = args['--job_id']
 sweep_id = args['--sweep_id']
 
+reduce_domain = args['--reduce_domain']
+if reduce_domain == 'False':
+    reduce_domain = False
+    print('domain not reduced', reduce_domain)
+elif reduce_domain == 'True':
+    reduce_domain = True
+    print('domain reduced', reduce_domain)
+
 ### make output_directories ###
 if not os.path.exists(output_path):
     os.makedirs(output_path)
@@ -104,11 +113,12 @@ snapshots =10000
 data_set, time_vals = load_data_set(input_path+'/data_4var_5000_30000.h5', variables, snapshots)
 print('shape of dataset', np.shape(data_set))
 
-reduce_domain = False
+reduce_domain = reduce_domain
 
 if reduce_domain:
-    data_set = data_set[:, 32:96, :, :]
-    x = x[32:96]
+    data_set = data_set[200:424,60:80,:,:] # 408 so we have 13 batches 12 for training and 1 for 'validation'
+    x = x[60:80]
+    time_vals = time_vals[200:424]
     print('reduced domain shape', np.shape(data_set))
     print('reduced x domain', np.shape(x))
     print('reduced x domain', len(x))
@@ -764,8 +774,8 @@ for i in range(N_parallel):
     b[i] = tf.keras.models.load_model(models_dir + '/dec_mod'+str(ker_size[i])+'_'+str(N_latent)+'.h5',
                                             custom_objects={"PerPad2D": PerPad2D})
 
-test_data = True
-all_data = False
+test_data = False
+all_data = True
 
 #### TESTING UNSEEN DATA ####
 if test_data:
@@ -909,7 +919,7 @@ if all_data:
     print('shape of truth', np.shape(truth_unscaled))
     print('shape of prediction', np.shape(decoded_unscaled))
 
-    n = 2
+    n = 1
     skips = 250
     for i in range(n):
         index = 0 + skips*i

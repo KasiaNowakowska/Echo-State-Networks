@@ -15,8 +15,10 @@ import json
 import sys
 sys.stdout.reconfigure(line_buffering=True)
 
-input_path='./input_data/Ra2e7/' #'./ToyData/'
-output_path='./Ra2e7/'
+input_path='./ToyData/'
+output_path='./ToyData/'
+
+projection = True
 
 def load_data(file, name):
     with h5py.File(file, 'r') as hf:
@@ -283,8 +285,22 @@ for index, name in enumerate(data_names):
         json.dump(metrics, file, indent=4)
 '''
 
-data_set, x, z, time = load_data_2e7(input_path+'/data_all.h5', 'w_vertical')
-data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_ = POD(data_set, n_modes[index], name)
+name = 'combined'
+data_set, x, z, time_vals = load_data(input_path+'/plume_wave_dataset.h5', name)
+
+projection = projection
+if projection:
+    print('starting projection since projectiion', projection)
+    data_proj = data_set[500:1000, :, :]
+    data_set = data_set[:500, :, :]
+    time_vals_proj = time_vals[500:1000]
+    time_vals = time_vals[:500]
+    print('reduced dataset', np.shape(data_set))
+    print('reduced time', np.shape(time))
+    print('proejction dataset', np.shape(data_proj))
+    print(x[0], x[-1])
+
+data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_ = POD(data_set, 64, name)
 plot_reconstruction(data_set, data_reconstructed, 32, 20, name)
 nrmse = NRMSE(data_set, data_reconstructed)
 mse   = MSE(data_set, data_reconstructed)
@@ -313,3 +329,30 @@ metrics = {
 with open(output_path_met, "w") as file:
     json.dump(metrics, file, indent=4)
 
+if projection:
+    print('starting projection')
+    data_reduced_proj          = transform_POD(data_proj, pca_)
+    _, data_reconstructed_proj = inverse_POD(data_reduced_proj, pca_)
+
+    plot_reconstruction_and_error(data_proj, data_reconstructed_proj, 32, 20, time_vals_proj, 'proj_'+name)
+    nrmse_proj = NRMSE(data_proj, data_reconstructed_proj)
+    mse_proj   = MSE(data_proj, data_reconstructed_proj)
+    evr_proj   = EVR_recon(data_proj, data_reconstructed_proj)
+    SSIM_proj  = compute_ssim_for_4d(data_proj, data_reconstructed_proj)
+
+    # Full path for saving the file
+    output_file = name + '_proj_metrics.json' 
+
+    output_path_met = os.path.join(output_path, output_file)
+
+    metrics = {
+    "no. modes": n_modes[index],
+    "EVR": evr_proj,
+    "MSE": mse_proj,
+    "NRMSE": nrmse_proj,
+    "SSIM": SSIM_proj,
+    "EV from POD": cumulative_explained_variance[-1],
+    }
+
+    with open(output_path_met, "w") as file:
+        json.dump(metrics, file, indent=4)

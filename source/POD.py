@@ -565,15 +565,16 @@ variables = ['q_all', 'w_all', 'u_all', 'b_all']
 names = ['q', 'w', 'u', 'b']
 x = np.load(input_path+'/x.npy')
 z = np.load(input_path+'/z.npy')
-snapshots = snapshots
+snapshots = 20000 #snapshots
 data_set, time_vals = load_data_set(input_path+'/data_4var_5000_30000.h5', variables, snapshots)
 print('shape of dataset', np.shape(data_set))
 
 #### change chape of dataset/add projecyion ####
 reduce_data_set = False
 if reduce_data_set:
-    data_set = data_set[:, 147:211, :, :]
-    x = x[147:211]
+    data_set = data_set[200:392,60:80,:,:]
+    x = x[60:80]
+    time_vals = time_vals[200:392]
     print('reduced domain shape', np.shape(data_set))
     print('reduced x domain', np.shape(x))
     print('reduced x domain', len(x))
@@ -581,11 +582,11 @@ if reduce_data_set:
 
 projection = projection
 if projection:
-    print('starting projection since projectiion', projection)
-    data_proj = data_set[500:, :, :, :]
-    data_set = data_set[:500, :, :, :]
-    time_vals_proj = time_vals[500:]
-    time_vals = time_vals[:500]
+    print('starting projection since projection', projection)
+    data_proj = data_set[15000:20000, :, :, :]
+    data_set = data_set[:11200, :, :, :]
+    time_vals_proj = time_vals[15000:20000]
+    time_vals = time_vals[:11200]
     print('reduced dataset', np.shape(data_set))
     print('reduced time', np.shape(time))
     print('proejction dataset', np.shape(data_proj))
@@ -630,9 +631,11 @@ else:
     print('no scaling')
     data_scaled = data_set
 
-n_modes_list = [16, 32, 64, 100, 128, 256] #[10, 16, 32, 64, 100]
+#n_modes_list = [4,8, 16, 32, 64, 100, 128] #[10, 16, 32, 64, 100]
+n_modes_list = np.arange(16, 192+16, 16)
+c_names = [f'Ra2e8_c{n}' for n in n_modes_list]
 #n_modes_list = [4, 8, 16, 25, 32, 64]
-c_names = ['Ra2e8_c16', 'Ra2e8_c32', 'Ra2e8_c64', 'Ra2e8_c100','Ra2e8_c128', 'Ra2e8_c256'] #['Ra2e8_c10', 'Ra2e8_c16', 'Ra2e8_c32', 'Ra2e8_c64', 'Ra2e8_c100']
+#c_names = ['Ra2e8_c4', 'Ra2e8_c8', 'Ra2e8_c16', 'Ra2e8_c32', 'Ra2e8_c64', 'Ra2e8_c100','Ra2e8_c128'] #['Ra2e8_c10', 'Ra2e8_c16', 'Ra2e8_c32', 'Ra2e8_c64', 'Ra2e8_c100']
 index=0
 
 nrmse_list, evr_list, ssim_list, cumEV_list, nrmse_plume_list = [], [], [], [], []
