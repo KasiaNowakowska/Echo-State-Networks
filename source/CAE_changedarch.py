@@ -728,7 +728,7 @@ def main():
                 enc_mods[j].add(PerPad2D(padding=p_size[j], asym=True,
                                                 name='Enc_' + str(j)+'_PerPad_'+str(i)))
                 enc_mods[j].add(tf.keras.layers.Conv2D(filters = n_fil[i], kernel_size=ker_size[j],
-                                            activation=act, padding=pad_enc, strides=4,
+                                            activation=act, padding=pad_enc, strides=2,
                                 name='Enc_' + str(j)+'_ConvLayer_'+str(i)))
             else:
                 #stride=2 padding and conv
@@ -767,7 +767,7 @@ def main():
                                               name='Dec_' + str(j)+'_PerPad_'+str(i))) 
                 dec_mods[j].add(tf.keras.layers.Conv2DTranspose(filters = n_dec[i],
                                 output_padding=None,kernel_size=ker_size[j],
-                                activation=act, padding=pad_dec, strides=4,
+                                activation=act, padding=pad_dec, strides=2,
                     name='Dec_' + str(j)+'_ConvLayer_'+str(i)))
             else:
                 #Transpose convolution with stride = 2 

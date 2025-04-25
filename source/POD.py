@@ -76,6 +76,23 @@ def load_data_set(file, names, snapshots):
 
     return data, time_vals
 
+def load_data_set_Ra2e7(file, names, snapshots):
+    with h5py.File(file, 'r') as hf:
+        print(hf.keys())
+        time_vals = np.array(hf['total_time'][:snapshots])
+        
+        data = np.zeros((len(time_vals), len(x), len(z), len(names)))
+        
+        index=0
+        for name in names:
+            print(name)
+            print(hf[name])
+            Var = np.array(hf[name])
+            data[:,:,:,index] = Var[:snapshots,:,0,:]
+            index+=1
+
+    return data, time_vals
+
 def POD(data, c,  file_str, Plotting=True):
     if data.ndim == 3: #len(time_vals), len(x), len(z)
             data_matrix = data.reshape(data.shape[0], data.shape[1]*data.shape[2])
@@ -566,7 +583,9 @@ names = ['q', 'w', 'u', 'b']
 x = np.load(input_path+'/x.npy')
 z = np.load(input_path+'/z.npy')
 snapshots = 20000 #snapshots
-data_set, time_vals = load_data_set(input_path+'/data_4var_5000_30000.h5', variables, snapshots)
+data_set, time_vals = load_data_set(input_path+'/data_4var_5000_48000.h5', variables, snapshots)
+#variables = ['q_vertical', 'w_vertical', 'u_vertical', 'b_vertical']
+#data_set, time_vals = load_data_set_Ra2e7(input_path+'/data_all.h5', variables, snapshots)
 print('shape of dataset', np.shape(data_set))
 
 #### change chape of dataset/add projecyion ####
@@ -583,14 +602,23 @@ if reduce_data_set:
 projection = projection
 if projection:
     print('starting projection since projection', projection)
-    data_proj = data_set[15000:20000, :, :, :]
-    data_set = data_set[:11200, :, :, :]
-    time_vals_proj = time_vals[15000:20000]
+    data_proj = data_set[16000:18000, :, :, :] #16000:20000
+    data_set = data_set[:11200, :, :, :] #:11200
+    time_vals_proj = time_vals[16000:18000]
     time_vals = time_vals[:11200]
     print('reduced dataset', np.shape(data_set))
     print('reduced time', np.shape(time))
     print('proejction dataset', np.shape(data_proj))
     print(x[0], x[-1])
+
+    # data_proj = data_set[500:, :, :, :] #16000:20000
+    # data_set = data_set[:500, :, :, :] #:11200
+    # time_vals_proj = time_vals[500:]
+    # time_vals = time_vals[:500]
+    # print('reduced dataset', np.shape(data_set))
+    # print('reduced time', np.shape(time))
+    # print('proejction dataset', np.shape(data_proj))
+    # print(x[0], x[-1])
 
 #### plot dataset ####
 fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
@@ -631,8 +659,8 @@ else:
     print('no scaling')
     data_scaled = data_set
 
-#n_modes_list = [4,8, 16, 32, 64, 100, 128] #[10, 16, 32, 64, 100]
-n_modes_list = np.arange(16, 192+16, 16)
+n_modes_list = [64]#[16,32,64,100,128,256] #[10, 16, 32, 64, 100]
+#n_modes_list = np.arange(16, 192+16, 16)
 c_names = [f'Ra2e8_c{n}' for n in n_modes_list]
 #n_modes_list = [4, 8, 16, 25, 32, 64]
 #c_names = ['Ra2e8_c4', 'Ra2e8_c8', 'Ra2e8_c16', 'Ra2e8_c32', 'Ra2e8_c64', 'Ra2e8_c100','Ra2e8_c128'] #['Ra2e8_c10', 'Ra2e8_c16', 'Ra2e8_c32', 'Ra2e8_c64', 'Ra2e8_c100']
@@ -677,7 +705,8 @@ if POD_type == 'together':
 
         if projection:
             print('starting projection')
-            data_reduced_proj          = transform_POD(data_proj, pca_)
+            data_scaled_proj           = ss_transform(data_proj, scaler)
+            data_reduced_proj          = transform_POD(data_scaled_proj, pca_)
             _, data_reconstructed_proj = inverse_POD(data_reduced_proj, pca_)
             if scaling == 'SS':
                 data_reconstructed_proj     = ss_inverse_transform(data_reconstructed_proj, scaler)
@@ -822,7 +851,7 @@ if POD_type == 'seperate':
             if scaling == 'SS':
                 data_reconstructed_proj     = ss_inverse_transform(data_reconstructed_proj, scaler)
 
-            plot_reconstruction_and_error(data_proj, data_reconstructed_proj, 32, 20, time_vals_proj, 'proj_'+c_names[index])
+            plot_reconstruction_and_error(data_proj[:1000], data_reconstructed_proj[:1000], 32, 20, time_vals_proj, 'proj_partial_'+c_names[index])
             nrmse_proj = NRMSE(data_proj, data_reconstructed_proj)
             mse_proj   = MSE(data_proj, data_reconstructed_proj)
             evr_proj   = EVR_recon(data_proj, data_reconstructed_proj)
@@ -844,6 +873,7 @@ if POD_type == 'seperate':
                 for v in range(2):
                     ax[v].set_xlabel('time')
                     ax[v].set_ylabel('x')
+
                 fig.savefig(output_path+f"/proj_active_plumes_{c_names[index]}.png")
                 plt.close()
             else:
