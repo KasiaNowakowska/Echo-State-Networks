@@ -1,13 +1,14 @@
 """
 python script for POD.
 
-Usage: lyapunov.py [--input_path=<input_path> --output_path=<output_path> --snapshots=<snapshots> --projection=<projection>]
+Usage: lyapunov.py [--input_path=<input_path> --output_path=<output_path> --snapshots=<snapshots> --projection=<projection> --modes_no=<modes_no>]
 
 Options:
     --input_path=<input_path>          file path to use for data
     --output_path=<output_path>        file path to save images output [default: ./images]
     --snapshots=<snapshots>            number of snapshots 
     --projection=<projection>          projection of POD [default: False]
+    --modes_no=<modes_no>                    number of modes
 """
 
 import os
@@ -34,6 +35,7 @@ input_path = args['--input_path']
 output_path = args['--output_path']
 snapshots = int(args['--snapshots'])
 projection = args['--projection']
+modes_no = int(args['--modes_no'])
 print(projection)
 if projection == 'False':
     projection = False
@@ -589,7 +591,7 @@ data_set, time_vals = load_data_set(input_path+'/data_4var_5000_48000.h5', varia
 print('shape of dataset', np.shape(data_set))
 
 #### change chape of dataset/add projecyion ####
-reduce_data_set = False
+reduce_data_set = True
 if reduce_data_set:
     data_set = data_set[200:392,60:80,:,:]
     x = x[60:80]
@@ -602,13 +604,14 @@ if reduce_data_set:
 projection = projection
 if projection:
     print('starting projection since projection', projection)
-    data_proj = data_set[16000:18000, :, :, :] #16000:20000
+    data_proj = data_set[16000:20000, :, :, :] #16000:20000
     data_set = data_set[:11200, :, :, :] #:11200
-    time_vals_proj = time_vals[16000:18000]
+    time_vals_proj = time_vals[16000:20000]
     time_vals = time_vals[:11200]
     print('reduced dataset', np.shape(data_set))
     print('reduced time', np.shape(time))
     print('proejction dataset', np.shape(data_proj))
+    print('time of projection', time_vals_proj[0], time_vals_proj[1])
     print(x[0], x[-1])
 
     # data_proj = data_set[500:, :, :, :] #16000:20000
@@ -659,7 +662,7 @@ else:
     print('no scaling')
     data_scaled = data_set
 
-n_modes_list = [64]#[16,32,64,100,128,256] #[10, 16, 32, 64, 100]
+n_modes_list = [modes_no]#[16,32,64,100,128,256] #[10, 16, 32, 64, 100]
 #n_modes_list = np.arange(16, 192+16, 16)
 c_names = [f'Ra2e8_c{n}' for n in n_modes_list]
 #n_modes_list = [4, 8, 16, 25, 32, 64]
@@ -676,7 +679,7 @@ if POD_type == 'together':
         if scaling == 'SS':
             data_reconstructed = ss_inverse_transform(data_reconstructed, scaler)
         #plot_reconstruction(data_set, data_reconstructed, 32, 20, 'Ra2e7')
-        plot_reconstruction_and_error(data_set, data_reconstructed, 32, 20, time_vals, c_names[index])
+        plot_reconstruction_and_error(data_set, data_reconstructed, 32, 75, time_vals, c_names[index])
         nrmse = NRMSE(data_set, data_reconstructed)
         mse   = MSE(data_set, data_reconstructed)
         evr   = EVR_recon(data_set, data_reconstructed)
@@ -779,6 +782,8 @@ if POD_type == 'together':
 
             metrics = {
             "no. modes": n_modes,
+            "start time of projection": time_vals_proj[0], 
+            "end time of projection": time_vals_proj[1],
             "EVR": evr_proj,
             "MSE": mse_proj,
             "NRMSE": nrmse_proj,

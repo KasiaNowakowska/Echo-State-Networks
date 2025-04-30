@@ -235,23 +235,26 @@ def main():
         """
         Periodic Padding layer
         """
-        def __init__(self, padding=1, asym=False, **kwargs):
-            self.padding = padding
+        def __init__(self, width_pad=1, height_pad=1, asym=False, last_layer=False, **kwargs):
+            self.width_pad = width_pad
+            self.height_pad = height_pad
             self.asym    = asym
+            self.last_layer = last_layer
             super(PerPad2D, self).__init__(**kwargs)
 
         def get_config(self): #needed to be able to save and load the model with this layer
             config = super(PerPad2D, self).get_config()
             config.update({
-                'padding': self.padding,
+                'height_pad': self.height_pad,
+                'width_pad': self.width_pad,
                 'asym': self.asym,
             })
             return config
 
         def call(self, x):
-            return periodic_padding(x, self.padding, self.asym)
+            return periodic_padding(x, self.height_pad, self.width_pad, self.asym, self.last_layer)
 
-    def periodic_padding(image, padding=1, asym=False):
+    def periodic_padding(image, height_pad=1, width_pad=1, asym=False, last_layer=False):
         '''
         Create a periodic padding (same of np.pad('wrap')) around the image,
         to mimic periodic boundary conditions.
@@ -268,17 +271,18 @@ def main():
         '''
 
         if asym:
-            right_pad = image[:,:,:padding+1]
+            right_pad = image[:,:,:width_pad+1]
         else:
-            right_pad = image[:,:,:padding]
+            right_pad = image[:,:,:width_pad]
 
-        if padding != 0:
-            left_pad = image[:,:,-padding:]
+        if width_pad != 0:
+            left_pad = image[:,:,-width_pad:]
             partial_image = tf.concat([left_pad, image, right_pad], axis=2)
         else:
             partial_image = tf.concat([image, right_pad], axis=2)
         #print(tf.shape(partial_image))
 
+        
         shape = tf.shape(partial_image)
         #print(shape)
         batch_size = shape[0]
@@ -287,12 +291,15 @@ def main():
         channel = shape[3]
         #print(batch_size, height, width, channel)
 
+        if last_layer:
+            height_pad = int(height_pad/2)
+
         if asym:
-            bottom_pad = tf.zeros([batch_size,padding+1,width,channel], dtype=image.dtype)
+            bottom_pad = tf.zeros([batch_size,height_pad+1,width,channel], dtype=image.dtype)
         else:
-            bottom_pad = tf.zeros([batch_size,padding,width,channel], dtype=image.dtype)
-        if padding != 0 :
-            top_pad = tf.zeros([batch_size,padding,width,channel], dtype=image.dtype)
+            bottom_pad = tf.zeros([batch_size,height_pad,width,channel], dtype=image.dtype)
+        if height_pad != 0 :
+            top_pad = tf.zeros([batch_size,height_pad,width,channel], dtype=image.dtype)
             padded_image = tf.concat([top_pad, partial_image, bottom_pad], axis=1)
         else:
             padded_image = tf.concat([partial_image, bottom_pad], axis=1)
@@ -616,15 +623,15 @@ def main():
         return data_unscaled
 
     #### load in data ###
-    if reduce_domain:    
-        b_size      = wandb.config.b_size   #batch_size
-        n_batches   = 12 #int((U.shape[0]/b_size) *0.7)  #number of batches #20
-        val_batches = 1 #int((U.shape[0]/b_size) *0.2)    #int(n_batches*0.2) # validation set size is 0.2 the size of the training set #2
+    if reduce_domain:
+        b_size       = wandb.config.b_size   #batch_size
+        n_batches    = 12 #int((U.shape[0]/b_size) *0.7)  #number of batches #20
+        val_batches  = 1 #int((U.shape[0]/b_size) *0.2)    #int(n_batches*0.2) # validation set size is 0.2 the size of the training set #2
         test_batches = 1 # int((U.shape[0]/b_size) *0.1)
     else:
-        b_size      = wandb.config.b_size   #batch_size
-        n_batches   = int((U.shape[0]/b_size) *0.7)  #number of batches #20
-        val_batches = int((U.shape[0]/b_size) *0.2)    #int(n_batches*0.2) # validation set size is 0.2 the size of the training set #2
+        b_size       = wandb.config.b_size   #batch_size
+        n_batches    = int((U.shape[0]/b_size) *0.7)  #number of batches #20
+        val_batches  = int((U.shape[0]/b_size) *0.2)    #int(n_batches*0.2) # validation set size is 0.2 the size of the training set #2
         test_batches = int((U.shape[0]/b_size) *0.1)
     skip        = 1
     print(n_batches, val_batches, test_batches)
@@ -739,14 +746,21 @@ def main():
 
             if i == N_layers-1:
                 #stride=2 padding and conv
-                enc_mods[j].add(PerPad2D(padding=p_size[j], asym=True,
+                enc_mods[j].add(PerPad2D(height_pad=p_fin[j], width_pad=p_fin[j], asym=False,
                                                 name='Enc_' + str(j)+'_PerPad_'+str(i)))
                 enc_mods[j].add(tf.keras.layers.Conv2D(filters = n_fil[i], kernel_size=ker_size[j],
-                                            activation=act, padding=pad_enc, strides=4,
+                                            activation=act, padding=pad_enc, strides=3,
+                                name='Enc_' + str(j)+'_ConvLayer_'+str(i)))
+            elif i == N_layers-2:
+                #stride=2 padding and conv
+                enc_mods[j].add(PerPad2D(height_pad=p_fin[j], width_pad=p_fin[j], asym=False,
+                                                name='Enc_' + str(j)+'_PerPad_'+str(i)))
+                enc_mods[j].add(tf.keras.layers.Conv2D(filters = n_fil[i], kernel_size=ker_size[j],
+                                            activation=act, padding=pad_enc, strides=3,
                                 name='Enc_' + str(j)+'_ConvLayer_'+str(i)))
             else:
                 #stride=2 padding and conv
-                enc_mods[j].add(PerPad2D(padding=p_size[j], asym=True,
+                enc_mods[j].add(PerPad2D(height_pad=p_size[j], width_pad=p_size[j], asym=True,
                                                 name='Enc_' + str(j)+'_PerPad_'+str(i)))
                 enc_mods[j].add(tf.keras.layers.Conv2D(filters = n_fil[i], kernel_size=ker_size[j],
                                             activation=act, padding=pad_enc, strides=2,
@@ -755,7 +769,7 @@ def main():
 
             #stride=1 padding and conv
             if i<N_layers-1:
-                enc_mods[j].add(PerPad2D(padding=p_fin[j], asym=False,
+                enc_mods[j].add(PerPad2D(height_pad=p_fin[j], width_pad=p_fin[j], asym=False,
                                                           name='Enc_'+str(j)+'_Add_PerPad1_'+str(i)))
                 enc_mods[j].add(tf.keras.layers.Conv2D(filters=n_fil[i],
                                                         kernel_size=ker_size[j],
@@ -777,12 +791,17 @@ def main():
 
             #initial padding of latent space
             if i==0: 
-                dec_mods[j].add(PerPad2D(padding=p_dec, asym=False,
+                dec_mods[j].add(PerPad2D(height_pad=p_dec, width_pad=p_dec, asym=False,
                                               name='Dec_' + str(j)+'_PerPad_'+str(i))) 
                 dec_mods[j].add(tf.keras.layers.Conv2DTranspose(filters = n_dec[i],
                                 output_padding=None,kernel_size=ker_size[j],
-                                activation=act, padding=pad_dec, strides=4,
+                                activation=act, padding=pad_dec, strides=3,
                     name='Dec_' + str(j)+'_ConvLayer_'+str(i)))
+            elif i==1:
+                    dec_mods[j].add(tf.keras.layers.Conv2DTranspose(filters = n_dec[i],
+                                output_padding=None,kernel_size=ker_size[j],
+                                activation=act, padding=pad_dec, strides=3,
+                    name='Dec_' + str(j)+'_ConvLayer_'+str(i))) 
             else:
                 #Transpose convolution with stride = 2 
                 dec_mods[j].add(tf.keras.layers.Conv2DTranspose(filters = n_dec[i],

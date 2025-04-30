@@ -1,13 +1,15 @@
 """
 python script for convolutional autoencoder.
 
-Usage: CAE.py [--input_path=<input_path> --output_path=<output_path> --hyperparam_config=<hyperparam_config> --sweep_id=<sweep_id>]
+Usage: CAE.py [--input_path=<input_path> --output_path=<output_path> --hyperparam_config=<hyperparam_config> --sweep_id=<sweep_id> --reduce_domain=<reduce_domain> --project_name=<project_name>]
 
 Options:
     --input_path=<input_path>                 file path to use for data
     --output_path=<output_path>               file path to save images output [default: ./images]
     --hyperparam_config=<hyperparam_config>   hyperparameter config file for search
     --sweep_id=<sweep_id>                     sweep_id for restarting sweep [default: None]
+    --reduce_domain=<reduce_domain>           reduce doamain [default: False]
+    --project_name=<project_name>             project name for wandb
 """
 
 # import packages
@@ -57,7 +59,18 @@ input_path = args['--input_path']
 output_path = args['--output_path']
 hyperparam_config = args['--hyperparam_config']
 sweep_id = args['--sweep_id']
+project_name = args['--project_name']
+if project_name == None:
+    print('ERROR: must supply project name for wandb')
 print('sweep id', sweep_id)
+
+reduce_domain = args['--reduce_domain']
+if reduce_domain == 'False':
+    reduce_domain = False
+    print('domain not reduced', reduce_domain)
+elif reduce_domain == 'True':
+    reduce_domain = True
+    print('domain reduced', reduce_domain)
 
 if not os.path.exists(output_path):
     os.makedirs(output_path)
@@ -105,16 +118,16 @@ snapshots = 10000
 data_set, time_vals = load_data_set(input_path+'/data_4var_5000_30000.h5', variables, snapshots)
 print('shape of dataset', np.shape(data_set))
 
-reduce_domain = False
+reduce_domain = reduce_domain
 
 if reduce_domain:
-    data_set = data_set[:, 32:96, :, :]
-    x = x[32:96]
+    data_set = data_set[200:424,60:80,:,:] # 408 so we have 13 batches 12 for training and 1 for 'validation'
+    x = x[60:80]
+    time_vals = time_vals[200:424]
     print('reduced domain shape', np.shape(data_set))
     print('reduced x domain', np.shape(x))
     print('reduced x domain', len(x))
     print(x[0], x[-1])
-
 
 fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
 c1 = ax.pcolormesh(time_vals, x, data_set[:,:,32,0].T)
@@ -130,7 +143,7 @@ with open(hyperparam_config, "r") as f:
     sweep_configuration = json.load(f)
 
 if sweep_id == 'None':
-    sweep_id = wandb.sweep(sweep=sweep_configuration, project="Ra2e8_new_full")
+    sweep_id = wandb.sweep(sweep=sweep_configuration, project=project_name)
     print('new sweep with sweep id', sweep_id)
 else:
     print('restarting sweep with sweep_id', sweep_id)
@@ -595,9 +608,9 @@ def main():
 
     #### load in data ###
     b_size      = wandb.config.b_size   #batch_size
-    n_batches   = int((U.shape[0]/b_size) *0.7)  #number of batches #20
-    val_batches = int((U.shape[0]/b_size) *0.2)    #int(n_batches*0.2) # validation set size is 0.2 the size of the training set #2
-    test_batches = int((U.shape[0]/b_size) *0.1)
+    n_batches   = 12#int((U.shape[0]/b_size) *0.7)  #number of batches #20
+    val_batches = 1 #int((U.shape[0]/b_size) *0.2)    #int(n_batches*0.2) # validation set size is 0.2 the size of the training set #2
+    test_batches = 1 #int((U.shape[0]/b_size) *0.1)
     skip        = 1
     print(n_batches, val_batches, test_batches)
 
@@ -1120,4 +1133,4 @@ def main():
 
     print('finished job')
 
-wandb.agent(sweep_id=sweep_id, function=main, entity="mm17ktn-university-of-leeds", project="Ra2e8_new_full")
+wandb.agent(sweep_id=sweep_id, function=main, entity="mm17ktn-university-of-leeds", project=project_name)

@@ -590,9 +590,14 @@ def ss_inverse_transform(data, scaler):
     return data_unscaled
 
 #### load in data ###
-n_batches   = int((U.shape[0]/b_size) *0.7)  #number of batches #20
-val_batches = int((U.shape[0]/b_size) *0.2)    #int(n_batches*0.2) # validation set size is 0.2 the size of the training set #2
-test_batches = int((U.shape[0]/b_size) *0.1)
+if reduce_domain:
+    n_batches   = 12 #int((U.shape[0]/b_size) *0.7)  #number of batches #20
+    val_batches = 1 #int((U.shape[0]/b_size) *0.2)    #int(n_batches*0.2) # validation set size is 0.2 the size of the training set #2
+    test_batches = 1#int((U.shape[0]/b_size) *0.1)
+else:
+    n_batches   = int((U.shape[0]/b_size) *0.7)  #number of batches #20
+    val_batches = int((U.shape[0]/b_size) *0.2)    #int(n_batches*0.2) # validation set size is 0.2 the size of the training set #2
+    test_batches = int((U.shape[0]/b_size) *0.1)
 skip        = 1
 print(n_batches, val_batches, test_batches)
 
@@ -925,7 +930,7 @@ if all_data:
         index = 0 + skips*i
 
         #plot_reconstruction(truth_unscaled, decoded_unscaled, 32, index, f"/test_{index}_")
-        plot_reconstruction_and_error(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], 32, index, f"/test_all")
+        plot_reconstruction_and_error(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], 32, 75, f"/test_all")
 
         fig, ax = plt.subplots(1)
         ax.plot(decoded_unscaled[index, :, 32, 0], label='dec')
