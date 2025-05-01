@@ -172,6 +172,14 @@ def main():
     global job
     job += 1
 
+    SEED = wandb.config.seed
+
+    tf.random.set_seed(SEED)
+    np.random.seed(SEED)
+    random.seed(SEED)
+    os.environ['PYTHONHASHSEED'] = str(SEED)
+    os.environ['TF_DETERMINISTIC_OPS'] = '1'
+
     def split_data(U, b_size, n_batches):
 
         '''

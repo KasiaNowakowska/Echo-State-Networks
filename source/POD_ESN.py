@@ -891,8 +891,9 @@ test_interval       = True
 if validation_interval:
     ##### quick test #####
     print('VALIDATION (TEST)')
+    print(N_washout)
     N_test   = n_tests                    #number of intervals in the test set
-    N_tstart = N_washout                  #where the first test interval starts
+    N_tstart = 500                    #where the first test interval starts
     N_intt   = test_len*N_lyap            #length of each test set interval
 
     # #prediction horizon normalization factor and threshold
@@ -935,7 +936,8 @@ if validation_interval:
 
         #run different test intervals
         for i in range(N_test):
-            print(N_tstart + i*N_intt)
+            print('index:', N_tstart + i*N_intt)
+            print('start_time:', time_vals[N_tstart + i*N_intt])
             # data for washout and target in each interval
             U_wash    = U[N_tstart - N_washout +i*N_intt : N_tstart + i*N_intt].copy()
             Y_t       = U[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt].copy()
@@ -1136,7 +1138,7 @@ if test_interval:
     ##### quick test #####
     print('TESTING')
     N_test   = n_tests                    #number of intervals in the test set
-    N_tstart = N_washout + N_train   #where the first test interval starts
+    N_tstart = 1050    #where the first test interval starts
     N_intt   = test_len*N_lyap             #length of each test set interval
 
     # #prediction horizon normalization factor and threshold
@@ -1180,6 +1182,7 @@ if test_interval:
         #run different test intervals
         for i in range(N_test):
             print(N_tstart + i*N_intt)
+            print('start_time:', time_vals[N_tstart + i*N_intt])
             # data for washout and target in each interval
             U_wash    = U[N_tstart - N_washout +i*N_intt : N_tstart + i*N_intt].copy()
             Y_t       = U[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt].copy()

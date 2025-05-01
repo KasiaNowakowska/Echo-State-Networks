@@ -684,6 +684,7 @@ if validation_interval:
     ##### quick test #####
     print('VALIDATION (TEST)')
     N_washout = int(N_washout)
+    print(N_washout)
     N_test   = 5                    #number of intervals in the test set
     N_tstart = 600 - N_washout                 #where the first test interval starts
     N_intt   = test_len*N_lyap            #length of each test set interval
