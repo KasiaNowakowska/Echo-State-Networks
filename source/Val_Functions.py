@@ -251,6 +251,23 @@ def ss_inverse_transform(data, scaler):
         
     return data_unscaled
 
+def spectral_corr_loss(y_true, y_pred):
+    fft_true = np.abs(np.fft.fft(y_true, axis=0))
+    fft_pred = np.abs(np.fft.fft(y_pred, axis=0))
+
+    # Normalize each mode's spectrum
+    fft_true /= np.sum(fft_true, axis=0, keepdims=True)
+    fft_pred /= np.sum(fft_pred, axis=0, keepdims=True)
+
+    # Compute 1 - Pearson correlation per mode and average
+    num_modes = y_true.shape[1]
+    losses = []
+    for m in range(num_modes):
+        corr = np.corrcoef(fft_true[:, m], fft_pred[:, m])[0, 1]
+        losses.append(1 - corr)
+
+    return np.mean(losses)  # smaller is better
+
 def RVC_Noise_weighted(x):
     #Recycle Validation
     
@@ -319,6 +336,61 @@ def RVC_Noise_weighted(x):
     
     # Compute weighted loss
     weighted_loss = alpha * Mean[a] + (1 - alpha) * NRMSE_plume[a]
+
+    #print for every set of hyperparameters
+    if print_flag:
+        print(k, ': Spectral radius, Input Scaling, Tikhonov, MSE:',
+              rho, sigma_in, tikh_opt[k-1],  Mean[a]/N_fo)
+
+    return weighted_loss
+
+def RVC_Noise_FFT(x):
+    #Recycle Validation
+    
+    global tikh_opt, k, ti, pca_, z, alpha, scaler
+    #tikh, U_washout, U_tv, Y_tv, U, N_in, N_fw, N_washout, N_val, N_units
+    #print(tikh)
+    #setting and initializing
+    rho         = x[0]
+    sigma_in    = round(10**x[1],2)
+    ti          = time.time()
+    lenn        = tikh.size
+    Mean        = np.zeros(lenn)
+    spectral_loss = np.zeros(lenn)
+    
+    
+    #Train using tv: training+val
+    Wout = train_n(U_washout, U_tv, Y_tv, tikh, sigma_in, rho)[0]
+
+    #Different Folds in the validation set
+    t1   = time.time()
+    for i in range(N_fo):
+        
+        #select washout and validation
+        p      = N_in + i*N_fw
+        Y_val  = U[N_washout + p : N_washout + p + N_val].copy()
+        U_wash = U[            p : N_washout + p        ].copy()
+        
+        #washout before closed loop
+        xf = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)[-1]
+                  
+        for j in range(lenn):
+            #Validate
+            Yh_val   = closed_loop(N_val-1, xf, Wout[j], sigma_in, rho)[0]
+            Mean[j] += np.log10(np.mean((Y_val-Yh_val)**2))
+            spectral_loss[j]   += spectral_corr_loss(Y_val, Yh_val)
+
+    if k==0: print('closed-loop time:', time.time() - t1)
+
+    #select optimal tikh
+    a = np.argmin(Mean)  # Find the best tikh *before* averaging
+    Mean /= N_fo
+    spectral_loss /= N_fo
+    tikh_opt[k] = tikh[a]
+    k          +=1
+    
+    # Compute weighted loss
+    weighted_loss = alpha * Mean[a] + (1 - alpha) * np.log10(spectral_loss[a] + 1e-12) #1e-12 for numerical stability
 
     #print for every set of hyperparameters
     if print_flag:

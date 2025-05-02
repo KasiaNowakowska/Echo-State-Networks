@@ -629,7 +629,7 @@ N_units      = Nr #neurons
 connectivity = 3
 sparseness   = 1 - connectivity/(N_units-1)
 
-tikh = np.array([1e-3,1e-6,1e-9,1e-12])  # Tikhonov factor (optimize among the values in this list)
+tikh = np.array([1e-1,1e-2,1e-3,1e-4,1e-6]) #np.array([1e-3,1e-6,1e-9,1e-12])  # Tikhonov factor (optimize among the values in this list)
 
 print('tikh:', tikh)
 print('N_r:', N_units, 'sparsity:', sparseness)
@@ -638,8 +638,8 @@ print('bias_in:', bias_in, 'bias_out:', bias_out)
 #### Grid Search and BO #####
 n_in  = 0           #Number of Initial random points
 
-spec_in     = .6    #range for hyperparameters (spectral radius and input scaling)
-spec_end    = 1.1   
+spec_in     = .8    #range for hyperparameters (spectral radius and input scaling)
+spec_end    = 0.99   
 in_scal_in  = np.log10(0.01)
 in_scal_end = np.log10(5.0)
 

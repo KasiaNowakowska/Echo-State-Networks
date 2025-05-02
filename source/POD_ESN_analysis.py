@@ -676,9 +676,9 @@ print('norm:', norm)
 print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
-test_interval = False
+test_interval = True
 validation_interval = True
-statistics_interval = False
+statistics_interval = True
 
 if validation_interval:
     ##### quick test #####
@@ -686,7 +686,7 @@ if validation_interval:
     N_washout = int(N_washout)
     print(N_washout)
     N_test   = 5                    #number of intervals in the test set
-    N_tstart = 600 - N_washout                 #where the first test interval starts
+    N_tstart = 450                 #where the first test interval starts
     N_intt   = test_len*N_lyap            #length of each test set interval
     N_gap    = int(test_len*3*N_lyap)
 
@@ -885,7 +885,7 @@ if validation_interval:
             output_path_met_all = os.path.join(output_path, output_file_all)
 
             metrics_ens = {
-            "ensestatistics_intervalmble": j,
+            "ensemble": j,
             "mean PH": np.mean(PH),
             "lower PH": np.quantile(PH, 0.75),
             "uppper PH": np.quantile(PH, 0.25),
@@ -932,8 +932,8 @@ if test_interval:
     ##### quick test #####
     print('TESTING')
     N_washout = int(N_washout)
-    N_test   = 3                     #number of intervals in the test set
-    N_tstart = N_washout+N_train  #where the first test interval starts
+    N_test   = 5                     #number of intervals in the test set
+    N_tstart = 1000  #where the first test interval starts
     N_intt   = test_len*N_lyap             #length of each test set interval
     N_gap    = int(test_len*3*N_lyap)
 
@@ -976,7 +976,7 @@ if test_interval:
         plot = True
         Plotting = True
         if plot:
-            n_plot = 3
+            n_plot = 5
             plt.rcParams["figure.figsize"] = (15,3*n_plot)
             plt.figure()
             plt.tight_layout()
@@ -1218,9 +1218,9 @@ if statistics_interval:
         os.makedirs(output_path)
         print('made directory')
 
-    N_test   = 50                    #number of intervals in the test set
+    N_test   = 1                    #number of intervals in the test set
     N_tstart = int(N_washout)   #where the first test interval starts
-    N_intt   = 30*N_lyap             #length of each test set interval
+    N_intt   = 10*N_lyap             #length of each test set interval
     N_washout = int(N_washout)
     N_gap = int(N_lyap)
 
@@ -1238,6 +1238,8 @@ if statistics_interval:
     true_POD_global = np.zeros((N_intt, 2, N_test))
     true_global     = np.zeros((N_intt, 2, N_test))
     ens_PH          = np.zeros((N_intt, ensemble_test))
+    ens_nrmse_global= np.zeros((ensemble_test))
+    ens_mse_global  = np.zeros((ensemble_test))
 
     for j in range(ensemble_test):
 
@@ -1312,7 +1314,6 @@ if statistics_interval:
             metrics = {
             "test": i,
             "no. modes": n_components,
-            "NRMSE plume": nrmse_plume,
             "PH": PH[i],
             "NRMSE global": nrmse_global,
             "MSE global": mse_global,
@@ -1378,7 +1379,7 @@ if statistics_interval:
         lower = np.percentile(ens_pred_global[:,:,i,:], 5, axis=-1)
         upper = np.percentile(ens_pred_global[:,:,i,:], 95, axis=-1)
         print('shape of mean:', np.shape(mean_ens))
-        print('shape of truth:', np.shape(true_global[:,v,i]))
+        #print('shape of truth:', np.shape(true_global[:,v,i]))
         for v in range(2):
             ax[v].plot(xx, true_global[:,v,i], color='tab:green', label='truth')
             ax[v].plot(xx, true_POD_global[:,v,i], color='tab:blue', label='POD reconstruction')
@@ -1394,7 +1395,7 @@ if statistics_interval:
 
     from scipy.stats import gaussian_kde
     for j in range(ensemble_test):
-        fig, ax =plt.subplots(1,2, figsize=(6, 12))
+        fig, ax =plt.subplots(1,2, figsize=(8,6))
         for v in range(2):
             ### pred ###
             ens_pred_global_flat = ens_pred_global[:,v,:,j].flatten()
