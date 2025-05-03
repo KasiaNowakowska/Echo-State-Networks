@@ -109,8 +109,8 @@ names = ['q', 'w', 'u', 'b']
 num_variables = 4
 x = np.load(input_path+'/x.npy')
 z = np.load(input_path+'/z.npy')
-snapshots =10000
-data_set, time_vals = load_data_set(input_path+'/data_4var_5000_30000.h5', variables, snapshots)
+snapshots = 16000
+data_set, time_vals = load_data_set(input_path+'/data_4var_5000_48000.h5', variables, snapshots)
 print('shape of dataset', np.shape(data_set))
 
 reduce_domain = reduce_domain
@@ -641,7 +641,7 @@ test_times = time_vals[b_size*n_batches*skip+b_size*val_batches*skip:
 U_train     = split_data(U_tt_scaled, b_size, n_batches).astype('float32') #to be used for randomly shuffled batches
 U_val       = split_data(U_vv_scaled, b_size, val_batches).astype('float32')
 
-del U_vv, U_tt, U_vv_scaled, U_tt_scaled
+del U_vv, U_tt, U_tt_scaled
 
 
 # define the model
@@ -779,11 +779,81 @@ for i in range(N_parallel):
     b[i] = tf.keras.models.load_model(models_dir + '/dec_mod'+str(ker_size[i])+'_'+str(N_latent)+'.h5',
                                             custom_objects={"PerPad2D": PerPad2D})
 
-test_data = False
-all_data = True
+validation_data = True
+test_data = True
+all_data = False
+
+if validation_data:
+    print('VALIDATION DATA')
+    truth = U_vv_scaled
+    decoded = model(truth,a,b)[1]
+    print(np.shape(decoded), np.shape(truth))
+
+    test_times = time_vals[b_size*n_batches*skip+b_size*val_batches*skip:
+                                b_size*n_batches*skip+b_size*val_batches*skip+b_size*test_batches*skip] 
+    print(test_times[0], test_times[-1])
+
+    decoded = decoded.numpy()
+
+    decoded_unscaled = ss_inverse_transform(decoded, scaler)
+    truth_unscaled = ss_inverse_transform(truth, scaler)
+    print('shape of validation prediction', np.shape(decoded_unscaled))
+    print('shape of validation truth', np.shape(truth_unscaled))
+
+    #SSIM
+    test_ssim = compute_ssim_for_4d(truth_unscaled, decoded_unscaled)
+
+    #MSE
+    mse = MSE(truth_unscaled, decoded_unscaled)
+
+    #NRMSE
+    nrmse = NRMSE(truth_unscaled, decoded_unscaled)
+
+    #EVR 
+    evr = EVR_recon(truth_unscaled, decoded_unscaled)
+
+    print("nrmse:", nrmse)
+    print("mse:", mse)
+    print("test_ssim:", test_ssim)
+    print("EVR:", evr)
+
+    #Plume NRMSE
+    if len(variables) == 4:
+        active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(truth_unscaled, decoded_unscaled, z)
+        print(np.shape(active_array))
+        print(np.shape(mask))
+        nrmse_plume             = NRMSE(truth_unscaled[:,:,:,:][mask], decoded_unscaled[:,:,:,:][mask])
+
+    import json
+    # Full path for saving the file
+    output_file = "validation_metrics.json"
+
+    output_path_met = os.path.join(output_path, output_file)
+
+    metrics = {
+    "MSE": mse,
+    "NRMSE": nrmse,
+    "SSIM": test_ssim,
+    "EVR": evr,
+    "plume NRMSE": nrmse_plume,
+    }
+
+    with open(output_path_met, "w") as file:
+        json.dump(metrics, file, indent=4)
+
+    ### plot from index 0
+    index = 0
+    plot_reconstruction_and_error(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], 32, 0, f"/validation_{index}")
+
+    index = 500
+    plot_reconstruction_and_error(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], 32, 0, f"/validation_{index}")
+
+    index = 1000
+    plot_reconstruction_and_error(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], 32, 0, f"/validation_{index}")
 
 #### TESTING UNSEEN DATA ####
 if test_data:
+    print('TEST DATA')
     truth = U_tv_scaled
     decoded = model(truth,a,b)[1]
     print(np.shape(decoded), np.shape(truth))
@@ -796,6 +866,8 @@ if test_data:
 
     decoded_unscaled = ss_inverse_transform(decoded, scaler)
     truth_unscaled = ss_inverse_transform(truth, scaler)
+    print('shape of test prediction', np.shape(decoded_unscaled))
+    print('shape of test truth', np.shape(truth_unscaled))
 
     #SSIM
     test_ssim = compute_ssim_for_4d(truth_unscaled, decoded_unscaled)
@@ -838,24 +910,22 @@ if test_data:
     with open(output_path_met, "w") as file:
         json.dump(metrics, file, indent=4)
 
+    ### plot from index 0
+    index = 0
+    plot_reconstruction_and_error(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], 32, 0, f"/test_{index}")
+
+    index = 500
+    plot_reconstruction_and_error(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], 32, 0, f"/test_{index}")
+
+
     n       =  2
 
     start   = b_size*n_batches*skip+b_size*val_batches*skip  #b_size*n_batches*skip+b_size*val_batches*skip #start after validation set
-
-    skips = 10
-    for i in range(n):
-        index = 0 + skips*i
-        time_value = test_times[index]
-
-        #plot_reconstruction(truth_unscaled, decoded_unscaled, 32, index, f"/test_{index}_")
-        plot_reconstruction_and_error(truth_unscaled, decoded_unscaled, 32, index, f"/test")
 
     skips = 250
     for i in range(n):
         index = 0 + skips*i
         time_value = test_times[index]
-        
-        plot_reconstruction_and_error(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], 32, index, f"/test_diff_{index}")
 
         if len(variables) ==4:
             active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], z)
