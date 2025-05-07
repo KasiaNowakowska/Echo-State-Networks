@@ -66,6 +66,7 @@ with open(hyperparam_file, "r") as f:
     val_len = hyperparams["N_val"]
     test_len = hyperparams["N_test"]
     washout_len = hyperparams["N_washout"]
+    washout_len_val = hyperparams.get("N_washout_val", washout_len)
     t_lyap = hyperparams["t_lyap"]
     normalisation = hyperparams["normalisation"]
     ens = hyperparams["ens"]
@@ -582,6 +583,7 @@ dt        = 2
 N_lyap    = int(t_lyap//dt)
 print('N_lyap', N_lyap)
 N_washout = washout_len*N_lyap #75
+N_washout_val = washout_len_val*N_lyap
 N_train   = train_len*N_lyap #600
 N_val     = val_len*N_lyap #45
 N_test    = test_len*N_lyap #45
@@ -677,18 +679,18 @@ print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
 test_interval = True
-validation_interval = True
-statistics_interval = True
+validation_interval = False
+statistics_interval = False
 
 if validation_interval:
     ##### quick test #####
     print('VALIDATION (TEST)')
     N_washout = int(N_washout)
     print(N_washout)
-    N_test   = 5                    #number of intervals in the test set
-    N_tstart = 450                 #where the first test interval starts
+    N_test   = 12                    #number of intervals in the test set
+    N_tstart = 100                 #where the first test interval starts
     N_intt   = test_len*N_lyap            #length of each test set interval
-    N_gap    = int(test_len*3*N_lyap)
+    N_gap    = 50 #int(test_len*3*N_lyap)
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
@@ -720,10 +722,10 @@ if validation_interval:
         nrmse_error    = np.zeros((N_test, N_intt))
 
         # to plot results
-        plot = True
-        Plotting = True
+        plot = False
+        Plotting = False
         if plot:
-            n_plot = 5
+            n_plot = N_test
             plt.rcParams["figure.figsize"] = (15,3*n_plot)
             plt.figure()
             plt.tight_layout()
@@ -733,7 +735,7 @@ if validation_interval:
             print(N_tstart + i*N_gap)
             print('start time of test', time_vals[N_tstart + i*N_gap])
             # data for washout and target in each interval
-            U_wash    = U[N_tstart - N_washout +i*N_gap : N_tstart + i*N_gap].copy()
+            U_wash    = U[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap].copy()
             Y_t       = U[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt].copy()
 
             #washout for each interval
@@ -932,10 +934,11 @@ if test_interval:
     ##### quick test #####
     print('TESTING')
     N_washout = int(N_washout)
-    N_test   = 5                     #number of intervals in the test set
-    N_tstart = 1000  #where the first test interval starts
+    N_test   = 4                  #number of intervals in the test set
+    N_tstart = 1025  #where the first test interval starts
     N_intt   = test_len*N_lyap             #length of each test set interval
-    N_gap    = int(test_len*3*N_lyap)
+    N_gap    = 50 #int(test_len*3*N_lyap)
+    #N_washout_val = 4*N_lyap
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
@@ -976,7 +979,7 @@ if test_interval:
         plot = True
         Plotting = True
         if plot:
-            n_plot = 5
+            n_plot = N_test
             plt.rcParams["figure.figsize"] = (15,3*n_plot)
             plt.figure()
             plt.tight_layout()
@@ -986,7 +989,7 @@ if test_interval:
             print(N_tstart + i*N_gap)
             print('start time of test', time_vals[N_tstart + i*N_gap])
             # data for washout and target in each interval
-            U_wash    = U[N_tstart - N_washout +i*N_gap : N_tstart + i*N_gap].copy()
+            U_wash    = U[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap].copy()
             Y_t       = U[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt].copy()
 
             #washout for each interval
@@ -1271,7 +1274,7 @@ if statistics_interval:
             print(N_tstart + i*N_gap)
             print('start time of test', time_vals[N_tstart + i*N_gap])
             # data for washout and target in each interval
-            U_wash    = U[N_tstart - N_washout +i*N_gap : N_tstart + i*N_gap].copy()
+            U_wash    = U[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap].copy()
             Y_t       = U[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt].copy()
 
             #washout for each interval

@@ -22,6 +22,8 @@ def step(x_pre, u, sigma_in, rho):
         u_augmented = np.hstack(((u-u_mean)/norm_std, bias_in))
     elif normalisation == 'off':
         u_augmented = np.hstack((u, bias_in))
+    elif normalisation == 'standard_plusregions':
+        u_augmented = np.hstack(((u[:n_components]-u_mean_pr)/norm_std_pr, u[n_components:], bias_in))
     # reservoir update
     x_post_part      = np.tanh(Win.dot(u_augmented*sigma_in) + W.dot(rho*x_pre))
 

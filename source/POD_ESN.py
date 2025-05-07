@@ -1,7 +1,7 @@
 """
 python script for POD.
 
-Usage: lyapunov.py [--input_path=<input_path> --output_path=<output_path> --modes=<modes> --hyperparam_file=<hyperparam_file> --config_number=<config_number>]
+Usage: lyapunov.py [--input_path=<input_path> --output_path=<output_path> --modes=<modes> --hyperparam_file=<hyperparam_file> --config_number=<config_number> --reduce_domain=<reduce_domain> --w_threshold=<w_threshold>]
 
 Options:
     --input_path=<input_path>            file path to use for data
@@ -9,6 +9,8 @@ Options:
     --modes=<modes>                      number of modes for POD 
     --hyperparam_file=<hyperparam_file>  hyperparameters for ESN
     --config_number=<config_number>      config_number [default: 0]
+    --reduce_domain=<reduce_domain>      reduce size of domain [default: False]
+    --w_threshold=<w_threshold>          w_threshold [defualt: False]
 """
 
 import os
@@ -50,6 +52,24 @@ modes = int(args['--modes'])
 hyperparam_file = args['--hyperparam_file']
 config_number = int(args['--config_number'])
 
+
+reduce_domain = args['--reduce_domain']
+if reduce_domain == 'False':
+    reduce_domain = False
+    print('domain not reduced', reduce_domain)
+elif reduce_domain == 'True':
+    reduce_domain = True
+    print('domain reduced', reduce_domain)
+
+w_threshold = args['--w_threshold']
+if w_threshold == 'False':
+    w_threshold = False
+    print('no threshold', w_threshold)
+elif w_threshold == 'True':
+    w_threshold = True
+    print('threshold', w_threshold)
+
+
 with open(hyperparam_file, "r") as f:
     hyperparams = json.load(f)
     Nr = hyperparams["Nr"]
@@ -57,6 +77,7 @@ with open(hyperparam_file, "r") as f:
     val_len = hyperparams["N_val"]
     test_len = hyperparams["N_test"]
     washout_len = hyperparams["N_washout"]
+    washout_len_val = hyperparams.get("N_washout_val", washout_len)
     t_lyap = hyperparams["t_lyap"]
     normalisation = hyperparams["normalisation"]
     ens = hyperparams["ens"]
@@ -306,7 +327,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, ti
             fig.colorbar(c1, ax=ax[0])
             ax[0].set_title('true')
             c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm)
-            fig.colorbar(c1, ax=ax[1])
+            fig.colorbar(c2, ax=ax[1])
             ax[1].set_title('reconstruction')
             c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:, i].T, cmap='Reds')
             fig.colorbar(c3, ax=ax[2])
@@ -329,7 +350,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, ti
             fig.colorbar(c1, ax=ax[0])
             ax[0].set_title('true')
             c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
-            fig.colorbar(c1, ax=ax[1])
+            fig.colorbar(c2, ax=ax[1])
             ax[1].set_title('reconstruction')
             c3 = ax[2].pcolormesh(time_vals, x,  abs_error[:,:,z_value, i].T, cmap='Reds')
             fig.colorbar(c3, ax=ax[2])
@@ -338,6 +359,29 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, ti
                 ax[v].set_ylabel('x')
             ax[-1].set_xlabel('time')
             fig.savefig(output_path+file_str+name+'_hovmoller_recon_error.png')
+            plt.close()
+
+            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+            minm = min(np.min(original[:, :, z_value,i]), np.min(reconstruction[:, :, z_value,i]))
+            maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
+            print(np.max(original[:, :, z_value,i]))
+            print(minm, maxm)
+            print("time shape:", np.shape(time_vals))
+            print("x shape:", np.shape(x))
+            print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
+            c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value, i].T)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(time_vals, x,  abs_error[:,:,z_value, i].T, cmap='Reds')
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('x')
+            ax[-1].set_xlabel('time')
+            fig.savefig(output_path+file_str+name+'_hovmoller_recon_diffbar_error.png')
             plt.close()
 
 
@@ -522,10 +566,20 @@ snapshots_load = 16000
 data_set, time_vals = load_data_set(input_path+'/data_4var_5000_48000.h5', variables, snapshots_load)
 print(np.shape(data_set))
 
-reduce_data_set = False
-if reduce_data_set:
-    data_set = data_set[:, 147:211, :, :]
-    x = x[147:211]
+reduce_domain = reduce_domain
+
+if reduce_domain:
+    # data_set = data_set[200:392,60:80,:,:] # 408 so we have 13 batches 12 for training and 1 for 'validation'
+    # x = x[60:80]
+    # time_vals = time_vals[200:392]
+    # print('reduced domain shape', np.shape(data_set))
+    # print('reduced x domain', np.shape(x))
+    # print('reduced x domain', len(x))
+    # print(x[0], x[-1])
+
+    data_set = data_set[:3900,128:160,:,:] # 408 so we have 13 batches 12 for training and 1 for 'validation'
+    x = x[128:160]
+    time_vals = time_vals[:3900]
     print('reduced domain shape', np.shape(data_set))
     print('reduced x domain', np.shape(x))
     print('reduced x domain', len(x))
@@ -554,8 +608,133 @@ n_components = modes
 snapshots_POD = 11200
 data_scaled = data_scaled[:snapshots_POD]
 data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_, cev = POD(data_scaled, n_components, f"modes{n_components}")
-
 U = data_reduced 
+
+centre_of_energy = False
+if centre_of_energy:
+
+    plot_rbf = True
+    def compute_center_of_energy(w_slice, x_coords=None):
+        """
+        Computes the center of energy in x-direction for each time step.
+        
+        Parameters:
+        - w_slice: np.ndarray of shape (T, X), the vertical velocity at a single z level across time.
+        - x_coords: Optional 1D array of x positions (length X). Defaults to 0 to X-1.
+        
+        Returns:
+        - center: np.ndarray of shape (T,), the energy-weighted center position at each time.
+        """
+        T, X = w_slice.shape
+        if x_coords is None:
+            x_coords = np.arange(X)
+
+        energy = np.abs(w_slice)**2  # energy at each x
+        weighted_sum = (energy * x_coords[None, :]).sum(axis=1)  # sum_x (x * |w|^2)
+        total_energy = energy.sum(axis=1) + 1e-8  # avoid division by zero
+        center = weighted_sum / total_energy
+        return center
+
+    def rbf_encode(center_positions, num_centers=10, domain_length=256, sigma=None):
+        """
+        Apply RBF encoding to the center positions.
+        
+        Parameters:
+        - center_positions: np.ndarray of shape (T,), the center positions of energy for each time step.
+        - num_centers: Number of RBF centers.
+        - domain_length: The length of the domain (e.g., the x-dimension size).
+        - sigma: The width (spread) of the RBFs. If None, it will be set to a default value.
+
+        Returns:
+        - np.ndarray of shape (T, num_centers) containing the RBF-encoded features for each time step.
+        """
+        T = center_positions.shape[0]
+        centers = np.linspace(0, domain_length - 1, num_centers)  # Evenly spaced centers in the domain
+        if sigma is None:
+            sigma = (domain_length / num_centers) / 2  # Default spread based on number of centers
+
+        # RBF encoding: exp(-((x - c)^2) / (2 * sigma^2))
+        rbf_features = np.exp(-((center_positions[:, None] - centers[None, :])**2) / (2 * sigma**2))
+        return rbf_features  # shape: (T, num_centers)
+
+    w_slice = data_scaled[:, :, 47, 1]
+    center_positions = compute_center_of_energy(w_slice, x)
+    
+    rbf_features = rbf_encode(center_positions, num_centers=10, domain_length=w_slice.shape[1], sigma=0.5)
+
+    U = np.hstack((data_reduced, rbf_features))
+
+    if plot_rbf:
+        time_step = 175
+        rbf_at_timestep = rbf_features[time_step,:]
+        # Generate x values for the plot (the RBF centers)
+        centers = np.linspace(x[0], x[-1], 10)  # Assuming domain length is 256
+        
+        # Plot the RBF features
+        fig, ax = plt.subplots(2, figsize=(8,6))
+        ax[0].plot(centers, rbf_at_timestep, marker='o', linestyle='-', color='b')
+        ax[0].set_xlabel('RBF Center Position (x)')
+        ax[0].set_ylabel('RBF Response')
+
+        ax[1].contourf(x, z, data_scaled[time_step, :, :, 1].T)
+        ax[1].set_xlabel('x')
+        ax[1].set_ylabel('z')
+        fig.suptitle(time_vals[time_step])
+        fig.savefig(output_path+'/rbf_features.png')
+        
+if w_threshold:
+    def detect_multiple_regions(w_slice, threshold=0.5, num_regions=3):
+        """
+        Detect multiple plumes by dividing the domain into regions and finding all regions with plumes.
+        
+        Parameters:
+        - w_slice: np.ndarray of shape (T, X), vertical velocity across time and space.
+        - threshold: Minimum height to consider a region as containing a plume.
+        - num_regions: Number of regions to divide the domain into.
+        
+        Returns:
+        - region_encoding: np.ndarray of shape (T, num_regions), encoding for the presence of plumes in each region.
+        """
+        T, X = w_slice.shape
+        region_encoding = np.zeros((T, num_regions))
+        
+        # Define the boundaries of the regions
+        region_width = X // num_regions
+        
+        for t in range(T):
+            # Detect the indices where vertical velocity exceeds the threshold
+            plume_region = np.where(np.abs(w_slice[t, :]) > threshold)[0]
+            
+            for region_idx in range(num_regions):
+                # Define the start and end indices of the current region
+                region_start = region_idx * region_width
+                region_end = (region_idx + 1) * region_width
+                
+                # If any plume points are within this region, mark it as 1
+                if np.any((plume_region >= region_start) & (plume_region < region_end)):
+                    region_encoding[t, region_idx] = 1
+        
+        return region_encoding
+    
+    w_slice = data_scaled[:,:,47,1]
+    threshold_w = np.percentile(w_slice, 99)
+    region_encoding = detect_multiple_regions(w_slice, threshold=threshold_w, num_regions=8)
+
+    fig, ax = plt.subplots(2, figsize=(8,6))
+    ax[0].pcolormesh(time_vals[:750], x[::32], region_encoding[:750].T, cmap='Reds', shading='auto')
+    ax[1].contourf(time_vals[:750], x, w_slice[:750].T)
+    fig.savefig(output_path+'/regions.png')
+    
+    time_step = 175
+    fig, ax =plt.subplots(2, figsize=(8,6))
+    #ax[0].pcolormesh(x[::32], [0,1], region_encoding[time_step].T)
+    ax[0].plot(x[::32], region_encoding[time_step])
+    ax[1].plot(x, w_slice[time_step])
+    fig.savefig(output_path+'/region_timestep.png')
+
+    U = np.hstack((data_reduced, region_encoding))
+
+
 print('shape of data for ESN', np.shape(U))
 
 # number of time steps for washout, train, validation, test
@@ -563,11 +742,12 @@ t_lyap    = t_lyap
 dt        = 2
 N_lyap    = int(t_lyap//dt)
 print('N_lyap', N_lyap)
-N_washout = washout_len*N_lyap #75
+N_washout = int(washout_len*N_lyap) #75
+N_washout_val = int(washout_len_val*N_lyap)
 N_train   = train_len*N_lyap #600
 N_val     = val_len*N_lyap #45
 N_test    = test_len*N_lyap #45
-dim       = n_components
+dim       = U.shape[1]
 
 # compute normalization factor (range component-wise)
 U_data = U[:N_washout+N_train].copy()
@@ -580,6 +760,10 @@ u_mean = U_data.mean(axis=0)
 norm_std = U_data.std(axis=0)
 normalisation = normalisation #on, off, standard
 
+#standardisation_plusregions
+norm_std_pr = U_data[:, :n_components].std(axis=0)
+u_mean_pr   = U_data[:, :n_components].mean(axis=0)
+
 print('norm', norm)
 print('u_mean', u_mean)
 print('norm_std', norm_std)
@@ -591,6 +775,7 @@ U_tv  = U[N_washout:N_washout+N_train-1].copy() #inputs
 Y_tv  = U[N_washout+1:N_washout+N_train].copy() #data to match at next timestep
 
 indexes_to_plot = np.array([1, 2, 10, 50, 64] ) -1
+indexes_to_plot = indexes_to_plot[indexes_to_plot <= (n_components-1)]
 
 # adding noise to training set inputs with sigma_n the noise of the data
 # improves performance and regularizes the error as a function of the hyperparameters
@@ -623,13 +808,15 @@ elif normalisation == 'standard':
     bias_in   = np.array([np.mean(np.abs((U_data-u_mean)/norm_std))]) #input bias (average absolute value of the inputs)
 elif normalisation == 'off':
     bias_in   = np.array([np.mean(np.abs(U_data))]) #input bias (average absolute value of the inputs)
+elif normalisation == 'standard_plusregions':
+    bias_in   = np.array([np.mean(np.abs((U_data[:,:n_components]-u_mean_pr)/norm_std_pr))]) #input bias (average absolute value of the inputs)
 bias_out  = np.array([1.]) #output bias
 
 N_units      = Nr #neurons
 connectivity = 3
 sparseness   = 1 - connectivity/(N_units-1)
 
-tikh = np.array([1e-1,1e-2,1e-3,1e-4,1e-6]) #np.array([1e-3,1e-6,1e-9,1e-12])  # Tikhonov factor (optimize among the values in this list)
+tikh = np.array([1e-1, 1e-2, 1e-3]) #np.array([1e-3,1e-6,1e-9,1e-12])  # Tikhonov factor (optimize among the values in this list)
 
 print('tikh:', tikh)
 print('N_r:', N_units, 'sparsity:', sparseness)
@@ -640,8 +827,8 @@ n_in  = 0           #Number of Initial random points
 
 spec_in     = .8    #range for hyperparameters (spectral radius and input scaling)
 spec_end    = 0.99   
-in_scal_in  = np.log10(0.01)
-in_scal_end = np.log10(5.0)
+in_scal_in  = np.log10(0.1)
+in_scal_end = np.log10(2.5)
 
 # In case we want to start from a grid_search, the first n_grid_x*n_grid_y points are from grid search
 n_grid_x = grid_x
@@ -717,7 +904,7 @@ if not os.path.exists(output_path):
 val      = eval(val)
 alpha = alpha
 N_fw     = n_forward*N_lyap
-N_fo     = (N_train-N_val-N_washout)//N_fw + 1 
+N_fo     = (N_train-N_val-N_washout_val)//N_fw + 1 
 #N_fo     = 33                     # number of validation intervals
 N_in     = N_washout                 # timesteps before the first validation interval (can't be 0 due to implementation)
 #N_fw     = (N_train-N_val-N_washout)//(N_fo-1) # how many steps forward the validation interval is shifted (in this way they are evenly spaced)
@@ -891,9 +1078,12 @@ test_interval       = True
 if validation_interval:
     ##### quick test #####
     print('VALIDATION (TEST)')
-    print(N_washout)
+    print(N_washout_val)
     N_test   = n_tests                    #number of intervals in the test set
-    N_tstart = 500                    #where the first test interval starts
+    if reduce_domain:
+        N_tstart = 500 #40
+    else:
+        N_tstart = 500                    #where the first test interval starts
     N_intt   = test_len*N_lyap            #length of each test set interval
 
     # #prediction horizon normalization factor and threshold
@@ -939,8 +1129,14 @@ if validation_interval:
             print('index:', N_tstart + i*N_intt)
             print('start_time:', time_vals[N_tstart + i*N_intt])
             # data for washout and target in each interval
-            U_wash    = U[N_tstart - N_washout +i*N_intt : N_tstart + i*N_intt].copy()
+            U_wash    = U[N_tstart - N_washout_val +i*N_intt : N_tstart + i*N_intt].copy()
             Y_t       = U[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt].copy()
+
+            if reduce_domain:
+                fig,ax = plt.subplots(1, figsize=(12,3))
+                c1=ax.contourf(time_vals[N_tstart + i*N_intt : N_tstart + i*N_intt + N_intt], x, data_reconstructed[N_tstart + i*N_intt : N_tstart + i*N_intt + N_intt,:,32,0].T)
+                fig.colorbar(c1, ax=ax)
+                fig.savefig(output_path+'/validation_slice_w.png')
 
             #washout for each interval
             Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
@@ -958,8 +1154,14 @@ if validation_interval:
             nrmse_error[i, :] = Y_err
 
             ##### reconstructions ####
-            _, reconstructed_truth       = inverse_POD(Y_t, pca_)
-            _, reconstructed_predictions = inverse_POD(Yh_t, pca_)
+            if w_threshold:
+                _, reconstructed_truth       = inverse_POD(Y_t[:,:n_components], pca_)
+                _, reconstructed_predictions = inverse_POD(Yh_t[:,:n_components], pca_)
+                region_encoding_truth        = Y_t[:,n_components:]
+                region_encoding_predictions  = Yh_t[:,n_components:]
+            else:
+                _, reconstructed_truth       = inverse_POD(Y_t, pca_)
+                _, reconstructed_predictions = inverse_POD(Yh_t, pca_)
 
             # rescale
             reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
@@ -1027,7 +1229,9 @@ if validation_interval:
                         
                         #### modes prediction ####
                         fig,ax =plt.subplots(len(indexes_to_plot),sharex=True, tight_layout=True)
-                        xx = np.arange(U_wash[:,-2].shape[0])/N_lyap
+                        print(np.shape(U_wash))
+                        xx = np.arange(U_wash[:,0].shape[0])/N_lyap
+                        print(np.shape(xx))
                         print(np.shape(xx), xx[0], xx[-1])
                         for v in range(len(indexes_to_plot)):
                             index = indexes_to_plot[v]
@@ -1064,9 +1268,17 @@ if validation_interval:
                         fig.savefig(output_path+'/PH_validation_ens%i_test%i.png' % (j,i))
                         plt.close()
 
+                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
+                        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
+                        ax.plot(np.linalg.norm(Xa1[:, :N_units], axis=1))
+                        ax.grid()
+                        ax.set_ylabel('res_states')
+                        fig.savefig(output_path+'/res_states_washout_ens%i_test%i.png' % (j,i))
+                        plt.close()
+
                         # reconstruction after scaling
                         print('reconstruction and error plot')
-                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 2*N_lyap, xx, 'ESN_validation_ens%i_test%i' %(j,i))
+                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, xx, 'ESN_validation_ens%i_test%i' %(j,i))
 
                         if len(variables) == 4:
                             fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
@@ -1138,7 +1350,10 @@ if test_interval:
     ##### quick test #####
     print('TESTING')
     N_test   = n_tests                    #number of intervals in the test set
-    N_tstart = 1050    #where the first test interval starts
+    if reduce_domain:
+        N_tstart = 3300 #75
+    else:
+        N_tstart = 3300 #850    #where the first test interval starts
     N_intt   = test_len*N_lyap             #length of each test set interval
 
     # #prediction horizon normalization factor and threshold
@@ -1184,8 +1399,14 @@ if test_interval:
             print(N_tstart + i*N_intt)
             print('start_time:', time_vals[N_tstart + i*N_intt])
             # data for washout and target in each interval
-            U_wash    = U[N_tstart - N_washout +i*N_intt : N_tstart + i*N_intt].copy()
+            U_wash    = U[N_tstart - N_washout_val +i*N_intt : N_tstart + i*N_intt].copy()
             Y_t       = U[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt].copy()
+
+            if reduce_domain:
+                fig,ax = plt.subplots(1, figsize=(12,3))
+                c1=ax.contourf(time_vals[N_tstart + i*N_intt : N_tstart + i*N_intt + N_intt], x, data_reconstructed[N_tstart + i*N_intt : N_tstart + i*N_intt + N_intt,:,32,0].T)
+                fig.colorbar(c1, ax=ax)
+                fig.savefig(output_path+'/test_slice_w.png')
 
             #washout for each interval
             Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
@@ -1203,8 +1424,15 @@ if test_interval:
             nrmse_error[i, :] = Y_err
 
             ##### reconstructions ####
-            _, reconstructed_truth       = inverse_POD(Y_t, pca_)
-            _, reconstructed_predictions = inverse_POD(Yh_t, pca_)
+            if w_threshold:
+                _, reconstructed_truth       = inverse_POD(Y_t[:,:n_components], pca_)
+                _, reconstructed_predictions = inverse_POD(Yh_t[:,:n_components], pca_)
+                region_encoding_truth        = Y_t[:,n_components:]
+                region_encoding_predictions  = Yh_t[:,n_components:]
+            else:
+                _, reconstructed_truth       = inverse_POD(Y_t, pca_)
+                _, reconstructed_predictions = inverse_POD(Yh_t, pca_)
+
 
             # rescale
             reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
@@ -1309,9 +1537,17 @@ if test_interval:
                         fig.savefig(output_path+'/PH_ens%i_test%i.png' % (j,i))
                         plt.close()
 
+                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
+                        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
+                        ax.plot(np.linalg.norm(Xa1[:, :N_units], axis=1))
+                        ax.grid()
+                        ax.set_ylabel('res_states')
+                        fig.savefig(output_path+'/res_states_test_washout_ens%i_test%i.png' % (j,i))
+                        plt.close()
+
                         # reconstruction after scaling
                         print('reconstruction and error plot')
-                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 2*N_lyap, xx, 'ESN_ens%i_test%i' %(j,i))
+                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, xx, 'ESN_ens%i_test%i' %(j,i))
 
                         if len(variables) == 4:
                             fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
@@ -1378,3 +1614,4 @@ if test_interval:
     with open(output_path_met_ALL, "w") as file:
         json.dump(metrics_ens_ALL, file, indent=4)
     print('finished testing')
+

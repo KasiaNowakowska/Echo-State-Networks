@@ -53,6 +53,11 @@ from sklearn.metrics import mean_squared_error
 import sys
 sys.stdout.reconfigure(line_buffering=True)
 
+from tensorflow.keras import backend as K
+import gc
+K.clear_session()
+gc.collect()
+
 import wandb
 wandb.login()
 
@@ -1167,8 +1172,9 @@ def main():
             ax.set_xlabel('epochs')
             ax.legend()
             fig.savefig(images_dir +'/EVR.png')
-
-
+    
+    K.clear_session()
+    gc.collect()
     print('finished job')
 
 wandb.agent(sweep_id=sweep_id, function=main, entity="mm17ktn-university-of-leeds", project=project_name)

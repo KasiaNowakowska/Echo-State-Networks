@@ -88,8 +88,8 @@ def RVC_Noise(x):
         
         #select washout and validation
         p      = N_in + i*N_fw
-        Y_val  = U[N_washout + p : N_washout + p + N_val].copy()
-        U_wash = U[            p : N_washout + p        ].copy()
+        Y_val  = U[N_washout_val + p : N_washout_val + p + N_val].copy()
+        U_wash = U[            p : N_washout_val + p        ].copy()
         
         #washout before closed loop
         xf = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)[-1]
@@ -112,6 +112,58 @@ def RVC_Noise(x):
               rho, sigma_in, tikh_opt[k-1],  Mean[a]/N_fo)
 
     return Mean[a]/N_fo
+
+def RVC_Noise_weightedloss(x):
+    #Recycle Validation
+    
+    global tikh_opt, k, ti 
+    #tikh, U_washout, U_tv, Y_tv, U, N_in, N_fw, N_washout, N_val, N_units
+    #print(tikh)
+    #setting and initializing
+    rho      = x[0]
+    sigma_in = round(10**x[1],2)
+    ti       = time.time()
+    lenn     = tikh.size
+    Mean     = np.zeros(lenn)
+    
+    #Train using tv: training+val
+    Wout = train_n(U_washout, U_tv, Y_tv, tikh, sigma_in, rho)[0]
+
+    #Different Folds in the validation set
+    t1   = time.time()
+    for i in range(N_fo):
+        
+        #select washout and validation
+        p      = N_in + i*N_fw
+        Y_val  = U[N_washout_val + p : N_washout_val + p + N_val].copy()
+        U_wash = U[            p : N_washout_val + p        ].copy()
+        
+        #washout before closed loop
+        xf = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)[-1]
+                  
+        for j in range(lenn):
+            #Validate
+            Yh_val   = closed_loop(N_val-1, xf, Wout[j], sigma_in, rho)[0]
+            err      = (Y_val-Yh_val)**2
+            
+            weights       = np.linspace(1.0, 0.1, len(err))  # heavier weight early
+            weighted_loss = np.sum(weights[:,None] * err) / np.sum(weights)
+            Mean[j]      += np.log10(weighted_loss)
+                            
+    if k==0: print('closed-loop time:', time.time() - t1)
+    
+    #select optimal tikh
+    a           = np.argmin(Mean)
+    tikh_opt[k] = tikh[a]
+    k          +=1
+    
+    #print for every set of hyperparameters
+    if print_flag:
+        print(k, ': Spectral radius, Input Scaling, Tikhonov, MSE:',
+              rho, sigma_in, tikh_opt[k-1],  Mean[a]/N_fo)
+
+    return Mean[a]/N_fo
+
 
 def RVC_Noise_PH(x):
     #Recycle Validation
@@ -291,8 +343,8 @@ def RVC_Noise_weighted(x):
         
         #select washout and validation
         p      = N_in + i*N_fw
-        Y_val  = U[N_washout + p : N_washout + p + N_val].copy()
-        U_wash = U[            p : N_washout + p        ].copy()
+        Y_val  = U[N_washout_val + p : N_washout_val + p + N_val].copy()
+        U_wash = U[            p : N_washout_val + p        ].copy()
         
         #washout before closed loop
         xf = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)[-1]
@@ -368,8 +420,8 @@ def RVC_Noise_FFT(x):
         
         #select washout and validation
         p      = N_in + i*N_fw
-        Y_val  = U[N_washout + p : N_washout + p + N_val].copy()
-        U_wash = U[            p : N_washout + p        ].copy()
+        Y_val  = U[N_washout_val + p : N_washout_val + p + N_val].copy()
+        U_wash = U[            p : N_washout_val + p        ].copy()
         
         #washout before closed loop
         xf = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)[-1]
