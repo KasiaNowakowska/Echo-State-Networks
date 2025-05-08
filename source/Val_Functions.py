@@ -146,7 +146,7 @@ def RVC_Noise_weightedloss(x):
             Yh_val   = closed_loop(N_val-1, xf, Wout[j], sigma_in, rho)[0]
             err      = (Y_val-Yh_val)**2
             
-            weights       = np.linspace(1.0, 0.1, len(err))  # heavier weight early
+            weights       = np.exp(-np.linspace(0, 3, len(err))) #np.linspace(1.0, 0.1, len(err))  # heavier weight early
             weighted_loss = np.sum(weights[:,None] * err) / np.sum(weights)
             Mean[j]      += np.log10(weighted_loss)
                             
@@ -203,7 +203,7 @@ def RVC_Noise_PH(x):
             Mean[j]    += np.log10(np.mean((Y_val-Yh_val)**2))
             Y_err       = np.sqrt(np.mean((Y_val-Yh_val)**2, axis=1))/sigma_ph
             PH_val      = np.argmax(Y_err>threshold_ph)/N_lyap
-            if PH_val == 0 and PH_val<threshold_ph: PH_val = N_val/N_lyap #(in case PH is larger than interval)
+            if PH_val == 0 and Y_err[0]<threshold_ph: PH_val = N_val/N_lyap #(in case PH is larger than interval)
             PH[j]      += -PH_val
 
                             

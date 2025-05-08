@@ -65,7 +65,7 @@ ax.set_xlabel('time')
 fig.savefig(output_path+'/LorenzAmplitude.png')
 
 # Parameters
-nx, nz = 128, 64  # Grid resolution in x and z
+nx, nz = 256, 64  # Grid resolution in x and z
 nt = 1000         # Number of snapshots
 time = np.linspace(0, 50, nt, endpoint=False)  # Time vector
 
@@ -94,8 +94,9 @@ print(k, omega, c)
 plume_data = np.zeros((nt, nx, nz))
 wave_data = np.zeros((nt, nx, nz))
 combined_data = np.zeros((nt, nx, nz))
+upgraded_data = np.zeros((nt, nx, nz))
 
-data_type = 'coupled'
+data_type = 'upgraded'
 
 if data_type == 'uncoupled':
     # Generate (uncoupled) data
@@ -110,6 +111,26 @@ if data_type == 'uncoupled':
         plume_data[t_idx] = plume.T
         wave_data[t_idx] = wave.T
         combined_data[t_idx] = plume.T + wave.T
+elif data_type == 'upgraded':
+    y_min = np.min(z_values[5000:10000])
+    y_max = np.max(z_values[5000:10000])
+    print(y_min, y_max)
+    print(z_values[5000:10000])
+    scaled_y_values = (z_values[5000:10000] - y_min) / (y_max - y_min) * 10  # Scaling to 0-10
+    print(scaled_y_values)
+    
+    for t_idx, t in enumerate(time):
+        x0 = scaled_y_values[t_idx]
+        
+        # Gaussian plume
+        plume = A[t_idx] * np.exp(-((x_grid - x0)**2 / (2 * sigma_x**2) + (z_grid - z0)**2 / (2 * sigma_z**2)))
+
+        # Traveling wave
+        wave = np.sin(k * x_grid - omega * t)
+
+        # Store data
+        upgraded_data[t_idx] = plume.T + wave.T
+
 elif data_type == 'coupled':
     threshold = 0.6
     # Generate data
@@ -132,10 +153,28 @@ elif data_type == 'coupled':
         combined_data[t_idx] = (plume_masked + wave).T  # Keep total combined data
 
 
-with h5py.File(output_path+'plume_wave_dataset.h5', 'w') as hf:
-    hf.create_dataset('plume', data=plume_data)
-    hf.create_dataset('wave', data=wave_data)
-    hf.create_dataset('combined', data=combined_data)
+# with h5py.File(output_path+'plume_wave_dataset.h5', 'w') as hf:
+#     hf.create_dataset('plume', data=plume_data)
+#     hf.create_dataset('wave', data=wave_data)
+#     hf.create_dataset('combined', data=combined_data)
+
+#     # Save grid information
+#     hf.create_dataset('x', data=x)  # 1D x-axis
+#     hf.create_dataset('z', data=z)  # 1D z-axis
+#     hf.create_dataset('time', data=time)  # 1D time vector
+#     hf.create_dataset('x_grid', data=x_grid)  # 2D meshgrid for x
+#     hf.create_dataset('z_grid', data=z_grid)  # 2D meshgrid for z
+
+#     hf.attrs['description'] = "Dataset with Gaussian plume, sine waves, and their combination"
+#     hf.attrs['grid'] = f"64x64 (x,z) with {nt} time steps"
+#     hf.attrs['plume_params'] = f"A={A}, sigma_x={sigma_x}, sigma_z={sigma_z}"
+#     hf.attrs['wave_params'] = f"k={k}, omega={omega}, c={c}"
+#     hf.attrs['num_snapshots'] = nt
+#     hf.attrs['dt'] = dt  # Time step
+# print("Dataset saved as plume_wave_dataset.h5")
+
+with h5py.File(output_path+'upgraded_dataset.h5', 'w') as hf:
+    hf.create_dataset('upgraded', data=upgraded_data)
 
     # Save grid information
     hf.create_dataset('x', data=x)  # 1D x-axis
@@ -150,7 +189,7 @@ with h5py.File(output_path+'plume_wave_dataset.h5', 'w') as hf:
     hf.attrs['wave_params'] = f"k={k}, omega={omega}, c={c}"
     hf.attrs['num_snapshots'] = nt
     hf.attrs['dt'] = dt  # Time step
-print("Dataset saved as plume_wave_dataset.h5")
+print("Dataset saved as upgraded_dataset.h5")
 
 
 #### Visualise ####
@@ -173,13 +212,16 @@ def plot_snapshot(data, t_idx, filename):
     fig.savefig(output_path+filename)
 
 if Plotting:
-    plot_hovmoller(plume_data, 32, 'plume_hov.png')
-    plot_hovmoller(wave_data, 32, 'wave_hov.png')
-    plot_hovmoller(combined_data, 32, 'combined_hov.png')
+    # plot_hovmoller(plume_data, 32, 'plume_hov.png')
+    # plot_hovmoller(wave_data, 32, 'wave_hov.png')
+    # plot_hovmoller(combined_data, 32, 'combined_hov.png')
+
+    # snapshot_idx = 450  # Example snapshot index
+    # plot_snapshot(plume_data, snapshot_idx, 'plume_snap.png')
+    # plot_snapshot(wave_data, snapshot_idx, 'wave_snap.png')
+    # plot_snapshot(combined_data, snapshot_idx, 'wave_snap.png')
+
+    plot_hovmoller(upgraded_data, 32, 'upgraded_hov.png')
 
     snapshot_idx = 450  # Example snapshot index
-    plot_snapshot(plume_data, snapshot_idx, 'plume_snap.png')
-    plot_snapshot(wave_data, snapshot_idx, 'wave_snap.png')
-    plot_snapshot(combined_data, snapshot_idx, 'wave_snap.png')
-
-
+    plot_snapshot(upgraded_data, snapshot_idx, 'upgraded_snap.png')

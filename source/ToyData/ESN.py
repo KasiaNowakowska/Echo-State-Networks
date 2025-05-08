@@ -44,9 +44,6 @@ print('run functions files')
 from docopt import docopt
 args = docopt(__doc__)
 
-input_path='./ToyData/'
-output_path='./ToyData/'
-
 input_path = args['--input_path']
 output_path = args['--output_path']
 modes = int(args['--modes'])
@@ -116,7 +113,7 @@ def POD(data, c,  file_str, Plotting=True):
     print('shape of reduced_data:', np.shape(data_reduced))
     data_reconstructed_reshaped = pca.inverse_transform(data_reduced)
     print('shape of data reconstructed flattened:', np.shape(data_reconstructed_reshaped))
-    data_reconstructed = data_reconstructed_reshaped.reshape(data.shape[0], data.shape[1], data.shape[2])
+    data_reconstructed = data_reconstructed_reshaped.reshape(data.shape[0], data.shape[1], data.shape[2], data.shape[3])
     print('shape of data reconstructed:', np.shape(data_reconstructed))
 
     components = pca.components_
@@ -142,7 +139,7 @@ def POD(data, c,  file_str, Plotting=True):
         plt.close()
 
         # Plot the time coefficients and mode structures
-        indexes_to_plot = np.array([1, 2, 3, 4] ) -1
+        indexes_to_plot = np.array([1, 2, 4, 8, 10] ) -1
         indexes_to_plot = indexes_to_plot[indexes_to_plot <= (c-1)]
         print('plotting for modes', indexes_to_plot)
         print('number of modes', len(indexes_to_plot))
@@ -452,12 +449,17 @@ def MSE(original_data, reconstructed_data):
 name=['combined']
 names = ['combined']
 n_components = 3
+# name=['upgraded']
+# names = ['upgraded']
+# n_components = 5
+
 num_variables = 1
 snapshots = 1000
 data_set, x, z, time_vals = load_data_set(input_path+'/plume_wave_dataset.h5', name, snapshots)
+# data_set, x, z, time_vals = load_data_set(input_path+'/upgraded_dataset.h5', name, snapshots)
 print(np.shape(data_set))
 
-def add_noise(data, noise_level=0.01):
+def add_noise(data, noise_level=0.01, seed=42):
     """
     Add Gaussian noise to a dataset of shape (time, x, z, channels).
     
@@ -468,11 +470,12 @@ def add_noise(data, noise_level=0.01):
     Returns:
         noisy_data (np.ndarray): Noisy version of the input data.
     """
+    np.random.seed(seed)
     noise = noise_level * np.random.randn(*data.shape)
     noisy_data = data + noise
     return noisy_data
-
-noise_level = 0.01
+  
+noise_level = 0.5
 data_set = add_noise(data_set, noise_level=noise_level)
 fig, ax =plt.subplots(1)
 ax.contourf(data_set[:,:,32,0].T)
@@ -538,7 +541,8 @@ U_washout = U[:N_washout].copy()
 U_tv  = U[N_washout:N_washout+N_train-1].copy() #inputs
 Y_tv  = U[N_washout+1:N_washout+N_train].copy() #data to match at next timestep
 
-indexes_to_plot = np.array([1, 2, 3] ) -1
+indexes_to_plot = np.array([1, 2, 4, 8, 10] ) -1
+indexes_to_plot = indexes_to_plot[indexes_to_plot < n_components]
 
 # adding noise to training set inputs with sigma_n the noise of the data
 # improves performance and regularizes the error as a function of the hyperparameters
@@ -551,7 +555,7 @@ rnd1  = np.random.RandomState(seed)
 noisy = True
 if noisy:
     data_std = np.std(U,axis=0)
-    sigma_n = 1e-3     #change this to increase/decrease noise in training inputs (up to 1e-1)
+    sigma_n = noise    #change this to increase/decrease noise in training inputs (up to 1e-1)
     for i in range(n_components):
         U_tv[:,i] = U_tv[:,i] \
                         + rnd1.normal(0, sigma_n*data_std[i], N_train-1)
@@ -647,7 +651,7 @@ print(search_space)
 #Number of Networks in the ensemble
 ensemble = ens
 
-data_dir = '/Run_n_units{0:}_ensemble{1:}_normalisation{2:}/'.format(N_units, ensemble, normalisation)
+data_dir = '/Run_n_units{0:}_ensemble{1:}_normalisation{2:}_config{3:}/'.format(N_units, ensemble, normalisation, config_number)
 output_path = output_path+data_dir
 print(output_path)
 if not os.path.exists(output_path):

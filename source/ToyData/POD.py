@@ -16,9 +16,9 @@ import sys
 sys.stdout.reconfigure(line_buffering=True)
 
 input_path='./ToyData/'
-output_path='./ToyData/'
+output_path='./ToyData/upgraded/'
 
-projection = True
+projection = False
 
 def load_data(file, name):
     with h5py.File(file, 'r') as hf:
@@ -79,7 +79,7 @@ def POD(data, c,  file_str, Plotting=True):
         plt.close()
 
         # Plot the time coefficients and mode structures
-        indexes_to_plot = np.array([1, 2, 3, 4] ) -1
+        indexes_to_plot = np.array([1, 2, 4, 8, 10] ) -1
         indexes_to_plot = indexes_to_plot[indexes_to_plot <= (c-1)]
         print('plotting for modes', indexes_to_plot)
         print('number of modes', len(indexes_to_plot))
@@ -122,7 +122,7 @@ def POD(data, c,  file_str, Plotting=True):
         #plt.show()
         plt.close()
 
-    return data_reduced, data_reconstructed_reshaped, data_reconstructed, pca
+    return data_reduced, data_reconstructed_reshaped, data_reconstructed, pca, cumulative_explained_variance[-1]
 
 def inverse_POD(data_reduced, pca_):
     data_reconstructed_reshaped = pca_.inverse_transform(data_reduced)
@@ -250,14 +250,81 @@ def MSE(original_data, reconstructed_data):
     mse = mean_squared_error(original_data, reconstructed_data)
     return mse
 
-'''
+def ss_inverse_transform(data, scaler):
+    if data.ndim == 4: #len(time_vals), len(x), len(z), len(var)
+        data_reshape = data.reshape(-1, data.shape[-1])
+    elif data.ndim == 3:
+        data_reshape = data_set.reshape(-1, 1)
+    else:
+        print('data needs to be 4 dimensions')
+    if data_reshape.ndim == 2:
+        print("data array is 2D.")
+    else:
+        print("data array is not 2D")
+        
+    print('shape before inverse scaling', np.shape(data_reshape))
+
+    data_unscaled = scaler.inverse_transform(data_reshape)
+    data_unscaled = data_unscaled.reshape(data.shape)
+    
+    if data_unscaled.ndim == 4:
+        print('unscaled and reshaped to 4 dimensions')
+    else:
+        print('not unscaled properly')
+        
+    return data_unscaled
+
+def add_noise(data, noise_level=0.01):
+    """
+    Add Gaussian noise to a dataset of shape (time, x, z, channels).
+    
+    Parameters:
+        data (np.ndarray): Input data of shape (T, X, Z, C).
+        noise_level (float): Standard deviation of Gaussian noise.
+    
+    Returns:
+        noisy_data (np.ndarray): Noisy version of the input data.
+    """
+    noise = noise_level * np.random.randn(*data.shape)
+    noisy_data = data + noise
+    return noisy_data
+
 #### plume ###
-data_names = ['plume', 'wave', 'combined']
-n_modes = [1, 2, 3]
+data_names = ['upgraded']#['combined']
+n_modes = [10]
 for index, name in enumerate(data_names):
-    data_set, x, z, time = load_data(input_path+'/plume_wave_dataset.h5', name)
-    data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_ = POD(data_set, n_modes[index], name)
-    plot_reconstruction(data_set, data_reconstructed, 32, 20, name)
+    #data_set, x, z, time = load_data(input_path+'/plume_wave_dataset.h5', name)
+    data_set, x, z, time = load_data(input_path+'/upgraded_dataset.h5', name)
+    print('shape of dataset', np.shape(data_set))
+
+    noise_level = 0
+    data_set = add_noise(data_set, noise_level=noise_level)
+    fig, ax =plt.subplots(1)
+    ax.contourf(data_set[:,:,32].T)
+    fig.savefig(output_path+f"/combined_data_noise{noise_level}.png")
+
+    # fit the scaler
+    scaling = 'SS'
+    if scaling == 'SS':
+        print('applying standard scaler')
+        data_reshape = data_set.reshape(-1, 1)
+        print('shape of data reshaped', np.shape(data_reshape))
+        scaler = StandardScaler()
+        scaler.fit(data_reshape)
+        print('means', scaler.mean_)
+
+        print('shape of data before scaling', np.shape(data_reshape))
+        data_scaled_reshape = scaler.transform(data_reshape)
+        #reshape 
+        data_scaled = data_scaled_reshape.reshape(data_set.shape)
+    else:
+        print('no scaling')
+        data_scaled = data_set
+    
+    
+    data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_, cev = POD(data_scaled, n_modes[index], name)
+    data_reconstructed = ss_inverse_transform(data_reconstructed, scaler)
+    plot_reconstruction(data_set, data_reconstructed, 32, 20, name+'_scaled')
     nrmse = NRMSE(data_set, data_reconstructed)
     mse   = MSE(data_set, data_reconstructed)
     evr   = EVR_recon(data_set, data_reconstructed)
@@ -269,7 +336,7 @@ for index, name in enumerate(data_names):
     print('SSIM', SSIM)
 
     # Full path for saving the file
-    output_file = name + '_metrics.json' 
+    output_file = name + '_scaled_metrics.json' 
 
     output_path_met = os.path.join(output_path, output_file)
 
@@ -279,12 +346,13 @@ for index, name in enumerate(data_names):
     "MSE": mse,
     "NRMSE": nrmse,
     "SSIM": SSIM,
+    "EV from POD": cev,
     }
 
     with open(output_path_met, "w") as file:
         json.dump(metrics, file, indent=4)
-'''
 
+'''
 name = 'combined'
 data_set, x, z, time_vals = load_data(input_path+'/plume_wave_dataset.h5', name)
 
@@ -356,3 +424,4 @@ if projection:
 
     with open(output_path_met, "w") as file:
         json.dump(metrics, file, indent=4)
+'''
