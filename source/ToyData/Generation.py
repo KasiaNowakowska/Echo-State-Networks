@@ -95,8 +95,9 @@ plume_data = np.zeros((nt, nx, nz))
 wave_data = np.zeros((nt, nx, nz))
 combined_data = np.zeros((nt, nx, nz))
 upgraded_data = np.zeros((nt, nx, nz))
+moderate_data = np.zeros((nt, nx, nz))
 
-data_type = 'upgraded'
+data_type = 'moderate'
 
 if data_type == 'uncoupled':
     # Generate (uncoupled) data
@@ -151,6 +152,29 @@ elif data_type == 'coupled':
         plume_data[t_idx] = plume.T
         wave_data[t_idx] = wave.T
         combined_data[t_idx] = (plume_masked + wave).T  # Keep total combined data
+elif data_type == 'moderate':
+    # Updated plume center paths
+    x0_vals = 7.0 + 0.3 * np.sin(2 * np.pi * time / 40)
+    #z0_vals = 7.0 + 0.3 * np.cos(2 * np.pi * time / 40)
+
+    # Mild modulation coefficient
+    modulation_strength = 0.25
+    print('mimn,maxm', min(A[:1000]), max(A[:1000]))
+
+    for t_idx, t in enumerate(time):
+        x0_t = x0_vals[t_idx]
+        #z0_t = z0_vals[t_idx]
+
+        # Plume
+        plume = A[t_idx] * np.exp(-((x_grid - x0_t)**2 / (2 * sigma_x**2) + 
+                                    (z_grid - z0)**2 / (2 * sigma_z**2)))
+
+        # Wave modulated slightly by plume amplitude
+        wave = (1 + modulation_strength * A[t_idx]) * np.sin(k * x_grid - omega * t)
+
+        # Combine
+        moderate_data[t_idx] = plume.T + wave.T
+
 
 
 # with h5py.File(output_path+'plume_wave_dataset.h5', 'w') as hf:
@@ -173,8 +197,8 @@ elif data_type == 'coupled':
 #     hf.attrs['dt'] = dt  # Time step
 # print("Dataset saved as plume_wave_dataset.h5")
 
-with h5py.File(output_path+'upgraded_dataset.h5', 'w') as hf:
-    hf.create_dataset('upgraded', data=upgraded_data)
+with h5py.File(output_path+'moderate_dataset.h5', 'w') as hf:
+    hf.create_dataset('moderate', data=moderate_data)
 
     # Save grid information
     hf.create_dataset('x', data=x)  # 1D x-axis
@@ -189,7 +213,7 @@ with h5py.File(output_path+'upgraded_dataset.h5', 'w') as hf:
     hf.attrs['wave_params'] = f"k={k}, omega={omega}, c={c}"
     hf.attrs['num_snapshots'] = nt
     hf.attrs['dt'] = dt  # Time step
-print("Dataset saved as upgraded_dataset.h5")
+print("Dataset saved as moderate_dataset.h5")
 
 
 #### Visualise ####
@@ -221,7 +245,7 @@ if Plotting:
     # plot_snapshot(wave_data, snapshot_idx, 'wave_snap.png')
     # plot_snapshot(combined_data, snapshot_idx, 'wave_snap.png')
 
-    plot_hovmoller(upgraded_data, 32, 'upgraded_hov.png')
+    plot_hovmoller(moderate_data, 32, 'moderate_hov.png')
 
     snapshot_idx = 450  # Example snapshot index
-    plot_snapshot(upgraded_data, snapshot_idx, 'upgraded_snap.png')
+    plot_snapshot(moderate_data, snapshot_idx, 'moderate_snap.png')

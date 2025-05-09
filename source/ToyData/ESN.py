@@ -139,7 +139,7 @@ def POD(data, c,  file_str, Plotting=True):
         plt.close()
 
         # Plot the time coefficients and mode structures
-        indexes_to_plot = np.array([1, 2, 4, 8, 10] ) -1
+        indexes_to_plot = np.array([1, 2, 3, 4, 8, 10] ) -1
         indexes_to_plot = indexes_to_plot[indexes_to_plot <= (c-1)]
         print('plotting for modes', indexes_to_plot)
         print('number of modes', len(indexes_to_plot))
@@ -446,17 +446,17 @@ def MSE(original_data, reconstructed_data):
     return mse
 
 #### LOAD DATA AND POD ####
-name=['combined']
-names = ['combined']
-n_components = 3
-# name=['upgraded']
-# names = ['upgraded']
-# n_components = 5
+# name=['combined']
+# names = ['combined']
+# n_components = 3
+name=['moderate']
+names = ['moderate']
+n_components = 4
 
 num_variables = 1
 snapshots = 1000
-data_set, x, z, time_vals = load_data_set(input_path+'/plume_wave_dataset.h5', name, snapshots)
-# data_set, x, z, time_vals = load_data_set(input_path+'/upgraded_dataset.h5', name, snapshots)
+# data_set, x, z, time_vals = load_data_set(input_path+'/plume_wave_dataset.h5', name, snapshots)
+data_set, x, z, time_vals = load_data_set(input_path+'/moderate_dataset.h5', name, snapshots)
 print(np.shape(data_set))
 
 def add_noise(data, noise_level=0.01, seed=42):
@@ -541,7 +541,7 @@ U_washout = U[:N_washout].copy()
 U_tv  = U[N_washout:N_washout+N_train-1].copy() #inputs
 Y_tv  = U[N_washout+1:N_washout+N_train].copy() #data to match at next timestep
 
-indexes_to_plot = np.array([1, 2, 4, 8, 10] ) -1
+indexes_to_plot = np.array([1, 2, 3, 4, 8, 10] ) -1
 indexes_to_plot = indexes_to_plot[indexes_to_plot < n_components]
 
 # adding noise to training set inputs with sigma_n the noise of the data
@@ -581,7 +581,7 @@ N_units      = Nr #neurons
 connectivity = 3
 sparseness   = 1 - connectivity/(N_units-1)
 
-tikh = np.array([1e-1, 1e-2, 1e-3]) #np.array([1e-3,1e-6,1e-9,1e-12])  # Tikhonov factor (optimize among the values in this list)
+tikh = np.array([1e-1, 1e-2]) #np.array([1e-3,1e-6,1e-9,1e-12])  # Tikhonov factor (optimize among the values in this list)
 
 print('tikh:', tikh)
 print('N_r:', N_units, 'sparsity:', sparseness)

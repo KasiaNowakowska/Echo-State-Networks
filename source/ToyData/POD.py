@@ -16,7 +16,7 @@ import sys
 sys.stdout.reconfigure(line_buffering=True)
 
 input_path='./ToyData/'
-output_path='./ToyData/upgraded/'
+output_path='./ToyData/moderate/'
 
 projection = False
 
@@ -79,7 +79,7 @@ def POD(data, c,  file_str, Plotting=True):
         plt.close()
 
         # Plot the time coefficients and mode structures
-        indexes_to_plot = np.array([1, 2, 4, 8, 10] ) -1
+        indexes_to_plot = np.array([1, 2, 3, 4, 8, 10] ) -1
         indexes_to_plot = indexes_to_plot[indexes_to_plot <= (c-1)]
         print('plotting for modes', indexes_to_plot)
         print('number of modes', len(indexes_to_plot))
@@ -274,7 +274,7 @@ def ss_inverse_transform(data, scaler):
         
     return data_unscaled
 
-def add_noise(data, noise_level=0.01):
+def add_noise(data, noise_level=0.01, seed=42):
     """
     Add Gaussian noise to a dataset of shape (time, x, z, channels).
     
@@ -285,19 +285,20 @@ def add_noise(data, noise_level=0.01):
     Returns:
         noisy_data (np.ndarray): Noisy version of the input data.
     """
+    np.random.seed(seed)
     noise = noise_level * np.random.randn(*data.shape)
     noisy_data = data + noise
     return noisy_data
 
 #### plume ###
-data_names = ['upgraded']#['combined']
-n_modes = [10]
+data_names = ['moderate']#['combined']
+n_modes = [4]
 for index, name in enumerate(data_names):
     #data_set, x, z, time = load_data(input_path+'/plume_wave_dataset.h5', name)
-    data_set, x, z, time = load_data(input_path+'/upgraded_dataset.h5', name)
+    data_set, x, z, time = load_data(input_path+'/moderate_dataset.h5', name)
     print('shape of dataset', np.shape(data_set))
 
-    noise_level = 0
+    noise_level = 0.5
     data_set = add_noise(data_set, noise_level=noise_level)
     fig, ax =plt.subplots(1)
     ax.contourf(data_set[:,:,32].T)

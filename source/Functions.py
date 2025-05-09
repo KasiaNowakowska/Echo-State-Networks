@@ -64,12 +64,14 @@ def closed_loop(N, x0, Wout, sigma_in, rho):
     """
     xa    = x0.copy()
     Yh    = np.empty((N+1, dim))
+    Xa    = np.empty((N+1, N_units+1))
     Yh[0] = np.dot(xa, Wout)
     for i in np.arange(1,N+1):
         xa    = step(xa[:N_units], Yh[i-1], sigma_in, rho)
+        Xa[i] = xa
         Yh[i] = np.dot(xa, Wout) #np.linalg.multi_dot([xa, Wout])
 
-    return Yh, xa
+    return Yh, xa, Xa
 
 def train_n(U_washout, U_train, Y_train, tikh, sigma_in, rho):
     """ Trains ESN.
@@ -96,6 +98,8 @@ def train_n(U_washout, U_train, Y_train, tikh, sigma_in, rho):
         Xa1 = open_loop(U_train[ii*N_len:(ii+1)*N_len], xf, sigma_in, rho)[1:]
         xf  = Xa1[-1,:N_units].copy()
         if ii == 0 and k==0: print('open_loop time:', (time.time()-t1)*N_splits)
+        cond_number = np.linalg.cond(Xa1)
+        print("Condition number of reservoir state matrix:", cond_number)
 
         ##computing the matrices for the linear system
         t1  = time.time()

@@ -699,7 +699,8 @@ if validation_interval:
     ensemble_test = ensemble_test
 
     ens_pred        = np.zeros((N_intt, dim, ensemble_test))
-    ens_PH          = np.zeros((N_intt, ensemble_test))
+    ens_PH          = np.zeros((N_test, ensemble_test))
+    ens_PH2         = np.zeros((ensemble_test))
     ens_nrmse       = np.zeros((ensemble_test))
     ens_ssim        = np.zeros((ensemble_test))
     ens_evr         = np.zeros((ensemble_test))
@@ -743,7 +744,7 @@ if validation_interval:
             Uh_wash = np.dot(Xa1, Wout)
 
             # Prediction Horizon
-            Yh_t        = closed_loop(N_intt-1, Xa1[-1], Wout, sigma_in, rho)[0]
+            Yh_t, _, Xa2        = closed_loop(N_intt-1, Xa1[-1], Wout, sigma_in, rho)
             print(np.shape(Yh_t))
             if i == 0:
                 ens_pred[:, :, j] = Yh_t
@@ -814,6 +815,7 @@ if validation_interval:
             ens_ssim[j]        += SSIM
             ens_nrmse_plume[j] += nrmse_plume
             ens_evr[j]         += evr
+            ens_PH2[j]         += PH[i]
 
             if plot:
                 #left column has the washout (open-loop) and right column the prediction (closed-loop)
@@ -860,6 +862,30 @@ if validation_interval:
                         fig.savefig(output_path+'/PH_validation_ens%i_test%i.png' % (j,i))
                         plt.close()
 
+                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
+                        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
+                        ax.plot(np.linalg.norm(Xa1[:, :N_units], axis=1))
+                        ax.grid()
+                        ax.set_ylabel('res_states')
+                        fig.savefig(output_path+'/res_states_validation_washout_ens%i_test%i.png' % (j,i))
+                        plt.close()
+
+                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
+                        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
+                        ax.plot(xx, np.linalg.norm(Xa2[:, :N_units], axis=1))
+                        ax.grid()
+                        ax.set_ylabel('res_states')
+                        fig.savefig(output_path+'/res_states_validation_ens%i_test%i.png' % (j,i))
+                        plt.close()
+
+                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
+                        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
+                        ax.plot(xx, np.linalg.norm(Y_t, axis=1))
+                        ax.grid()
+                        ax.set_ylabel('res_states')
+                        fig.savefig(output_path+'/inputnorm_validation_ens%i_test%i.png' % (j,i))
+                        plt.close()
+
                         # reconstruction after scaling
                         print('reconstruction and error plot')
                         plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 2*N_lyap, xx, 'ESN_validation_ens%i_test%i' %(j,i))
@@ -880,50 +906,30 @@ if validation_interval:
                         else:
                             print('no image')
 
-
-            # Full path for saving the file
-            output_file_all = 'ESN_validation_metrics_ens%i_all.json' % j
-
-            output_path_met_all = os.path.join(output_path, output_file_all)
-
-            metrics_ens = {
-            "ensemble": j,
-            "mean PH": np.mean(PH),
-            "lower PH": np.quantile(PH, 0.75),
-            "uppper PH": np.quantile(PH, 0.25),
-            "median PH": np.median(PH),
-            "mean NRMSE": ens_nrmse[j]/n_plot,
-            "mean NRMSE plume": ens_nrmse_plume[j]/n_plot,
-            "mean EVR": ens_evr[j]/n_plot,
-            "mean ssim": ens_ssim[j]/n_plot,
-            }
-
-            with open(output_path_met_all, "w") as file:
-                json.dump(metrics_ens, file, indent=4)
-
-            mean_nrmse_error = np.mean(nrmse_error, axis=0)
-            fig, ax = plt.subplots(1, figsize=(8,6))
-            ax.plot(xx, mean_nrmse_error)
-            ax.grid()
-            ax.set_xlabel('LT')
-            ax.set_ylabel('mean nrmse error for ensemble')
-            fig.savefig(output_path+f"meanerror_ensemble{j}.png")
-
-                        
+        # accumulation for each ensemble member
+        ens_nrmse[j]       = ens_nrmse[j] / N_test
+        ens_nrmse_plume[j] = ens_nrmse_plume[j] / N_test
+        ens_ssim[j]        = ens_ssim[j] / N_test
+        ens_evr[j]         = ens_evr[j] / N_test
+        ens_PH2[j]         = ens_PH2[j] / N_test  
+             
     # Full path for saving the file
     output_file_ALL = 'ESN_validation_metrics_all.json' 
 
     output_path_met_ALL = os.path.join(output_path, output_file_ALL)
 
+    flatten_PH = ens_PH.flatten()
+    print('flat PH', flatten_PH)
+
     metrics_ens_ALL = {
-    "mean PH": np.mean(ens_PH),
-    "lower PH": np.quantile(ens_PH, 0.75),
-    "uppper PH": np.quantile(ens_PH, 0.25),
-    "median PH": np.median(ens_PH),
-    "mean NRMSE": np.sum(ens_nrmse)/(n_plot*ensemble_test),
-    "mean NRMSE plume": np.sum(ens_nrmse_plume)/(n_plot*ensemble_test),
-    "mean EVR": np.sum(ens_evr)/(n_plot*ensemble_test),
-    "mean ssim": np.sum(ens_ssim)/(n_plot*ensemble_test),
+    "mean PH": np.mean(ens_PH2),
+    "lower PH": np.quantile(flatten_PH, 0.75),
+    "uppper PH": np.quantile(flatten_PH, 0.25),
+    "median PH": np.median(flatten_PH),
+    "mean NRMSE": np.mean(ens_nrmse),
+    "mean NRMSE plume": np.mean(ens_nrmse_plume),
+    "mean EVR": np.mean(ens_evr),
+    "mean ssim": np.mean(ens_ssim),
     }
 
     with open(output_path_met_ALL, "w") as file:
@@ -947,7 +953,8 @@ if test_interval:
     ensemble_test = ensemble_test
 
     ens_pred        = np.zeros((N_intt, dim, ensemble_test))
-    ens_PH          = np.zeros((N_intt, ensemble_test))
+    ens_PH          = np.zeros((N_test, ensemble_test))
+    ens_PH2         = np.zeros((ensemble_test))
     ens_nrmse       = np.zeros((ensemble_test))
     ens_ssim        = np.zeros((ensemble_test))
     ens_evr         = np.zeros((ensemble_test))
@@ -997,7 +1004,7 @@ if test_interval:
             Uh_wash = np.dot(Xa1, Wout)
 
             # Prediction Horizon
-            Yh_t        = closed_loop(N_intt-1, Xa1[-1], Wout, sigma_in, rho)[0]
+            Yh_t,_,Xa2        = closed_loop(N_intt-1, Xa1[-1], Wout, sigma_in, rho)
             print(np.shape(Yh_t))
             if i == 0:
                 ens_pred[:, :, j] = Yh_t
@@ -1080,6 +1087,7 @@ if test_interval:
             ens_ssim[j]        += SSIM
             ens_nrmse_plume[j] += nrmse_plume
             ens_evr[j]         += evr
+            ens_PH2[j]         += PH[i]
 
             ens_nrmse_global[j]+= nrmse_global
             ens_mse_global[j]  += mse_global
@@ -1129,6 +1137,30 @@ if test_interval:
                         fig.savefig(output_path+'/PH_ens%i_test%i.png' % (j,i))
                         plt.close()
 
+                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
+                        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
+                        ax.plot(np.linalg.norm(Xa1[:, :N_units], axis=1))
+                        ax.grid()
+                        ax.set_ylabel('res_states')
+                        fig.savefig(output_path+'/res_states_test_washout_ens%i_test%i.png' % (j,i))
+                        plt.close()
+
+                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
+                        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
+                        ax.plot(xx, np.linalg.norm(Xa2[:, :N_units], axis=1))
+                        ax.grid()
+                        ax.set_ylabel('res_states')
+                        fig.savefig(output_path+'/res_states_test_ens%i_test%i.png' % (j,i))
+                        plt.close()
+
+                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
+                        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
+                        ax.plot(xx, np.linalg.norm(Y_t, axis=1))
+                        ax.grid()
+                        ax.set_ylabel('res_states')
+                        fig.savefig(output_path+'/inputnorm_test_ens%i_test%i.png' % (j,i))
+                        plt.close()
+
                         # reconstruction after scaling
                         print('reconstruction and error plot')
                         plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 2*N_lyap, xx, 'ESN_ens%i_test%i' %(j,i))
@@ -1161,58 +1193,36 @@ if test_interval:
                         fig.savefig(output_path+f"/global_prediciton_ens{j}_test{i}.png")
                         plt.close()
 
-            # Full path for saving the file
-            output_file_all = 'ESN_test_metrics_ens%i_all.json' % j
-
-            output_path_met_all = os.path.join(output_path, output_file_all)
-
-            metrics_ens = {
-            "ensemble": j,
-            "mean PH": np.mean(PH),
-            "lower PH": np.quantile(PH, 0.75),
-            "uppper PH": np.quantile(PH, 0.25),
-            "median PH": np.median(PH),
-            "mean NRMSE": ens_nrmse[j]/n_plot,
-            "mean NRMSE plume": ens_nrmse_plume[j]/n_plot,
-            "mean EVR": ens_evr[j]/n_plot,
-            "mean ssim": ens_ssim[j]/n_plot,
-            "mean nrmse global": ens_nrmse_global[j]/N_test,
-            "mean mse global": ens_mse_global[j]/N_test,
-            }
-
-            with open(output_path_met_all, "w") as file:
-                json.dump(metrics_ens, file, indent=4)
-
-            mean_nrmse_error = np.mean(nrmse_error, axis=0)
-            fig, ax = plt.subplots(1, figsize=(8,6))
-            ax.plot(xx, mean_nrmse_error)
-            ax.grid()
-            ax.set_xlabel('LT')
-            ax.set_ylabel('mean nrmse error for ensemble')
-            fig.savefig(output_path+f"meanerror_ensemble{j}.png")
-
-
+        # accumulation for each ensemble member
+        ens_nrmse[j]       = ens_nrmse[j] / N_test
+        ens_nrmse_plume[j] = ens_nrmse_plume[j] / N_test
+        ens_ssim[j]        = ens_ssim[j] / N_test
+        ens_evr[j]         = ens_evr[j] / N_test
+        ens_PH2[j]         = ens_PH2[j] / N_test  
+             
     # Full path for saving the file
     output_file_ALL = 'ESN_test_metrics_all.json' 
 
     output_path_met_ALL = os.path.join(output_path, output_file_ALL)
 
+    flatten_PH = ens_PH.flatten()
+    print('flat PH', flatten_PH)
+
     metrics_ens_ALL = {
-    "mean PH": np.mean(ens_PH),
-    "lower PH": np.quantile(ens_PH, 0.75),
-    "uppper PH": np.quantile(ens_PH, 0.25),
-    "median PH": np.median(ens_PH),
-    "mean NRMSE": np.sum(ens_nrmse)/(n_plot*ensemble_test),
-    "mean NRMSE plume": np.sum(ens_nrmse_plume)/(n_plot*ensemble_test),
-    "mean EVR": np.sum(ens_evr)/(n_plot*ensemble_test),
-    "mean ssim": np.sum(ens_ssim)/(n_plot*ensemble_test),
-    "mean nrmse global": np.sum(ens_nrmse_global)/(N_test*ensemble_test),
-    "mean mse global": np.sum(ens_mse_global)/(N_test*ensemble_test),
+    "mean PH": np.mean(ens_PH2),
+    "lower PH": np.quantile(flatten_PH, 0.75),
+    "uppper PH": np.quantile(flatten_PH, 0.25),
+    "median PH": np.median(flatten_PH),
+    "mean NRMSE": np.mean(ens_nrmse),
+    "mean NRMSE plume": np.mean(ens_nrmse_plume),
+    "mean EVR": np.mean(ens_evr),
+    "mean ssim": np.mean(ens_ssim),
     }
 
     with open(output_path_met_ALL, "w") as file:
         json.dump(metrics_ens_ALL, file, indent=4)
     print('finished testing')
+
 
 if statistics_interval:
     #### STATISTICS ####

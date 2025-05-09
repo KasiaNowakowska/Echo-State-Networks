@@ -462,20 +462,20 @@ def MSE(original_data, reconstructed_data):
     return mse
 
 #### LOAD DATA AND POD ####
-# name=['combined']
-# names = ['combined']
-# n_components = 3
-name=['upgraded']
-names = ['upgraded']
-n_components = 5
+name=['combined']
+names = ['combined']
+n_components = 3
+# name=['upgraded']
+# names = ['upgraded']
+# n_components = 5
 
 num_variables = 1
 snapshots = 1000
-# data_set, x, z, time_vals = load_data_set(input_path+'/plume_wave_dataset.h5', name, snapshots)
-data_set, x, z, time_vals = load_data_set(input_path+'/upgraded_dataset.h5', name, snapshots)
+data_set, x, z, time_vals = load_data_set(input_path+'/plume_wave_dataset.h5', name, snapshots)
+#data_set, x, z, time_vals = load_data_set(input_path+'/upgraded_dataset.h5', name, snapshots)
 print(np.shape(data_set))
 
-def add_noise(data, noise_level=0.01):
+def add_noise(data, noise_level=0.01, seed=42):
     """
     Add Gaussian noise to a dataset of shape (time, x, z, channels).
     
@@ -486,11 +486,12 @@ def add_noise(data, noise_level=0.01):
     Returns:
         noisy_data (np.ndarray): Noisy version of the input data.
     """
+    np.random.seed(seed)
     noise = noise_level * np.random.randn(*data.shape)
     noisy_data = data + noise
     return noisy_data
 
-noise_level = 0
+noise_level = 0.5
 data_set = add_noise(data_set, noise_level=noise_level)
 fig, ax =plt.subplots(1)
 ax.contourf(data_set[:,:,32,0].T)
@@ -997,12 +998,14 @@ if test_interval:
     print('finished testing')
 
 
+
 if statistics_interval:
     print('STATISTICS')
     print(N_washout_val)
-    N_test   = 1                    #number of intervals in the test set
+    N_test   = 2                    #number of intervals in the test set
     N_tstart = int(N_washout_val)                    #where the first test interval starts
     N_intt   = int(24*N_lyap)            #length of each test set interval
+    N_gap    = int(3*N_lyap)
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
@@ -1039,11 +1042,11 @@ if statistics_interval:
 
         #run different test intervals
         for i in range(N_test):
-            print(N_tstart + i*N_intt)
-            print('start time:', time_vals[N_tstart + i*N_intt])
+            print(N_tstart + i*N_gap)
+            print('start time:', time_vals[N_tstart + i*N_gap])
             # data for washout and target in each interval
-            U_wash    = U[N_tstart - N_washout_val +i*N_intt : N_tstart + i*N_intt].copy()
-            Y_t       = U[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt].copy()
+            U_wash    = U[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap].copy()
+            Y_t       = U[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt].copy()
 
             #washout for each interval
             Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
@@ -1088,6 +1091,51 @@ if statistics_interval:
                         fig.savefig(output_path+f"/global_prediciton_ens{j}_test{i}.png")
                         plt.close()
 
+            from scipy.stats import gaussian_kde
+            kde_true  = gaussian_kde(global_var_truth)
+            kde_pred  = gaussian_kde(global_var_predictions)
+
+            var_vals_true      = np.linspace(min(global_var_truth), max(global_var_truth), 1000)  # X range
+            pdf_vals_true      = kde_true(var_vals_true)
+            var_vals_pred      = np.linspace(min(global_var_predictions), max(global_var_predictions), 1000)  # X range
+            pdf_vals_pred      = kde_pred(var_vals_pred)
+
+            fig, ax = plt.subplots(1, figsize=(8,6))
+            ax.plot(var_vals_true, pdf_vals_true, label="truth")
+            ax.plot(var_vals_pred, pdf_vals_pred, label="prediction")
+            ax.grid()
+            ax.set_ylabel('Denisty')
+            ax.set_xlabel('Value')
+            ax.legend()
+            fig.savefig(output_path+f"/stats_pdf_global_ens{j}_test{i}.png")
+
+            fig, ax = plt.subplots(1, figsize=(8,6))
+            ax.scatter(Y_t[:,0], Y_t[:,1], label='truth')
+            ax.scatter(Yh_t[:,0], Yh_t[:,1], label='prediction')
+            ax.grid()
+            ax.set_xlabel('mode 1')
+            ax.set_ylabel('mode 2')
+            ax.legend()
+            fig.savefig(output_path+f"/trajectories_ens{j}_test{i}.png")
+
+            fig, ax = plt.subplots(1,3, figsize=(12, 6))
+            for v in range(3):
+                kde_true  = gaussian_kde(Y_t[:,v])
+                kde_pred  = gaussian_kde(Yh_t[:,v])
+
+                var_vals_true      = np.linspace(min(Y_t[:,v]), max(Y_t[:,v]), 1000)  # X range
+                pdf_vals_true      = kde_true(var_vals_true)
+                var_vals_pred      = np.linspace(min(Yh_t[:,v]), max(Yh_t[:,v]), 1000)  # X range
+                pdf_vals_pred      = kde_pred(var_vals_pred)
+
+                ax[v].plot(var_vals_true, pdf_vals_true, label="truth")
+                ax[v].plot(var_vals_pred, pdf_vals_pred, label="prediction")
+                ax[v].grid()
+                ax[v].set_ylabel('Denisty')
+                ax[v].set_xlabel(f"Mode {v}")
+                ax[v].legend()
+            fig.savefig(output_path+f"/stats_pdf_modes_ens{j}_test{i}.png")
+
         # accumulation for each ensemble member
         ens_nrmse_global[j]= ens_nrmse_global[j]/N_test
 
@@ -1103,5 +1151,4 @@ if statistics_interval:
     with open(output_path_met_ALL, "w") as file:
         json.dump(metrics_ens_ALL, file, indent=4)
     print('finished statistics')
-
 
