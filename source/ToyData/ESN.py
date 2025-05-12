@@ -446,17 +446,17 @@ def MSE(original_data, reconstructed_data):
     return mse
 
 #### LOAD DATA AND POD ####
-# name=['combined']
-# names = ['combined']
-# n_components = 3
-name=['moderate']
-names = ['moderate']
-n_components = 4
+name=['combined']
+names = ['combined']
+n_components = 3
+# name=['moderate']
+# names = ['moderate']
+# n_components = 4
 
 num_variables = 1
 snapshots = 1000
-# data_set, x, z, time_vals = load_data_set(input_path+'/plume_wave_dataset.h5', name, snapshots)
-data_set, x, z, time_vals = load_data_set(input_path+'/moderate_dataset.h5', name, snapshots)
+data_set, x, z, time_vals = load_data_set(input_path+'/plume_wave_dataset.h5', name, snapshots)
+# data_set, x, z, time_vals = load_data_set(input_path+'/moderate_dataset.h5', name, snapshots)
 print(np.shape(data_set))
 
 def add_noise(data, noise_level=0.01, seed=42):

@@ -591,7 +591,7 @@ data_set, time_vals = load_data_set(input_path+'/data_4var_5000_48000.h5', varia
 print('shape of dataset', np.shape(data_set))
 
 #### change chape of dataset/add projecyion ####
-reduce_data_set = True
+reduce_data_set = False
 if reduce_data_set:
     data_set = data_set[200:392,60:80,:,:]
     x = x[60:80]
@@ -600,6 +600,17 @@ if reduce_data_set:
     print('reduced x domain', np.shape(x))
     print('reduced x domain', len(x))
     print(x[0], x[-1])
+
+reduce_data_set2 = True
+if reduce_data_set2:
+    data_set = data_set[:4650,128:160,:,:] # 10LTs washout, 200LTs train, 1000LTs test
+    x = x[128:160]
+    time_vals = time_vals[:4650]
+    print('reduced domain shape', np.shape(data_set))
+    print('reduced x domain', np.shape(x))
+    print('reduced x domain', len(x))
+    print(x[0], x[-1])
+
 
 projection = projection
 if projection:

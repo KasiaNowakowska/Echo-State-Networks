@@ -1,7 +1,7 @@
 """
 python script for POD.
 
-Usage: lyapunov.py [--input_path=<input_path> --output_path=<output_path> --modes=<modes> --hyperparam_file=<hyperparam_file> --config_number=<config_number> --reduce_domain=<reduce_domain> --w_threshold=<w_threshold>]
+Usage: lyapunov.py [--input_path=<input_path> --output_path=<output_path> --modes=<modes> --hyperparam_file=<hyperparam_file> --config_number=<config_number> --reduce_domain=<reduce_domain> --w_threshold=<w_threshold> --reduce_domain2=<reduce_domain2>]
 
 Options:
     --input_path=<input_path>            file path to use for data
@@ -10,6 +10,7 @@ Options:
     --hyperparam_file=<hyperparam_file>  hyperparameters for ESN
     --config_number=<config_number>      config_number [default: 0]
     --reduce_domain=<reduce_domain>      reduce size of domain [default: False]
+    --reduce_domain2=<reduce_domain2>    reduce size of domain keep time period [default: False]
     --w_threshold=<w_threshold>          w_threshold [defualt: False]
 """
 
@@ -60,6 +61,14 @@ if reduce_domain == 'False':
 elif reduce_domain == 'True':
     reduce_domain = True
     print('domain reduced', reduce_domain)
+
+reduce_domain2 = args['--reduce_domain2']
+if reduce_domain2 == 'False':
+    reduce_domain2 = False
+    print('domain not reduced', reduce_domain2)
+elif reduce_domain2 == 'True':
+    reduce_domain2 = True
+    print('domain reduced', reduce_domain2)
 
 w_threshold = args['--w_threshold']
 if w_threshold == 'False':
@@ -161,7 +170,7 @@ def POD(data, c,  file_str, Plotting=False):
         plt.close()
 
         # Plot the time coefficients and mode structures
-        indexes_to_plot = np.array([1, 2, 10, 50, 64] ) -1
+        indexes_to_plot = np.array([1, 2, 10, 32, 64] ) -1
         indexes_to_plot = indexes_to_plot[indexes_to_plot <= (c-1)]
         print('plotting for modes', indexes_to_plot)
         print('number of modes', len(indexes_to_plot))
@@ -566,7 +575,8 @@ snapshots_load = 16000
 data_set, time_vals = load_data_set(input_path+'/data_4var_5000_48000.h5', variables, snapshots_load)
 print(np.shape(data_set))
 
-reduce_domain = reduce_domain
+reduce_domain  = reduce_domain
+reduce_domain2 = reduce_domain2
 
 if reduce_domain:
     data_set = data_set[200:392,60:80,:,:] # 408 so we have 13 batches 12 for training and 1 for 'validation'
@@ -577,13 +587,14 @@ if reduce_domain:
     print('reduced x domain', len(x))
     print(x[0], x[-1])
 
-    # data_set = data_set[:3900,128:160,:,:] # 408 so we have 13 batches 12 for training and 1 for 'validation'
-    # x = x[128:160]
-    # time_vals = time_vals[:3900]
-    # print('reduced domain shape', np.shape(data_set))
-    # print('reduced x domain', np.shape(x))
-    # print('reduced x domain', len(x))
-    # print(x[0], x[-1])
+if reduce_domain2:
+    data_set = data_set[:4650,128:160,:,:] # 10LTs washout, 200LTs train, 1000LTs test
+    x = x[128:160]
+    time_vals = time_vals[:4650]
+    print('reduced domain shape', np.shape(data_set))
+    print('reduced x domain', np.shape(x))
+    print('reduced x domain', len(x))
+    print(x[0], x[-1])
 
 data_reshape = data_set.reshape(-1, data_set.shape[-1])
 print('shape of data reshaped', data_reshape)
@@ -774,7 +785,7 @@ U_washout = U[:N_washout].copy()
 U_tv  = U[N_washout:N_washout+N_train-1].copy() #inputs
 Y_tv  = U[N_washout+1:N_washout+N_train].copy() #data to match at next timestep
 
-indexes_to_plot = np.array([1, 2, 10, 50, 64] ) -1
+indexes_to_plot = np.array([1, 2, 10, 32, 64] ) -1
 indexes_to_plot = indexes_to_plot[indexes_to_plot <= (n_components-1)]
 
 # adding noise to training set inputs with sigma_n the noise of the data
@@ -816,7 +827,7 @@ N_units      = Nr #neurons
 connectivity = 3
 sparseness   = 1 - connectivity/(N_units-1)
 
-tikh = np.array([1e-1]) #np.array([1e-3,1e-6,1e-9,1e-12])  # Tikhonov factor (optimize among the values in this list)
+tikh = np.array([1, 1e-1, 1e-2, 1e-3]) #np.array([1e-3,1e-6,1e-9,1e-12])  # Tikhonov factor (optimize among the values in this list)
 
 print('tikh:', tikh)
 print('N_r:', N_units, 'sparsity:', sparseness)
@@ -1082,6 +1093,8 @@ if validation_interval:
     N_test   = n_tests                    #number of intervals in the test set
     if reduce_domain:
         N_tstart = 40
+    elif reduce_domain2:
+        N_tstart = N_washout_val
     else:
         N_tstart = 500                    #where the first test interval starts
     N_intt   = test_len*N_lyap            #length of each test set interval
@@ -1360,6 +1373,8 @@ if test_interval:
     N_test   = n_tests                    #number of intervals in the test set
     if reduce_domain:
         N_tstart = 75
+    elif reduce_domain2:
+        N_tstart = N_train + N_washout_val
     else:
         N_tstart = 3300 #850    #where the first test interval starts
     N_intt   = test_len*N_lyap             #length of each test set interval

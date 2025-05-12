@@ -1,7 +1,7 @@
 """
 python script for POD.
 
-Usage: lyapunov.py [--input_path=<input_path> --output_path=<output_path> --modes=<modes> --hyperparam_file=<hyperparam_file> --config_number=<config_number> --number_of_tests=<number_of_tests>]
+Usage: lyapunov.py [--input_path=<input_path> --output_path=<output_path> --modes=<modes> --hyperparam_file=<hyperparam_file> --config_number=<config_number> --number_of_tests=<number_of_tests> --reduce_domain2=<reduce_domain2>]
 
 Options:
     --input_path=<input_path>            file path to use for data
@@ -9,6 +9,7 @@ Options:
     --modes=<modes>                      number of modes for POD 
     --hyperparam_file=<hyperparam_file>  hyperparameters for ESN
     --config_number=<config_number>      config_number [default: 0]
+    --reduce_domain2=<reduce_domain2>    reduce size of domain keep time period [default: False]
     --number_of_tests=<number_of_tests>  number of tests [default: 5]
 """
 
@@ -51,6 +52,14 @@ modes = int(args['--modes'])
 hyperparam_file = args['--hyperparam_file']
 config_number = int(args['--config_number'])
 number_of_tests = int(args['--number_of_tests'])
+
+reduce_domain2 = args['--reduce_domain2']
+if reduce_domain2 == 'False':
+    reduce_domain2 = False
+    print('domain not reduced', reduce_domain2)
+elif reduce_domain2 == 'True':
+    reduce_domain2 = True
+    print('domain reduced', reduce_domain2)
 
 model_path = output_path
 
@@ -546,6 +555,15 @@ if reduce_data_set:
     print('reduced x domain', len(x))
     print(x[0], x[-1])
 
+if reduce_domain2:
+    data_set = data_set[:4650,128:160,:,:] # 10LTs washout, 200LTs train, 1000LTs test
+    x = x[128:160]
+    time_vals = time_vals[:4650]
+    print('reduced domain shape', np.shape(data_set))
+    print('reduced x domain', np.shape(x))
+    print('reduced x domain', len(x))
+    print(x[0], x[-1])
+
 ### global ###
 truth_global = global_parameters(data_set)
 global_labels=['KE', 'q']
@@ -679,18 +697,21 @@ print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
 test_interval = True
-validation_interval = False
-statistics_interval = False
+validation_interval = True
+statistics_interval = True
 
 if validation_interval:
     ##### quick test #####
     print('VALIDATION (TEST)')
     N_washout = int(N_washout)
     print(N_washout)
-    N_test   = 12                    #number of intervals in the test set
-    N_tstart = 100                 #where the first test interval starts
+    N_test   = 20                    #number of intervals in the test set
+    if reduce_domain2:
+        N_tstart = N_washout
+    else:
+        N_tstart = 100                 #where the first test interval starts
     N_intt   = test_len*N_lyap            #length of each test set interval
-    N_gap    = 50 #int(test_len*3*N_lyap)
+    N_gap    = int(test_len*N_lyap)
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
@@ -723,8 +744,8 @@ if validation_interval:
         nrmse_error    = np.zeros((N_test, N_intt))
 
         # to plot results
-        plot = False
-        Plotting = False
+        plot = True
+        Plotting = True
         if plot:
             n_plot = N_test
             plt.rcParams["figure.figsize"] = (15,3*n_plot)
@@ -793,7 +814,7 @@ if validation_interval:
             print('NRMSE plume', nrmse_plume)
 
             # Full path for saving the file
-            output_file = 'ESN_test_metrics_ens%i_test%i.json' % (j,i)
+            output_file = 'ESN_validation_metrics_ens%i_test%i.json' % (j,i)
 
             output_path_met = os.path.join(output_path, output_file)
 
@@ -824,7 +845,7 @@ if validation_interval:
                     if ensemble_test % 1 == 0:
                         
                         #### modes prediction ####
-                        fig,ax =plt.subplots(len(indexes_to_plot),sharex=True, tight_layout=True)
+                        fig,ax =plt.subplots(len(indexes_to_plot), figsize=(12,9), sharex=True, tight_layout=True)
                         xx = np.arange(U_wash[:,-2].shape[0])/N_lyap
                         print(np.shape(xx), xx[0], xx[-1])
                         for v in range(len(indexes_to_plot)):
@@ -840,7 +861,7 @@ if validation_interval:
                         fig.savefig(output_path+'/washout_validation_ens%i_test%i.png' % (j,i))
                         plt.close()
 
-                        fig,ax =plt.subplots(len(indexes_to_plot),sharex=True, tight_layout=True)
+                        fig,ax =plt.subplots(len(indexes_to_plot), figsize=(12,9), sharex=True, tight_layout=True)
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
                         for v in range(len(indexes_to_plot)):
                             index = indexes_to_plot[v]
@@ -852,7 +873,7 @@ if validation_interval:
                         fig.savefig(output_path+'/prediction_validation_ens%i_test%i.png' % (j,i))
                         plt.close()
                         
-                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
+                        fig,ax =plt.subplots(1, figsize=(12,9), sharex=True, tight_layout=True)
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
                         ax.plot(xx,Y_err, 'b')
                         ax.axhline(y=threshold_ph, xmin=xx[0], xmax=xx[-1])
@@ -862,7 +883,7 @@ if validation_interval:
                         fig.savefig(output_path+'/PH_validation_ens%i_test%i.png' % (j,i))
                         plt.close()
 
-                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
+                        fig,ax =plt.subplots(1, figsize=(12,9),sharex=True, tight_layout=True)
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
                         ax.plot(np.linalg.norm(Xa1[:, :N_units], axis=1))
                         ax.grid()
@@ -870,7 +891,7 @@ if validation_interval:
                         fig.savefig(output_path+'/res_states_validation_washout_ens%i_test%i.png' % (j,i))
                         plt.close()
 
-                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
+                        fig,ax =plt.subplots(1, figsize=(12,9), sharex=True, tight_layout=True)
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
                         ax.plot(xx, np.linalg.norm(Xa2[:, :N_units], axis=1))
                         ax.grid()
@@ -878,7 +899,7 @@ if validation_interval:
                         fig.savefig(output_path+'/res_states_validation_ens%i_test%i.png' % (j,i))
                         plt.close()
 
-                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
+                        fig,ax =plt.subplots(1, figsize=(12,9), sharex=True, tight_layout=True)
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
                         ax.plot(xx, np.linalg.norm(Y_t, axis=1))
                         ax.grid()
@@ -940,10 +961,13 @@ if test_interval:
     ##### quick test #####
     print('TESTING')
     N_washout = int(N_washout)
-    N_test   = 4                  #number of intervals in the test set
-    N_tstart = 1025  #where the first test interval starts
+    N_test   = 20                  #number of intervals in the test set
+    if reduce_domain2:
+        N_tstart = N_washout + N_train
+    else:
+        N_tstart = 1025  #where the first test interval starts
     N_intt   = test_len*N_lyap             #length of each test set interval
-    N_gap    = 50 #int(test_len*3*N_lyap)
+    N_gap    = int(test_len*N_lyap)
     #N_washout_val = 4*N_lyap
 
     # #prediction horizon normalization factor and threshold
@@ -1099,7 +1123,7 @@ if test_interval:
                     if ensemble_test % 1 == 0:
                         
                         #### modes prediction ####
-                        fig,ax =plt.subplots(len(indexes_to_plot),sharex=True, tight_layout=True)
+                        fig,ax =plt.subplots(len(indexes_to_plot), figsize=(12,9),sharex=True, tight_layout=True)
                         xx = np.arange(U_wash[:,-2].shape[0])/N_lyap
                         print(np.shape(xx), xx[0], xx[-1])
                         for v in range(len(indexes_to_plot)):
@@ -1115,7 +1139,7 @@ if test_interval:
                         fig.savefig(output_path+'/washout_ens%i_test%i.png' % (j,i))
                         plt.close()
 
-                        fig,ax =plt.subplots(len(indexes_to_plot),sharex=True, tight_layout=True)
+                        fig,ax =plt.subplots(len(indexes_to_plot), figsize=(12,9),sharex=True, tight_layout=True)
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
                         for v in range(len(indexes_to_plot)):
                             index = indexes_to_plot[v]
@@ -1127,7 +1151,7 @@ if test_interval:
                         fig.savefig(output_path+'/prediction_ens%i_test%i.png' % (j,i))
                         plt.close()
                         
-                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
+                        fig,ax =plt.subplots(1, figsize=(12,9),sharex=True, tight_layout=True)
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
                         ax.plot(xx,Y_err, 'b')
                         ax.axhline(y=threshold_ph, xmin=xx[0], xmax=xx[-1])
@@ -1137,7 +1161,7 @@ if test_interval:
                         fig.savefig(output_path+'/PH_ens%i_test%i.png' % (j,i))
                         plt.close()
 
-                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
+                        fig,ax =plt.subplots(1, figsize=(12,9),sharex=True, tight_layout=True)
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
                         ax.plot(np.linalg.norm(Xa1[:, :N_units], axis=1))
                         ax.grid()
@@ -1145,7 +1169,7 @@ if test_interval:
                         fig.savefig(output_path+'/res_states_test_washout_ens%i_test%i.png' % (j,i))
                         plt.close()
 
-                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
+                        fig,ax =plt.subplots(1, figsize=(12,9),sharex=True, tight_layout=True)
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
                         ax.plot(xx, np.linalg.norm(Xa2[:, :N_units], axis=1))
                         ax.grid()
@@ -1153,7 +1177,7 @@ if test_interval:
                         fig.savefig(output_path+'/res_states_test_ens%i_test%i.png' % (j,i))
                         plt.close()
 
-                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
+                        fig,ax =plt.subplots(1, figsize=(12,9),sharex=True, tight_layout=True)
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
                         ax.plot(xx, np.linalg.norm(Y_t, axis=1))
                         ax.grid()
@@ -1233,7 +1257,7 @@ if statistics_interval:
 
     N_test   = 1                    #number of intervals in the test set
     N_tstart = int(N_washout)   #where the first test interval starts
-    N_intt   = 10*N_lyap             #length of each test set interval
+    N_intt   = 15*N_lyap             #length of each test set interval
     N_washout = int(N_washout)
     N_gap = int(N_lyap)
 
@@ -1319,21 +1343,6 @@ if statistics_interval:
             nrmse_global = NRMSE(PODtruth_global, predictions_global)
             mse_global   = MSE(PODtruth_global, predictions_global)
 
-            # Full path for saving the file
-            output_file = 'ESN_test_metrics_ens%i_test%i.json' % (j,i)
-
-            output_path_met = os.path.join(output_path, output_file)
-
-            metrics = {
-            "test": i,
-            "no. modes": n_components,
-            "PH": PH[i],
-            "NRMSE global": nrmse_global,
-            "MSE global": mse_global,
-            }
-
-            with open(output_path_met, "w") as file:
-                json.dump(metrics, file, indent=4)
 
             ens_nrmse_global[j]+= nrmse_global
             ens_mse_global[j]  += mse_global
@@ -1342,7 +1351,7 @@ if statistics_interval:
                 #left column has the washout (open-loop) and right column the prediction (closed-loop)
                 # only first n_plot test set intervals are plotted
                 if i<n_plot:
-                    if ensemble_test % 10 == 0:
+                    if ensemble_test % 1 == 0:
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
                         ### global prediction ###
                         fig, ax = plt.subplots(2, figsize=(12,6), sharex=True, tight_layout=True)
@@ -1356,83 +1365,65 @@ if statistics_interval:
                         fig.savefig(output_path+f"/global_prediciton_ens{j}_test{i}.png")
                         plt.close()
 
+            from scipy.stats import gaussian_kde
+            fig, ax = plt.subplots(2, figsize=(8,6))
+            for v in range(2):
+                kde_true  = gaussian_kde(PODtruth_global[:,v])
+                kde_pred  = gaussian_kde(predictions_global[:,v])
 
-            # Full path for saving the file
-            output_file_all = 'ESN_test_metrics_ens%i_all.json' % j
+                var_vals_true      = np.linspace(min(PODtruth_global[:,v]), max(PODtruth_global[:,v]), 1000)  # X range
+                pdf_vals_true      = kde_true(var_vals_true)
+                var_vals_pred      = np.linspace(min(predictions_global[:,v]), max(predictions_global[:,v]), 1000)  # X range
+                pdf_vals_pred      = kde_pred(var_vals_pred)
 
-            output_path_met_all = os.path.join(output_path, output_file_all)
+                
+                ax[v].plot(var_vals_true, pdf_vals_true, label="truth")
+                ax[v].plot(var_vals_pred, pdf_vals_pred, label="prediction")
+                ax[v].grid()
+                ax[v].set_ylabel('Denisty')
+                ax[v].set_xlabel('Value')
+                ax[v].legend()
+            fig.savefig(output_path+f"/stats_pdf_global_ens{j}_test{i}.png")
 
-            metrics_ens = {
-            "ensemble": j,
-            "mean PH": np.mean(PH),
-            "lower PH": np.quantile(PH, 0.75),
-            "uppper PH": np.quantile(PH, 0.25),
-            "median PH": np.median(PH),
-            "mean nrmse global": ens_nrmse_global[j]/N_test,
-            "mean mse global": ens_mse_global[j]/N_test,
-            }
-
-            with open(output_path_met_all, "w") as file:
-                json.dump(metrics_ens, file, indent=4)
-
-            mean_nrmse_error = np.mean(nrmse_error, axis=0)
             fig, ax = plt.subplots(1, figsize=(8,6))
-            xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-            ax.plot(xx, mean_nrmse_error)
+            ax.scatter(Y_t[:,0], Y_t[:,1], label='truth')
+            ax.scatter(Yh_t[:,0], Yh_t[:,1], label='prediction')
             ax.grid()
-            ax.set_xlabel('LT')
-            ax.set_ylabel('mean nrmse error for ensemble')
-            fig.savefig(output_path+f"meanerror_ensemble{j}.png")
+            ax.set_xlabel('mode 1')
+            ax.set_ylabel('mode 2')
+            ax.legend()
+            fig.savefig(output_path+f"/trajectories_ens{j}_test{i}.png")
 
-    for i in range(N_test):
-        fig, ax =plt.subplots(2, figsize=(12,6), sharex=True)
-        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-        mean_ens = np.mean(ens_pred_global[:,:,i,:], axis=-1)
-        median_ens = np.percentile(ens_pred_global[:,:,i,:], 50, axis=-1)
-        lower = np.percentile(ens_pred_global[:,:,i,:], 5, axis=-1)
-        upper = np.percentile(ens_pred_global[:,:,i,:], 95, axis=-1)
-        print('shape of mean:', np.shape(mean_ens))
-        #print('shape of truth:', np.shape(true_global[:,v,i]))
-        for v in range(2):
-            ax[v].plot(xx, true_global[:,v,i], color='tab:green', label='truth')
-            ax[v].plot(xx, true_POD_global[:,v,i], color='tab:blue', label='POD reconstruction')
-            ax[v].plot(xx, median_ens[:,v], color='tab:orange', label='ESN median prediction')
-            ax[v].fill_between(xx, lower[:,v], upper[:,v], color='tab:orange', alpha=0.3, label='ESN 90% confidence interval')
-            ax[v].grid()
-            ax[v].legend()
-        ax[1].set_xlabel('Lyapunov Time')
-        ax[0].set_ylabel('KE')
-        ax[1].set_ylabel('q')
-        fig.savefig(output_path+'/ens_pred_median_test%i.png' % i)
-        plt.close()
+            fig, ax = plt.subplots(len(indexes_to_plot), figsize=(12, 12))
+            for v, element in enumerate(indexes_to_plot):
+                kde_true  = gaussian_kde(Y_t[:,element])
+                kde_pred  = gaussian_kde(Yh_t[:,element])
 
-    from scipy.stats import gaussian_kde
-    for j in range(ensemble_test):
-        fig, ax =plt.subplots(1,2, figsize=(8,6))
-        for v in range(2):
-            ### pred ###
-            ens_pred_global_flat = ens_pred_global[:,v,:,j].flatten()
-            kde = gaussian_kde(ens_pred_global_flat)
-            var_vals = np.linspace(min(ens_pred_global_flat), max(ens_pred_global_flat), 1000)  # X range
-            pdf_vals = kde(var_vals)
+                var_vals_true      = np.linspace(min(Y_t[:,element]), max(Y_t[:,element]), 1000)  # X range
+                pdf_vals_true      = kde_true(var_vals_true)
+                var_vals_pred      = np.linspace(min(Yh_t[:,element]), max(Yh_t[:,element]), 1000)  # X range
+                pdf_vals_pred      = kde_pred(var_vals_pred)
 
-            ### reconstruction ###
-            true_POD_global_flat = true_POD_global[:,v,:].flatten()
-            kde_POD = gaussian_kde(true_POD_global_flat)
-            var_vals_POD = np.linspace(min(true_POD_global_flat), max(true_POD_global_flat), 1000)  # X range
-            pdf_vals_POD = kde_POD(var_vals_POD)
+                ax[v].plot(var_vals_true, pdf_vals_true, label="truth")
+                ax[v].plot(var_vals_pred, pdf_vals_pred, label="prediction")
+                ax[v].grid()
+                ax[v].set_ylabel('Denisty')
+                ax[v].set_xlabel(f"Mode {v}")
+                ax[v].legend()
+            fig.savefig(output_path+f"/stats_pdf_modes_ens{j}_test{i}.png")
 
-            ### true ###
-            true_global_flat = true_global[:,v,:].flatten()
-            kde_true = gaussian_kde(true_global_flat)
-            var_vals_true = np.linspace(min(true_global_flat), max(true_global_flat), 1000)  # X range
-            pdf_vals_true = kde_true(var_vals_true)
+        # accumulation for each ensemble member
+        ens_nrmse_global[j]= ens_nrmse_global[j]/N_test
 
-            ax[v].plot(var_vals, pdf_vals, label="prediction")
-            ax[v].plot(var_vals_POD, pdf_vals_POD, label="POD")
-            ax[v].plot(var_vals_true, pdf_vals_true, label="true")
-            ax[v].grid()
-            ax[v].legend()
-            ax[v].set_ylabel(f"Density")
-            ax[v].set_xlabel(f"Value of {global_labels[v]}")
-        fig.savefig(output_path+f"/pdfs_{j}.png")
+    # Full path for saving the file
+    output_file_ALL = 'ESN_statistics_metrics_all.json' 
+
+    output_path_met_ALL = os.path.join(output_path, output_file_ALL)
+
+    metrics_ens_ALL = {
+    "mean global NRMSE": np.mean(ens_nrmse_global),
+    }
+
+    with open(output_path_met_ALL, "w") as file:
+        json.dump(metrics_ens_ALL, file, indent=4)
+    print('finished statistics')
