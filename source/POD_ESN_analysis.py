@@ -709,7 +709,7 @@ if validation_interval:
     if reduce_domain2:
         N_tstart = N_washout
     else:
-        N_tstart = 100                 #where the first test interval starts
+        N_tstart = N_washout                 #where the first test interval starts
     N_intt   = test_len*N_lyap            #length of each test set interval
     N_gap    = int(test_len*N_lyap)
 
@@ -965,7 +965,7 @@ if test_interval:
     if reduce_domain2:
         N_tstart = N_washout + N_train
     else:
-        N_tstart = 1025  #where the first test interval starts
+        N_tstart = N_washout + N_train  #where the first test interval starts
     N_intt   = test_len*N_lyap             #length of each test set interval
     N_gap    = int(test_len*N_lyap)
     #N_washout_val = 4*N_lyap
