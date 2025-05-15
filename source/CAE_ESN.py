@@ -9,7 +9,7 @@ Options:
     --model_path=<model_path>                   file path to location of job 
     --CAE_hyperparam_file=<CAE_hyperparam_file> file with hyperparmas from CAE
     --ESN_hyperparam_file=<ESN_hyperparam_file> file with hyperparams for ESN
-    --config_number=<config_number>             config_number 
+    --config_number=<config_number>             config number 
 """
 
 # import packages
@@ -71,6 +71,7 @@ output_path = args['--output_path']
 model_path = args['--model_path']
 CAE_hyperparam_file = args['--CAE_hyperparam_file']
 ESN_hyperparam_file = args['--ESN_hyperparam_file']
+config_number = args['--config_number']
 
 if not os.path.exists(output_path):
     os.makedirs(output_path)
@@ -581,7 +582,7 @@ data_set, time_vals = load_data_set(input_path+'/data_4var_5000_30000.h5', varia
 print(np.shape(data_set))
 dt = time_vals[1]-time_vals[0]
 
-reduce_data_set = False
+reduce_data_set = reduce_domain = reduce_domain2 = False
 if reduce_data_set:
     data_set = data_set[:, 32:96, :, :]
     x = x[32:96]
@@ -886,7 +887,7 @@ N_units      = Nr #neurons
 connectivity = 3   
 sparseness   = 1 - connectivity/(N_units-1) 
 
-tikh = np.array([1e-2])  # Tikhonov factor (optimize among the values in this list)
+tikh = np.array([1])  # Tikhonov factor (optimize among the values in this list)
 
 #### hyperparamter search ####
 n_in  = 0           #Number of Initial random points
@@ -967,7 +968,7 @@ if not os.path.exists(output_path):
 val      = eval(val)
 alpha = alpha
 N_fw     = n_forward*N_lyap
-N_fo     = (N_train-N_val-N_washout_val)//N_fw + 1 
+N_fo     = (N_train-N_val-N_washout)//N_fw + 1 
 #N_fo     = 33                     # number of validation intervals
 N_in     = N_washout                 # timesteps before the first validation interval (can't be 0 due to implementation)
 #N_fw     = (N_train-N_val-N_washout)//(N_fo-1) # how many steps forward the validation interval is shifted (in this way they are evenly spaced)
@@ -1054,12 +1055,12 @@ for i in range(ensemble):
     output_path_hyp = os.path.join(output_path, hyp_file)
 
     hyps = {
-    "test": i,
-    "no. modes": n_components,
-    "spec rad": minimum[i,0],
-    "input scaling": 10**minimum[i,1],
-    "tikh": minimum[i,2],
-    "min f": minimum[i,-1],
+    "test": int(i),
+    "no. modes": int(n_components),
+    "spec rad": float(minimum[i,0]),
+    "input scaling": float(10**minimum[i,1]),
+    "tikh": float(minimum[i,2]),
+    "min f": float(minimum[i,-1]),
     }
 
     with open(output_path_hyp, "w") as file:
@@ -1142,11 +1143,11 @@ if validation_interval:
     print(N_washout_val)
     N_test   = n_tests                    #number of intervals in the test set
     if reduce_domain:
-        N_tstart = N_washout_val
+        N_tstart = N_washout
     elif reduce_domain2:
-        N_tstart = N_washout_val
+        N_tstart = N_washout
     else:
-        N_tstart = 500                    #where the first test interval starts
+        N_tstart = N_washout                    #where the first test interval starts
     N_intt   = test_len*N_lyap            #length of each test set interval
 
     # #prediction horizon normalization factor and threshold
@@ -1258,14 +1259,14 @@ if validation_interval:
             output_path_met = os.path.join(output_path, output_file)
 
             metrics = {
-            "test": i,
-            "no. modes": n_components,
-            "EVR": evr,
-            "MSE": mse,
-            "NRMSE": nrmse,
-            "SSIM": SSIM,
-            "NRMSE plume": nrmse_plume,
-            "PH": PH[i],
+            "test": int(i),
+            "no. modes": int(n_components),
+            "EVR": float(evr),
+            "MSE": float(mse),
+            "NRMSE": float(nrmse),
+            "SSIM": float(SSIM),
+            "NRMSE plume": float(nrmse_plume),
+            "PH": float(PH[i]),
             }
 
             with open(output_path_met, "w") as file:
@@ -1417,7 +1418,7 @@ if test_interval:
     elif reduce_domain2:
         N_tstart = N_train + N_washout_val
     else:
-        N_tstart = 3300 #850    #where the first test interval starts
+        N_tstart = N_train + N_washout #850    #where the first test interval starts
     N_intt   = test_len*N_lyap             #length of each test set interval
 
     # #prediction horizon normalization factor and threshold
@@ -1529,14 +1530,14 @@ if test_interval:
             output_path_met = os.path.join(output_path, output_file)
 
             metrics = {
-            "test": i,
-            "no. modes": n_components,
-            "EVR": evr,
-            "MSE": mse,
-            "NRMSE": nrmse,
-            "SSIM": SSIM,
-            "NRMSE plume": nrmse_plume,
-            "PH": PH[i],
+            "test": int(i),
+            "no. modes": int(n_components),
+            "EVR": float(evr),
+            "MSE": float(mse),
+            "NRMSE": float(nrmse),
+            "SSIM": float(SSIM),
+            "NRMSE plume": float(nrmse_plume),
+            "PH": float(PH[i]),
             }
 
             with open(output_path_met, "w") as file:

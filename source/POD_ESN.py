@@ -837,7 +837,7 @@ print('bias_in:', bias_in, 'bias_out:', bias_out)
 n_in  = 0           #Number of Initial random points
 
 spec_in     = .8    #range for hyperparameters (spectral radius and input scaling)
-spec_end    = 0.99   
+spec_end    = .99  
 in_scal_in  = np.log10(0.8)
 in_scal_end = np.log10(2.5)
 
