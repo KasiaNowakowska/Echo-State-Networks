@@ -1,7 +1,7 @@
 """
 python script for convolutional autoencoder.
 
-Usage: CAE.py [--input_path=<input_path> --output_path=<output_path> --CAE_model_path=<CAE_model_path> --CAE_hyperparam_file=<CAE_hyperparam_file> --ESN_hyperparam_file=<ESN_hyperparam_file> --number_of_tests=<number_of_tests>]
+Usage: CAE.py [--input_path=<input_path> --output_path=<output_path> --CAE_model_path=<CAE_model_path> --CAE_hyperparam_file=<CAE_hyperparam_file> --ESN_hyperparam_file=<ESN_hyperparam_file> --number_of_tests=<number_of_tests> --encoded_data=<encoded_data>]
 
 Options:
     --input_path=<input_path>                   file path to use for data
@@ -9,7 +9,8 @@ Options:
     --CAE_model_path=<CAE_model_path>           file path to location of job 
     --CAE_hyperparam_file=<CAE_hyperparam_file> file with hyperparmas from CAE
     --ESN_hyperparam_file=<ESN_hyperparam_file> file with hyperparams for ESN
-    --number_of_tests=<number_of_tests>  number of tests [default: 5]
+    --number_of_tests=<number_of_tests>         number of tests [default: 5]
+    --encoded_data=<encoded_data>               encoded data exists already [default: True]  
 """
 
 # import packages
@@ -73,6 +74,15 @@ ESN_model_path = output_path
 CAE_hyperparam_file = args['--CAE_hyperparam_file']
 ESN_hyperparam_file = args['--ESN_hyperparam_file']
 number_of_tests = int(args['--number_of_tests'])
+
+encoded_data = args['--encoded_data']
+if encoded_data == 'False':
+    encoded_data = False
+    print('data not already encoded so', encoded_data)
+elif encoded_data == 'True':
+    encoded_data = True
+    print('data already encoded so', encoded_data)
+
 
 output_path = output_path + '/further_analysis/'
 if not os.path.exists(output_path):
@@ -314,7 +324,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, ti
             fig.colorbar(c1, ax=ax[0])
             ax[0].set_title('true')
             c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm)
-            fig.colorbar(c1, ax=ax[1])
+            fig.colorbar(c2, ax=ax[1])
             ax[1].set_title('reconstruction')
             c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:, i].T, cmap='Reds')
             fig.colorbar(c3, ax=ax[2])
@@ -337,7 +347,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, ti
             fig.colorbar(c1, ax=ax[0])
             ax[0].set_title('true')
             c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
-            fig.colorbar(c1, ax=ax[1])
+            fig.colorbar(c2, ax=ax[1])
             ax[1].set_title('reconstruction')
             c3 = ax[2].pcolormesh(time_vals, x,  abs_error[:,:,z_value, i].T, cmap='Reds')
             fig.colorbar(c3, ax=ax[2])
@@ -345,6 +355,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, ti
             for v in range(2):
                 ax[v].set_ylabel('x')
             ax[-1].set_xlabel('time')
+            fig.suptitle(f"time=")
             fig.savefig(output_path+file_str+name+'_snapshot_recon_error.png')
             plt.close()
 
@@ -742,17 +753,21 @@ for i in range(N_parallel):
 
 ##### Compute encoded time_series #####
 #set U to the standard scaler version
-U = U_scaled
-train_leng = 0
-N_pos = 2000
-k     = (U.shape[0] - train_leng)//N_pos
+if encoded_data:
+    with h5py.File(output_path+'/encoded_data'+str(N_latent)+'.h5', 'r') as df:
+        U_enc = np.array(df['U_enc'])
+else:
+    U = U_scaled
+    train_leng = 0
+    N_pos = 2000
+    k     = (U.shape[0] - train_leng)//N_pos
 
-U_enc = np.empty((k*N_pos, N_1[1], N_1[2], N_1[3]))
-for i in range(k):
-        U_enc[i*N_pos:(i+1)*N_pos]= model(U[i*N_pos:(i+1)*N_pos], a, b)[0]
+    U_enc = np.empty((k*N_pos, N_1[1], N_1[2], N_1[3]))
+    for i in range(k):
+            U_enc[i*N_pos:(i+1)*N_pos]= model(U[i*N_pos:(i+1)*N_pos], a, b)[0]
 
-with h5py.File(output_path+'/encoded_data'+str(N_latent)+'.h5', 'w') as df:
-    df['U_enc'] = U_enc
+    with h5py.File(output_path+'/encoded_data'+str(N_latent)+'.h5', 'w') as df:
+        df['U_enc'] = U_enc
 
 
 ###### ESN #######
@@ -869,8 +884,8 @@ print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
 test_interval = True
-validation_interval = False
-statistics_interval = False
+validation_interval = True
+statistics_interval = True
 
 if validation_interval:
     ##### quick test #####
@@ -882,6 +897,7 @@ if validation_interval:
     else:
         N_tstart = int(N_washout)                    #where the first test interval starts
     N_intt   = int(test_len*N_lyap)            #length of each test set interval
+    N_gap    = int(3*N_lyap)
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
@@ -924,11 +940,12 @@ if validation_interval:
 
         #run different test intervals
         for i in range(N_test):
-            print('index:', N_tstart + i*N_intt)
-            print('start_time:', time_vals[N_tstart + i*N_intt])
+            print('index:', N_tstart + i*N_gap)
+            print('start_time:', time_vals[N_tstart + i*N_gap])
             # data for washout and target in each interval
-            U_wash    = U[N_tstart - N_washout_val +i*N_intt : N_tstart + i*N_intt].copy()
-            Y_t       = U[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt].copy()
+            U_wash    = U[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap].copy()
+            Y_t       = U[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt].copy()
+            
 
             #washout for each interval
             Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
@@ -1076,8 +1093,8 @@ if validation_interval:
 
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                        ax.plot(time_vals[N_tstart - N_washout_val +i*N_intt : N_tstart + i*N_intt], np.linalg.norm(Xa1[:-1, :N_units], axis=1), color='red')
-                        ax.plot(time_vals[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt], np.linalg.norm(Xa2[:, :N_units], axis=1), color='blue')
+                        ax.plot(time_vals[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap], np.linalg.norm(Xa1[:-1, :N_units], axis=1), color='red')
+                        ax.plot(time_vals[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt], np.linalg.norm(Xa2[:, :N_units], axis=1), color='blue')
                         ax.grid()
                         ax.set_ylabel('res_norm')
                         fig.savefig(output_path+'/resnorm_validation_ens%i_test%i.png' % (j,i))
@@ -1085,8 +1102,8 @@ if validation_interval:
 
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                        ax.plot(time_vals[N_tstart - N_washout_val +i*N_intt : N_tstart + i*N_intt], np.linalg.norm(U_wash, axis=1), color='red')
-                        ax.plot(time_vals[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt], np.linalg.norm(Y_t, axis=1), color='blue')
+                        ax.plot(time_vals[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap], np.linalg.norm(U_wash, axis=1), color='red')
+                        ax.plot(time_vals[N_tstart + i*N_gap           : N_tstart + i*N_gap + N_gap], np.linalg.norm(Y_t, axis=1), color='blue')
                         ax.grid()
                         ax.set_ylabel('input_norm')
                         fig.savefig(output_path+'/inputnorm_validation_ens%i_test%i.png' % (j,i))
@@ -1094,7 +1111,7 @@ if validation_interval:
 
                         # reconstruction after scaling
                         print('reconstruction and error plot')
-                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, xx, 'ESN_validation_ens%i_test%i' %(j,i))
+                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, xx, 'ESN_validation_ens%i_test%i_time%i' %(j,i, time_vals[N_tstart + i*N_intt + 1*N_lyap]))
 
                         if len(variables) == 4:
                             fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
@@ -1154,6 +1171,9 @@ if test_interval:
     else:
         N_tstart = int(N_train + N_washout) #850    #where the first test interval starts
     N_intt   = int(test_len*N_lyap)             #length of each test set interval
+    N_gap    = int(3*N_lyap)
+
+    print('N_intt=', N_intt)
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
@@ -1189,18 +1209,18 @@ if test_interval:
         plot = True
         Plotting = True
         if plot:
-            n_plot = N_test
+            n_plot = 3
             plt.rcParams["figure.figsize"] = (15,3*n_plot)
             plt.figure()
             plt.tight_layout()
 
         #run different test intervals
         for i in range(N_test):
-            print(N_tstart + i*N_intt)
-            print('start_time:', time_vals[N_tstart + i*N_intt])
+            print(N_tstart + i*N_gap)
+            print('start_time:', time_vals[N_tstart + i*N_gap])
             # data for washout and target in each interval
-            U_wash    = U[N_tstart - N_washout_val +i*N_intt : N_tstart + i*N_intt].copy()
-            Y_t       = U[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt].copy()
+            U_wash    = U[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap].copy()
+            Y_t       = U[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt].copy()
 
             #washout for each interval
             Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
@@ -1346,8 +1366,8 @@ if test_interval:
 
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                        ax.plot(time_vals[N_tstart - N_washout_val +i*N_intt : N_tstart + i*N_intt], np.linalg.norm(Xa1[:-1, :N_units], axis=1), color='red')
-                        ax.plot(time_vals[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt], np.linalg.norm(Xa2[:, :N_units], axis=1), color='blue')
+                        ax.plot(time_vals[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap], np.linalg.norm(Xa1[:-1, :N_units], axis=1), color='red')
+                        ax.plot(time_vals[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt], np.linalg.norm(Xa2[:, :N_units], axis=1), color='blue')
                         ax.grid()
                         ax.set_ylabel('res_norm')
                         fig.savefig(output_path+'/resnorm_test_ens%i_test%i.png' % (j,i))
@@ -1355,8 +1375,8 @@ if test_interval:
 
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                        ax.plot(time_vals[N_tstart - N_washout_val +i*N_intt : N_tstart + i*N_intt], np.linalg.norm(U_wash, axis=1), color='red')
-                        ax.plot(time_vals[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt], np.linalg.norm(Y_t, axis=1), color='blue')
+                        ax.plot(time_vals[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap], np.linalg.norm(U_wash, axis=1), color='red')
+                        ax.plot(time_vals[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt], np.linalg.norm(Y_t, axis=1), color='blue')
                         ax.grid()
                         ax.set_ylabel('input_norm')
                         fig.savefig(output_path+'/inputnorm_test_ens%i_test%i.png' % (j,i))
@@ -1364,7 +1384,7 @@ if test_interval:
 
                         # reconstruction after scaling
                         print('reconstruction and error plot')
-                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, xx, 'ESN_ens%i_test%i' %(j,i))
+                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, xx, 'ESN_ens%i_test%i_time%i' %(j,i, time_vals[N_tstart + i*N_intt + 1*N_lyap]))
 
                         if len(variables) == 4:
                             fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
