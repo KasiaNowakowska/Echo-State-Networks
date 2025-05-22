@@ -779,9 +779,10 @@ for i in range(N_parallel):
     b[i] = tf.keras.models.load_model(models_dir + '/dec_mod'+str(ker_size[i])+'_'+str(N_latent)+'.h5',
                                             custom_objects={"PerPad2D": PerPad2D})
 
-validation_data = True
+validation_data = False
 test_data = True
 all_data = False
+visualisation = True
 
 if validation_data:
     print('VALIDATION DATA')
@@ -1007,3 +1008,63 @@ if all_data:
         ax.plot(truth_unscaled[index, :,32,0], label='true')
         plt.legend()
         fig.savefig(output_path+'/lines%i.png' % i)
+
+if visualisation:
+    print('VISUALISATION')
+    vis_path = output_path + '/visualisation/'
+
+    ### make output_directories ###
+    if not os.path.exists(vis_path):
+        os.makedirs(vis_path)
+        print('made visualisation directory')
+
+    #### all data ####
+    snapshots_vis = 1000
+    U_scaled = ss_transform(U, scaler)
+    truth = U_scaled[:snapshots_vis]
+
+    U = U_scaled
+    train_leng = 0
+    N_pos = 200
+    k     = snapshots_vis//N_pos
+
+    encoded = np.empty((snapshots_vis, N_1[1], N_1[2], N_1[3]))
+    for i in range(k):
+            encoded[i*N_pos:(i+1)*N_pos]= model(U[i*N_pos:(i+1)*N_pos], a, b)[0]
+
+    #encoded = encoded.numpy()
+    print('shape of encoded data', np.shape(encoded))
+
+    x_ls = np.arange(0, 8, 1)
+    z_ls = np.arange(0, 2, 1)
+    
+
+    fig, ax = plt.subplots(5, figsize=(12,12), sharex=True)
+    for v in range(5):
+        if v == 0:
+            c=ax[v].contourf(time_vals[:snapshots_vis], x, truth[:, :, 32, 1].T)
+            ax[v].set_ylabel(f"x")
+            ax[v].set_xlabel('time')
+            fig.colorbar(c, ax=ax[v], label="w")
+        else:
+            c=ax[v].contourf(time_vals[:snapshots_vis], x_ls, encoded[:, :, 0, v-1].T)
+            ax[v].set_ylabel(f"latent width")
+            fig.colorbar(c, ax=ax[v], label=f"latent depth={v-1}")
+    ax[-1].set_xlabel('time')
+    fig.savefig(vis_path+'/hovmoller.png')
+
+    time_vis = 100
+    fig, ax = plt.subplots(5, figsize=(12,12))
+    for v in range(5):
+        if v == 0:
+            c=ax[v].contourf(x, z, truth[time_vis, :, :, 1].T)
+            ax[v].set_ylabel(f"z")
+            ax[v].set_xlabel('x')
+            fig.colorbar(c, ax=ax[v], label="w")
+        else:
+            c=ax[v].contourf(x_ls, z_ls, encoded[time_vis, :, :, v-1].T)
+            ax[v].set_ylabel(f"latent height")
+            fig.colorbar(c, ax=ax[v], label=f"latent depth={v-1}")
+    ax[-1].set_xlabel('latent width')
+    fig.savefig(vis_path+f"/snapshot_time{time_vis}.png")
+    

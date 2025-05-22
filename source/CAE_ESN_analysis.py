@@ -883,9 +883,12 @@ print('norm:', norm)
 print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
-test_interval = True
-validation_interval = True
+test_interval = False
+validation_interval = False
 statistics_interval = True
+fourier = False
+vertical_profiles = False
+reservoir_investigation = False
 
 if validation_interval:
     ##### quick test #####
@@ -1434,14 +1437,14 @@ if test_interval:
 
 if statistics_interval:
     #### STATISTICS ####
-    output_path = output_path + '/statistics/'
+    output_path = output_path + '/statistics/35LTs/'
     if not os.path.exists(output_path):
         os.makedirs(output_path)
         print('made directory')
 
     N_test   = 1                    #number of intervals in the test set
     N_tstart = int(N_washout)   #where the first test interval starts
-    N_intt   = 15*N_lyap             #length of each test set interval
+    N_intt   = 35*N_lyap             #length of each test set interval
     N_washout = int(N_washout)
     N_gap = int(N_lyap)
 
@@ -1552,6 +1555,15 @@ if statistics_interval:
                         fig.savefig(output_path+f"/global_prediciton_ens{j}_test{i}.png")
                         plt.close()
 
+                        fig, ax = plt.subplots(1, figsize=(8,6), tight_layout=True)
+                        ax.scatter(PODtruth_global[:,1], PODtruth_global[:,0], label='POD')
+                        ax.scatter(predictions_global[:,1], predictions_global[:,0], label='ESN')
+                        ax.grid()
+                        ax.set_ylabel('KE')
+                        ax.set_xlabel('q')
+                        fig.savefig(output_path+f"/global_prediciton_ps_ens{j}_test{i}.png")
+                        plt.close()
+
             from scipy.stats import gaussian_kde
             fig, ax = plt.subplots(2, figsize=(8,6))
             for v in range(2):
@@ -1576,8 +1588,8 @@ if statistics_interval:
             ax.scatter(Y_t[:,0], Y_t[:,1], label='truth')
             ax.scatter(Yh_t[:,0], Yh_t[:,1], label='prediction')
             ax.grid()
-            ax.set_xlabel('mode 1')
-            ax.set_ylabel('mode 2')
+            ax.set_xlabel('LS 1')
+            ax.set_ylabel('LS 2')
             ax.legend()
             fig.savefig(output_path+f"/trajectories_ens{j}_test{i}.png")
 
@@ -1614,3 +1626,304 @@ if statistics_interval:
     with open(output_path_met_ALL, "w") as file:
         json.dump(metrics_ens_ALL, file, indent=4)
     print('finished statistics')
+
+def FFT1D(signal, x1):
+    signal = signal - np.mean(signal)
+    fft    = np.fft.fft(signal)
+    fft    = np.fft.fftshift(fft)
+
+    start, end = x1[0], x1[-1]
+
+    om = np.fft.fftfreq(len(x1), d=(end-start)/len(x1))
+    om = np.fft.fftshift(om)
+    om = 2*np.pi*om
+
+    magnitude = np.abs(fft)
+    psd       = magnitude**2
+
+    return psd, om
+
+if fourier:
+    #### FOURIER ####
+    print('fourier analysis')
+    output_path = output_path + '/fourier/'
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
+        print('made directory')
+
+    plot = True
+
+    N_test   = 20                    #number of intervals in the test set
+    if reduce_domain:
+        N_tstart = N_train + N_washout_val
+    elif reduce_domain2:
+        N_tstart = N_train + N_washout_val
+    else:
+        N_tstart = int(N_train + N_washout) #850    #where the first test interval starts
+    N_intt   = int(test_len*N_lyap)             #length of each test set interval
+    N_gap    = int(3*N_lyap)
+
+    print('N_intt=', N_intt)
+
+    mean_psd_truth      = np.zeros((N_test, len(x)))
+    mean_psd_prediction = np.zeros((N_test, len(x)))
+
+    for j in range(ensemble_test):
+
+        print('Realization    :',j+1)
+
+        #load matrices and hyperparameters
+        Wout     = Woutt[j].copy()
+        Win      = Winn[j] #csr_matrix(Winn[j])
+        W        = Ws[j]   #csr_matrix(Ws[j])
+        rho      = opt_hyp[j,0].copy()
+        sigma_in = opt_hyp[j,1].copy()
+        print('Hyperparameters:',rho, sigma_in)
+
+        #run different test intervals
+        for i in range(N_test):
+            print(N_tstart + i*N_gap)
+            print('start_time:', time_vals[N_tstart + i*N_gap])
+            # data for washout and target in each interval
+            U_wash    = U[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap].copy()
+            Y_t       = U[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt].copy()
+
+            #washout for each interval
+            Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
+            Uh_wash = np.dot(Xa1, Wout)
+
+            # Prediction Horizon
+            Yh_t, xa, Xa2        = closed_loop(N_intt-1, Xa1[-1], Wout, sigma_in, rho)
+            print(np.shape(Yh_t))
+
+            ##### reconstructions ####
+            # 1. reshape for decoder
+            Y_t_reshaped = Y_t.reshape(Y_t.shape[0], N_1[1], N_1[2], N_1[3])
+            Yh_t_reshaped = Yh_t.reshape(Yh_t.shape[0], N_1[1], N_1[2], N_1[3])
+            # 2. put through decoder
+            reconstructed_truth = Decoder(Y_t_reshaped,b).numpy()
+            reconstructed_predictions = Decoder(Yh_t_reshaped,b).numpy()
+            # 3. scale back
+            reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
+            reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
+
+            #### FFT ####
+            z_index = 48
+            z_slice_truth      = reconstructed_truth[:,:,z_index,1] # through w
+            z_slice_prediction = reconstructed_predictions[:,:,z_index,1] 
+
+            psd_truth_all      = np.zeros((Y_t.shape[0], len(x)))
+            psd_prediction_all = np.zeros((Y_t.shape[0], len(x)))
+
+            for t_index in range(Y_t.shape[0]):
+                psd_truth, om_truth = FFT1D(z_slice_truth[t_index], x)
+                psd_prediction, om_prediction = FFT1D(z_slice_prediction[t_index], x)
+
+                psd_truth_all[t_index] = psd_truth
+                psd_prediction_all[t_index] = psd_prediction
+
+                if plot:
+                    if i == 0:
+                        if t_index % N_lyap==0:
+                            half = len(om_truth) // 2
+                            fig, ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
+                            ax.plot(om_truth[half:], psd_truth[half:], label='truth')
+                            ax.plot(om_prediction[half:], psd_prediction[half:], label='ESN')
+                            ax.grid()
+                            ax.legend()
+                            ax.set_xlabel('wavenumber')
+                            ax.set_ylabel('PSD')
+                            fig.savefig(output_path+f"FFT_test0_time{t_index}.png")
+
+            time_avg_psd_truth      = np.mean(psd_truth_all, axis=0)
+            time_avg_psd_prediction = np.mean(psd_prediction_all, axis=0)
+            
+            mean_psd_truth[i]      = time_avg_psd_truth
+            mean_psd_prediction[i] = time_avg_psd_prediction
+
+            if plot:
+                fig, ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
+                half = len(om_truth) // 2
+                ax.plot(om_truth[half:], time_avg_psd_truth[half:], label='truth')
+                ax.plot(om_prediction[half:], time_avg_psd_prediction[half:], label='ESN')
+                ax.grid()
+                ax.legend()
+                ax.set_xlabel('wavenumber')
+                ax.set_ylabel('PSD')
+                fig.savefig(output_path+f"FFT_mean_test{i}.png")
+
+        mean_psd_truth      = np.mean(mean_psd_truth, axis=0)
+        mean_psd_prediction = np.mean(mean_psd_prediction, axis=0)
+
+        if plot:
+            half = len(om_truth) // 2
+            fig, ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
+            ax.plot(om_truth[half:], mean_psd_truth[half:], label='truth')
+            ax.plot(om_prediction[half:], mean_psd_prediction[half:], label='ESN')
+            ax.grid()
+            ax.legend()
+            ax.set_xlabel('wavenumber')
+            ax.set_ylabel('PSD')
+            fig.savefig(output_path+f"FFT_mean_alltests.png")
+
+if vertical_profiles:
+    #### VERTICAL PROFILES ####
+    print('vertical_profiles')
+    output_path = output_path + '/vertical_profiles/'
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
+        print('made directory')
+
+    plot = True
+
+    N_test   = 3                    #number of intervals in the test set
+    if reduce_domain:
+        N_tstart = N_train + N_washout_val
+    elif reduce_domain2:
+        N_tstart = N_train + N_washout_val
+    else:
+        N_tstart = int(N_train + N_washout) #850    #where the first test interval starts
+    N_intt   = int(test_len*N_lyap)             #length of each test set interval
+    N_gap    = int(3*N_lyap)
+
+    print('N_intt=', N_intt)
+
+    for j in range(ensemble_test):
+
+        print('Realization    :',j+1)
+
+        #load matrices and hyperparameters
+        Wout     = Woutt[j].copy()
+        Win      = Winn[j] #csr_matrix(Winn[j])
+        W        = Ws[j]   #csr_matrix(Ws[j])
+        rho      = opt_hyp[j,0].copy()
+        sigma_in = opt_hyp[j,1].copy()
+        print('Hyperparameters:',rho, sigma_in)
+
+        #run different test intervals
+        for i in range(N_test):
+            print(N_tstart + i*N_gap)
+            print('start_time:', time_vals[N_tstart + i*N_gap])
+            # data for washout and target in each interval
+            U_wash    = U[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap].copy()
+            Y_t       = U[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt].copy()
+
+            #washout for each interval
+            Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
+            Uh_wash = np.dot(Xa1, Wout)
+
+            # Prediction Horizon
+            Yh_t, xa, Xa2        = closed_loop(N_intt-1, Xa1[-1], Wout, sigma_in, rho)
+            print(np.shape(Yh_t))
+
+            ##### reconstructions ####
+            # 1. reshape for decoder
+            Y_t_reshaped = Y_t.reshape(Y_t.shape[0], N_1[1], N_1[2], N_1[3])
+            Yh_t_reshaped = Yh_t.reshape(Yh_t.shape[0], N_1[1], N_1[2], N_1[3])
+            # 2. put through decoder
+            reconstructed_truth = Decoder(Y_t_reshaped,b).numpy()
+            reconstructed_predictions = Decoder(Yh_t_reshaped,b).numpy()
+            # 3. scale back
+            reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
+            reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
+
+            U_truth = ss_inverse_transform(U_scaled, scaler)
+
+            #### vertical profiles ####
+            timex_avg_truth      = np.mean(U_truth, axis=(0,1))
+            timex_avg_CAE        = np.mean(reconstructed_truth, axis=(0,1))
+            timex_avg_prediction = np.mean(reconstructed_predictions, axis=(0,1))
+            fig, ax = plt.subplots(1, 4, figsize=(12,4), tight_layout=True, sharey=True)
+            for v in range(4):
+                ax[v].plot(timex_avg_truth[:,v], z, label='Truth')
+                ax[v].plot(timex_avg_CAE[:,v], z, label='CAE')
+                ax[v].plot(timex_avg_prediction[:,v], z, linestyle='--', label='ESN')
+                ax[v].set_xlabel(names[v])
+                ax[v].grid()
+            ax[0].legend()
+            ax[0].set_ylabel('z')
+            fig.savefig(output_path+f"/avg_profiles_test{i}.png")
+
+if reservoir_investigation:
+    #### RESERVOIR ####
+    print('vertical_profiles')
+    output_path = output_path + '/reservoir_invetigation/'
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
+        print('made directory')
+
+    plot = True
+
+    N_test   = 1                    #number of intervals in the test set
+    if reduce_domain:
+        N_tstart = N_train + N_washout_val
+    elif reduce_domain2:
+        N_tstart = N_train + N_washout_val
+    else:
+        N_tstart = int(N_train + N_washout) #850    #where the first test interval starts
+    N_intt   = int(test_len*N_lyap)             #length of each test set interval
+    N_gap    = int(3*N_lyap)
+
+    print('N_intt=', N_intt)
+
+    for j in range(ensemble_test):
+
+        print('Realization    :',j+1)
+
+        #load matrices and hyperparameters
+        Wout     = Woutt[j].copy()
+        Win      = Winn[j] #csr_matrix(Winn[j])
+        W        = Ws[j]   #csr_matrix(Ws[j])
+        rho      = opt_hyp[j,0].copy()
+        sigma_in = opt_hyp[j,1].copy()
+        print('Hyperparameters:',rho, sigma_in)
+
+        #run different test intervals
+        for i in range(N_test):
+            print(N_tstart + i*N_gap)
+            print('start_time:', time_vals[N_tstart + i*N_gap])
+            # data for washout and target in each interval
+            U_wash    = U[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap].copy()
+            Y_t       = U[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt].copy()
+
+            #washout for each interval
+            Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
+            Uh_wash = np.dot(Xa1, Wout)
+
+            # Prediction Horizon
+            Yh_t, xa, Xa2        = closed_loop(N_intt-1, Xa1[-1], Wout, sigma_in, rho)
+            print(np.shape(Yh_t))
+
+            ##### reservoir #####
+            res_states = [1, 100, 1000, 5000]
+            fig, ax = plt.subplots(2, figsize=(12,6), tight_layout=True)
+            for r in res_states:
+                ax[0].plot(time_vals[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap], Xa1[:-1,r], label=f"r_{r}")
+                ax[1].plot(time_vals[N_tstart + i*N_gap: N_tstart + i*N_gap + N_intt], Xa2[:,r], label=f"r_{r}")
+            ax[0].grid()
+            ax[1].grid()
+            ax[0].legend()
+            ax[0].set_xlabel('Time')
+            ax[1].set_xlabel('Time')
+            ax[0].set_ylabel(f"$r_i$")
+            ax[1].set_ylabel(f"$r_i$")
+            fig.savefig(output_path+'/res_states.png')
+
+            fig, ax = plt.subplots(2, figsize=(12,6), tight_layout=True)
+            for r in res_states:
+                psd_washout, om_washout = FFT1D(Xa1[:-1,r], time_vals[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap])
+                psd_test, om_test = FFT1D(Xa2[:,r], time_vals[N_tstart + i*N_gap: N_tstart + i*N_gap + N_intt])
+                half = len(om_washout) // 2
+                half_test = len(om_test) // 2
+                ax[0].plot(om_washout[half:], psd_washout[half:], label=f"r_{r}")
+                ax[1].plot(om_test[half_test:], psd_test[half_test:], label=f"r_{r}")
+            ax[0].grid()
+            ax[1].grid()
+            ax[0].legend()
+            ax[0].set_xlabel('frequency')
+            ax[1].set_xlabel('frequency')
+            ax[0].set_ylabel(f"PSD")
+            ax[1].set_ylabel(f"PSD")
+            fig.savefig(output_path+'/res_states_FFT.png')
+
+

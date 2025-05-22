@@ -16,7 +16,7 @@ import sys
 sys.stdout.reconfigure(line_buffering=True)
 
 input_path='./ToyData/'
-output_path='./ToyData/moderate/'
+output_path='./ToyData/scaled/Noise0_5/'
 
 projection = False
 
@@ -144,23 +144,152 @@ def plot_reconstruction(original, reconstruction, z_value, t_value, file_str):
     for v in range(2):
         ax[v].set_ylabel('z')
     ax[-1].set_xlabel('x')
-    fig.savefig(output_path+file_str+'_hovmoller_recon.png')
+    fig.savefig(output_path+file_str+'_snapshot_recon.png')
 
     fig, ax = plt.subplots(2, figsize=(12,6), tight_layout=True, sharex=True)
     minm = min(np.min(original[:, :, z_value]), np.min(reconstruction[:, :, z_value]))
     maxm = max(np.max(original[:, :, z_value]), np.max(reconstruction[:, :, z_value]))
     print(np.max(original[:, :, z_value]))
     print(minm, maxm)
-    c1 = ax[0].pcolormesh(time, x, original[:, :, z_value].T)
+    c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value].T)
     fig.colorbar(c1, ax=ax[0])
     ax[0].set_title('true')
-    c2 = ax[1].pcolormesh(time, x, reconstruction[:, :, z_value].T)
+    c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value].T)
     fig.colorbar(c1, ax=ax[1])
     ax[1].set_title('reconstruction')
     for v in range(2):
         ax[v].set_ylabel('x')
     ax[-1].set_xlabel('time')
-    fig.savefig(output_path+file_str+'_snapshot_recon.png')
+    fig.savefig(output_path+file_str+'_hovmoller_recon.png')
+
+def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, time_vals, file_str):
+    abs_error = np.abs(original-reconstruction)
+    residual  = original - reconstruction
+    vmax_res = np.max(np.abs(res))  # Get maximum absolute value
+    vmin_res = -vmax_res
+    if original.ndim == 3: #len(time_vals), len(x), len(z)
+
+        fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+        minm = min(np.min(original[t_value, :, :]), np.min(reconstruction[t_value, :, :]))
+        maxm = max(np.max(original[t_value, :, :]), np.max(reconstruction[t_value, :, :]))
+        c1 = ax[0].pcolormesh(x, z, original[t_value,:,:].T, vmin=minm, vmax=maxm)
+        fig.colorbar(c1, ax=ax[0])
+        ax[0].set_title('true')
+        c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:].T, vmin=minm, vmax=maxm)
+        fig.colorbar(c1, ax=ax[1])
+        ax[1].set_title('reconstruction')
+        c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:].T, cmap='Reds')
+        fig.colorbar(c3, ax=ax[2])
+        ax[2].set_title('error')
+        for v in range(3):
+            ax[v].set_ylabel('z')
+        ax[-1].set_xlabel('x')
+        fig.savefig(output_path+file_str+'_snapshot_recon_error.png')
+
+        fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+        minm = min(np.min(original[:, :, z_value]), np.min(reconstruction[:, :, z_value]))
+        maxm = max(np.max(original[:, :, z_value]), np.max(reconstruction[:, :, z_value]))
+        print(np.max(original[:, :, z_value]))
+        print(minm, maxm)
+        c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value].T)
+        fig.colorbar(c1, ax=ax[0])
+        ax[0].set_title('true')
+        c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value].T)
+        fig.colorbar(c1, ax=ax[1])
+        ax[1].set_title('reconstruction')
+        c3 = ax[2].pcolormesh(time_vals, x, abs_error[:, :, z_value].T, cmap='Reds')
+        fig.colorbar(c3, ax=ax[2])
+        ax[2].set_title('error')
+        for v in range(2):
+            ax[v].set_ylabel('x')
+        ax[-1].set_xlabel('time')
+        fig.savefig(output_path+file_str+'_hovmoller_recon_error.png')
+
+    elif original.ndim == 4: #len(time_vals), len(x), len(z), var
+        for i in range(original.shape[3]):
+            name = names[i]
+            print(name)
+            fig, ax = plt.subplots(3, figsize=(12,6), tight_layout=True, sharex=True)
+            minm = min(np.min(original[t_value, :, :, i]), np.min(reconstruction[t_value, :, :, i]))
+            maxm = max(np.max(original[t_value, :, :, i]), np.max(reconstruction[t_value, :, :, i]))
+            c1 = ax[0].pcolormesh(x, z, original[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:, i].T, cmap='Reds')
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('z')
+            ax[-1].set_xlabel('x')
+            fig.savefig(output_path+file_str+name+'_hovmoller_recon_error.png')
+
+            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+            minm = min(np.min(original[:, :, z_value,i]), np.min(reconstruction[:, :, z_value,i]))
+            maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
+            print(np.max(original[:, :, z_value,i]))
+            print(minm, maxm)
+            print("time shape:", np.shape(time_vals))
+            print("x shape:", np.shape(x))
+            print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
+            c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(time_vals, x,  abs_error[:,:,z_value, i].T, cmap='Reds')
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('x')
+            ax[-1].set_xlabel('time')
+            fig.savefig(output_path+file_str+name+'_snapshot_recon_error.png')
+
+            fig, ax = plt.subplots(3, figsize=(12,6), tight_layout=True, sharex=True)
+            minm = min(np.min(original[t_value, :, :, i]), np.min(reconstruction[t_value, :, :, i]))
+            maxm = max(np.max(original[t_value, :, :, i]), np.max(reconstruction[t_value, :, :, i]))
+            c1 = ax[0].pcolormesh(x, z, original[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(x, z, residual[t_value,:,:, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('z')
+                ax[v].tick_params(axis='both', labelsize=12)
+            ax[-1].set_xlabel('x')
+            fig.savefig(output_path+file_str+name+'_hovmoller_recon_residual.png')
+
+            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+            minm = min(np.min(original[:, :, z_value,i]), np.min(reconstruction[:, :, z_value,i]))
+            maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
+            print(np.max(original[:, :, z_value,i]))
+            print(minm, maxm)
+            print("time shape:", np.shape(time_vals))
+            print("x shape:", np.shape(x))
+            print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
+            c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(time_vals, x,  residual[:,:,z_value, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('x')
+                ax[v].tick_params(axis='both', labelsize=12)
+            ax[-1].set_xlabel('time')
+            fig.savefig(output_path+file_str+name+'_snapshot_recon_residual.png')
+
+
 
 #### Metrics ####
 from sklearn.metrics import mean_squared_error
@@ -291,17 +420,20 @@ def add_noise(data, noise_level=0.01, seed=42):
     return noisy_data
 
 #### plume ###
-data_names = ['moderate']#['combined']
-n_modes = [4]
+data_names = ['combined']#['combined']
+n_modes = [3]
 for index, name in enumerate(data_names):
-    #data_set, x, z, time = load_data(input_path+'/plume_wave_dataset.h5', name)
-    data_set, x, z, time = load_data(input_path+'/moderate_dataset.h5', name)
+    data_set, x, z, time_vals = load_data(input_path+'/plume_wave_dataset.h5', name)
+    #data_set, x, z, time = load_data(input_path+'/moderate_dataset.h5', name)
     print('shape of dataset', np.shape(data_set))
 
     noise_level = 0.5
     data_set = add_noise(data_set, noise_level=noise_level)
-    fig, ax =plt.subplots(1)
-    ax.contourf(data_set[:,:,32].T)
+    fig, ax =plt.subplots(1, figsize=(12,3), tight_layout=True)
+    c=ax.contourf(time_vals, x, data_set[:,:,32].T)
+    fig.colorbar(c, ax=ax)
+    ax.set_xlabel('Time', fontsize=14)
+    ax.set_ylabel('x', fontsize=14)
     fig.savefig(output_path+f"/combined_data_noise{noise_level}.png")
 
     # fit the scaler
@@ -325,7 +457,7 @@ for index, name in enumerate(data_names):
     
     data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_, cev = POD(data_scaled, n_modes[index], name)
     data_reconstructed = ss_inverse_transform(data_reconstructed, scaler)
-    plot_reconstruction(data_set, data_reconstructed, 32, 20, name+'_scaled')
+    plot_reconstruction_and_error(data_set, data_reconstructed, 32, 20, time_vals, name+'_scaled')
     nrmse = NRMSE(data_set, data_reconstructed)
     mse   = MSE(data_set, data_reconstructed)
     evr   = EVR_recon(data_set, data_reconstructed)

@@ -929,7 +929,7 @@ def main():
         nrmse_0       = 0
         accuracy_0    = 0
         nrmse_plume_0 = 0 
-        mse_0      = 0
+        mse_0         = 0
         rng.shuffle(U_train, axis=0) #shuffle batches
         for j in range(n_batches):
             loss, decoded    = train_step(U_train[j], enc_mods, dec_mods)

@@ -1,11 +1,14 @@
 """
 python script for convolutional autoencoder.
 
-Usage: CAE.py [--input_path=<input_path> --output_path=<output_path>]
+Usage: CAE.py [--input_path=<input_path> --output_path=<output_path> --hyperparam_config=<hyperparam_config> --sweep_id=<sweep_id> --project_name=<project_name>]
 
 Options:
-    --input_path=<input_path>          file path to use for data
-    --output_path=<output_path>        file path to save images output [default: ./images]
+    --input_path=<input_path>                 file path to use for data
+    --output_path=<output_path>               file path to save images output [default: ./images]
+    --hyperparam_config=<hyperparam_config>   hyperparameter config file for search
+    --sweep_id=<sweep_id>                     sweep_id for restarting sweep [default: None]
+    --project_name=<project_name>             name of project for weights and biases
 """
 
 # import packages
@@ -31,6 +34,7 @@ args = docopt(__doc__)
 os.environ["OMP_NUM_THREADS"] = "1" #set cores for numpy
 import tensorflow as tf
 import json
+import random
 tf.get_logger().setLevel('ERROR') #no info and warnings are printed
 tf.config.threading.set_inter_op_parallelism_threads(1) #set cores for TF
 tf.config.threading.set_intra_op_parallelism_threads(1)
@@ -49,30 +53,33 @@ from sklearn.metrics import mean_squared_error
 import sys
 sys.stdout.reconfigure(line_buffering=True)
 
+from tensorflow.keras import backend as K
+import gc
+K.clear_session()
+gc.collect()
+
 import wandb
 wandb.login()
 
-input_path='./ToyData/'
-output_path='./ToyData/Autoencoder'
+SEED = 42
+tf.random.set_seed(SEED)
+np.random.seed(SEED)
+random.seed(SEED)
+os.environ['PYTHONHASHSEED'] = '42'
+os.environ['TF_DETERMINISTIC_OPS'] = '1'
+
+input_path = args['--input_path']
+output_path = args['--output_path']
+hyperparam_config = args['--hyperparam_config']
+sweep_id = args['--sweep_id']
+project_name = args['--project_name']
+if project_name == None:
+    print('ERROR: must supply project name for wandb')
+print('sweep id', sweep_id)
 
 if not os.path.exists(output_path):
     os.makedirs(output_path)
     print('made directory')
-
-#### make directory ####
-from datetime import datetime 
-now = datetime.now()
-print(now)
-# Format the date and time as YYYY-MM-DD_HH-MM-SS for a file name
-formatted_datetime = now.strftime("%Y-%m-%d_%H-%M-%S")
-# Example of using the formatted datetime in a file name
-output_new = f"validation_{formatted_datetime}/"
-output_path = os.path.join(output_path, output_new)
-print(output_path)
-if not os.path.exists(output_path):
-    os.makedirs(output_path)
-    print('made directory')
-
 
 def load_data(file, name):
     with h5py.File(file, 'r') as hf:
@@ -86,11 +93,35 @@ def load_data(file, name):
 
     return data, x, z, time
 
+def add_noise(data, noise_level=0.01, seed=42):
+    """
+    Add Gaussian noise to a dataset of shape (time, x, z, channels).
+    
+    Parameters:
+        data (np.ndarray): Input data of shape (T, X, Z, C).
+        noise_level (float): Standard deviation of Gaussian noise.
+    
+    Returns:
+        noisy_data (np.ndarray): Noisy version of the input data.
+    """
+    np.random.seed(seed)
+    noise = noise_level * np.random.randn(*data.shape)
+    noisy_data = data + noise
+    return noisy_data
 
 #### LOAD DATA AND POD ####
 name='combined'
 data_set, x, z, time_vals = load_data(input_path+'/plume_wave_dataset.h5', name)
 print('shape of data', np.shape(data_set))
+
+noise_level = 0
+data_set = add_noise(data_set, noise_level=noise_level)
+fig, ax =plt.subplots(1, figsize=(12,3), tight_layout=True)
+c=ax.contourf(time_vals, x, data_set[:,:,32].T)
+fig.colorbar(c, ax=ax)
+ax.set_xlabel('Time', fontsize=14)
+ax.set_ylabel('x', fontsize=14)
+fig.savefig(output_path+f"/combined_data_noise{noise_level}.png")
 
 data_set = data_set.reshape(len(time_vals), len(x), len(z), 1)
 print('shape of reshaped data set', np.shape(data_set))
@@ -98,28 +129,25 @@ print('shape of reshaped data set', np.shape(data_set))
 U = data_set
 dt = time_vals[1]-time_vals[0]
 print('dt:', dt)
-variables = 1
+num_variables = 1
+variables = names = ['A']
 
-#### Hyperparmas #####
-# WandB hyperparams settings
-sweep_configuration = {
-    "method": "grid",
-    "name": "sweep",
-    "metric": {"goal": "minimize", "name": "Val Loss"},
-    "parameters": {
-        "lat_dep":{"values": [1]},
-        "n_epochs": {"values": [151]},
-        "l_rate": {"values": [0.002]},
-        "b_size": {"values": [32]},
-        "lrate_mult": {"values": [0.8]},
-        "N_lr": {"values": [150]},
-        "N_layers": {"values": [4]},
-        "N_parallel": {"values": [1]},
-        "kernel_choice": {"values": [2]}
-    },
-}
+# Load the config from file
+with open(hyperparam_config, "r") as f:
+    sweep_configuration = json.load(f)
 
-sweep_id = wandb.sweep(sweep=sweep_configuration, project="toydata_lorenz_plumes")
+if sweep_id == 'None':
+    sweep_id = wandb.sweep(sweep=sweep_configuration, project=project_name) #"Ra2e8_smallerdomain"
+    print('new sweep with sweep id', sweep_id)
+else:
+    print('restarting sweep with sweep_id', sweep_id)
+
+output_new = f"validation_{sweep_id}"
+output_path = os.path.join(output_path, output_new)
+print(output_path)
+if not os.path.exists(output_path):
+    os.makedirs(output_path)
+    print('made directory')
 
 job = 0
 
@@ -128,6 +156,14 @@ def main():
     run = wandb.init()
     global job
     job += 1
+
+    SEED = wandb.config.seed
+
+    tf.random.set_seed(SEED)
+    np.random.seed(SEED)
+    random.seed(SEED)
+    os.environ['PYTHONHASHSEED'] = str(SEED)
+    os.environ['TF_DETERMINISTIC_OPS'] = '1'
 
     def split_data(U, b_size, n_batches):
 
@@ -299,6 +335,95 @@ def main():
         ax[-1].set_xlabel('time')
         fig.savefig(output_path+file_str+'_snapshot_recon.png')
     
+    def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, file_str):
+        abs_error = np.abs(original-reconstruction)
+        if original.ndim == 3: #len(time_vals), len(x), len(z)
+
+            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+            minm = min(np.min(original[t_value, :, :]), np.min(reconstruction[t_value, :, :]))
+            maxm = max(np.max(original[t_value, :, :]), np.max(reconstruction[t_value, :, :]))
+            c1 = ax[0].pcolormesh(x, z, original[t_value,:,:].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:].T, cmap='Reds')
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(3):
+                ax[v].set_ylabel('z')
+            ax[-1].set_xlabel('x')
+            fig.savefig(output_path+file_str+'_hovmoller_recon_error.png')
+            plt.close()
+
+            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+            minm = min(np.min(original[:, :, z_value]), np.min(reconstruction[:, :, z_value]))
+            maxm = max(np.max(original[:, :, z_value]), np.max(reconstruction[:, :, z_value]))
+            print(np.max(original[:, :, z_value]))
+            print(minm, maxm)
+            c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value].T)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value].T)
+            fig.colorbar(c1, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(time_vals, x, abs_error[:, :, z_value].T, cmap='Reds')
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('x')
+            ax[-1].set_xlabel('time')
+            fig.savefig(output_path+file_str+'_snapshot_recon_error.png')
+            plt.close()
+
+        elif original.ndim == 4: #len(time_vals), len(x), len(z), var
+            time_zone = np.linspace(0, original.shape[0],  original.shape[0])
+            for i in range(original.shape[3]):
+                name = names[i]
+                print(name)
+                fig, ax = plt.subplots(3, figsize=(12,6), tight_layout=True, sharex=True)
+                minm = min(np.min(original[t_value, :, :, i]), np.min(reconstruction[t_value, :, :, i]))
+                maxm = max(np.max(original[t_value, :, :, i]), np.max(reconstruction[t_value, :, :, i]))
+                c1 = ax[0].pcolormesh(x, z, original[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+                fig.colorbar(c1, ax=ax[0])
+                ax[0].set_title('true')
+                c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+                fig.colorbar(c1, ax=ax[1])
+                ax[1].set_title('reconstruction')
+                c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:, i].T, cmap='Reds')
+                fig.colorbar(c3, ax=ax[2])
+                ax[2].set_title('error')
+                for v in range(2):
+                    ax[v].set_ylabel('z')
+                ax[-1].set_xlabel('x')
+                fig.savefig(output_path+file_str+name+'_snapshot_recon_error.png')
+                plt.close()
+
+                fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+                minm = min(np.min(original[:, :, z_value,i]), np.min(reconstruction[:, :, z_value,i]))
+                maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
+                print(np.max(original[:, :, z_value,i]))
+                print(minm, maxm)
+                print("time shape:", np.shape(time_vals))
+                print("x shape:", np.shape(x))
+                print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
+                c1 = ax[0].pcolormesh(time_zone, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+                fig.colorbar(c1, ax=ax[0])
+                ax[0].set_title('true')
+                c2 = ax[1].pcolormesh(time_zone, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+                fig.colorbar(c1, ax=ax[1])
+                ax[1].set_title('reconstruction')
+                c3 = ax[2].pcolormesh(time_zone, x,  abs_error[:,:,z_value, i].T, cmap='Reds')
+                fig.colorbar(c3, ax=ax[2])
+                ax[2].set_title('error')
+                for v in range(2):
+                    ax[v].set_ylabel('x')
+                ax[-1].set_xlabel('time')
+                fig.savefig(output_path+file_str+name+'_hovmoller_recon_error.png')
+                plt.close()
+
+
     #### Metrics ####
     from sklearn.metrics import mean_squared_error
     def NRMSE(original_data, reconstructed_data):
@@ -354,7 +479,7 @@ def main():
                 #print(t, c)
                 # Extract the 2D slice for each timestep and channel
                 orig_slice = original[t, :, :, c]
-                dec_slice = decoded[t, :, :, c].numpy()
+                dec_slice = decoded[t, :, :, c]
                 #print(orig_slice, dec_slice)
                 
                 # Compute SSIM for the current slice
@@ -446,20 +571,23 @@ def main():
             
         return data_unscaled
 
-
     #### load in data ###
-    b_size      = wandb.config.b_size   #batch_size
-    n_batches   = int((U.shape[0]/b_size) *0.7)  #number of batches #20
-    val_batches = int((U.shape[0]/b_size) *0.2)    #int(n_batches*0.2) # validation set size is 0.2 the size of the training set #2
+    b_size       = wandb.config.b_size   #batch_size
+    n_batches    = int((U.shape[0]/b_size) *0.7)  #number of batches #20
+    val_batches  = int((U.shape[0]/b_size) *0.2)    #int(n_batches*0.2) # validation set size is 0.2 the size of the training set #2
     test_batches = int((U.shape[0]/b_size) *0.1)
-    skip        = 1
+    skip         = 1
     print(n_batches, val_batches, test_batches)
 
     #print(b_size*n_batches*skip*dt*upsample)
 
+    print('number of snapshot training set', b_size*n_batches*skip)
+    print('number of snapshot validation set', b_size*val_batches*skip)  
+
     print('Train Data%  :',b_size*n_batches*skip/U.shape[0]) #how much of the data we are using for training
     print('Val   Data%  :',b_size*val_batches*skip/U.shape[0])
     print('Test   Data%  :',b_size*test_batches*skip/U.shape[0])
+
 
     # training data
     U_tt        = np.array(U[:b_size*n_batches*skip])            #to be used for random batches
@@ -473,6 +601,8 @@ def main():
     U_tt_reshape = U_tt.reshape(-1, U_tt.shape[-1])
     U_vv_reshape = U_vv.reshape(-1, U_vv.shape[-1])
     U_tv_reshape = U_tv.reshape(-1, U_tv.shape[-1])
+
+    print('shape of U_tt_reshape', np.shape(U_tt_reshape))
 
     # fit the scaler
     scaler = StandardScaler()
@@ -489,10 +619,12 @@ def main():
     U_vv_scaled = U_vv_scaled.reshape(U_vv.shape)
     U_tv_scaled = U_tv_scaled.reshape(U_tv.shape)
     
+    print(b_size*n_batches*skip+b_size*val_batches*skip)
+
     test_times = time_vals[b_size*n_batches*skip+b_size*val_batches*skip:
                              b_size*n_batches*skip+b_size*val_batches*skip+b_size*test_batches*skip] 
 
-    for v in range(variables):
+    for v in range(num_variables):
         fig, ax = plt.subplots(1)
         c=ax.pcolormesh(test_times, x, U_tv_scaled[:,:,32,v].T)
         fig.colorbar(c, ax=ax)        
@@ -561,13 +693,21 @@ def main():
     for j in range(N_parallel):
         for i in range(N_layers):
 
-            #stride=2 padding and conv
-            enc_mods[j].add(PerPad2D(padding=p_size[j], asym=True,
-                                              name='Enc_' + str(j)+'_PerPad_'+str(i)))
-            enc_mods[j].add(tf.keras.layers.Conv2D(
-                filters=n_fil[i], kernel_size=ker_size[j],
-                activation=act, padding=pad_enc, strides=2,  # Keep stride-2 for earlier layers
-                name='Enc_' + str(j)+'_ConvLayer_'+str(i)))
+            if i == N_layers-1:
+                #stride=2 padding and conv
+                enc_mods[j].add(PerPad2D(padding=p_size[j], asym=True,
+                                                name='Enc_' + str(j)+'_PerPad_'+str(i)))
+                enc_mods[j].add(tf.keras.layers.Conv2D(filters = n_fil[i], kernel_size=ker_size[j],
+                                            activation=act, padding=pad_enc, strides=4,
+                                name='Enc_' + str(j)+'_ConvLayer_'+str(i)))
+            else:
+                #stride=2 padding and conv
+                enc_mods[j].add(PerPad2D(padding=p_size[j], asym=True,
+                                                name='Enc_' + str(j)+'_PerPad_'+str(i)))
+                enc_mods[j].add(tf.keras.layers.Conv2D(filters = n_fil[i], kernel_size=ker_size[j],
+                                            activation=act, padding=pad_enc, strides=2,
+                                name='Enc_' + str(j)+'_ConvLayer_'+str(i)))
+            
 
             #stride=1 padding and conv
             if i<N_layers-1:
@@ -586,37 +726,41 @@ def main():
     print("Latent space dimensions:", N_latent)
 
 
-    # Generate decoder layers            
+    #generate decoder layers            
     for j in range(N_parallel):
-    
+
         for i in range(N_layers):
-    
-            # Initial padding of latent space
-            if i == 0: 
+
+            #initial padding of latent space
+            if i==0: 
                 dec_mods[j].add(PerPad2D(padding=p_dec, asym=False,
-                                         name='Dec_' + str(j)+'_PerPad_'+str(i))) 
+                                              name='Dec_' + str(j)+'_PerPad_'+str(i))) 
+                dec_mods[j].add(tf.keras.layers.Conv2DTranspose(filters = n_dec[i],
+                                output_padding=None,kernel_size=ker_size[j],
+                                activation=act, padding=pad_dec, strides=4,
+                    name='Dec_' + str(j)+'_ConvLayer_'+str(i)))
+            else:
+                #Transpose convolution with stride = 2 
+                dec_mods[j].add(tf.keras.layers.Conv2DTranspose(filters = n_dec[i],
+                                            output_padding=None,kernel_size=ker_size[j],
+                                            activation=act, padding=pad_dec, strides=2,
+                                    name='Dec_' + str(j)+'_ConvLayer_'+str(i)))
             
-            # Transpose convolution with normal stride = 2 
-            dec_mods[j].add(tf.keras.layers.Conv2DTranspose(filters=n_dec[i],
-                                          output_padding=None, kernel_size=ker_size[j],
-                                          activation=act, padding=pad_dec, strides=2,  # Regular stride
-                                          name='Dec_' + str(j)+'_ConvLayer_'+str(i)))
-    
-            # Convolution with stride=1
-            if i < N_layers - 1:       
+            #Convolution with stride=1
+            if  i<N_layers-1:       
                 dec_mods[j].add(tf.keras.layers.Conv2D(filters=n_dec[i],
-                                              kernel_size=ker_size[j], 
-                                              activation=act, padding=pad_dec, strides=1,
-                                              name='Dec_' + str(j)+'_ConvLayer1_'+str(i)))
-    
-        # Crop and final linear convolution with stride=1
+                                            kernel_size=ker_size[j], 
+                                           activation=act,padding=pad_dec,strides=1,
+                                          name='Dec_' + str(j)+'_ConvLayer1_'+str(i)))
+
+        #crop and final linear convolution with stride=1
         dec_mods[j].add(tf.keras.layers.CenterCrop(p_crop[0] + 2*p_fin[j],
-                                                   p_crop[1] + 2*p_fin[j],
-                                    name='Dec_' + str(j)+'_Crop_'+str(i)))
+                                                       p_crop[1]+ 2*p_fin[j],
+                                name='Dec_' + str(j)+'_Crop_'+str(i)))
         dec_mods[j].add(tf.keras.layers.Conv2D(filters=U.shape[3],
-                                               kernel_size=ker_size[j], 
-                                               activation='linear', padding=pad_dec, strides=1,
-                                               name='Dec_' + str(j)+'_Final_Layer'))
+                                                kernel_size=ker_size[j], 
+                                                activation='linear',padding=pad_dec,strides=1,
+                                                  name='Dec_' + str(j)+'_Final_Layer'))
 
 
     # run the model once to print summary
@@ -667,7 +811,7 @@ def main():
     t            = 1 # initial (not important value) to monitor the time of the training
 
     #### make directory to save ###
-    job_name = 'job{0:}_batch_size{1:}_learning_rate{2:}_num_epochs{3:}_lrate_mult{4:}_N_lr{5:}_n_parallel{6:}_lat_dep{7:}_N_layers{8:}'.format(job, b_size, l_rate, n_epochs, lrate_mult, N_lr, N_parallel, lat_dep, N_layers)
+    job_name = f"job_{str(wandb.run.id)}"
     job_path = os.path.join(output_path, job_name)
     os.makedirs(job_path, exist_ok=True)
 
@@ -695,9 +839,11 @@ def main():
     "lrate_mult": lrate_mult,
     "N_lr": N_lr,
     "n_parallel": N_parallel,
-    "N_check:": N_check,
+    "N_check": N_check,
     "lat_dep": lat_dep, 
     "ker_size": str(ker_size),
+    "job id": str(wandb.run.id),
+    "sweep id": str(wandb.run.sweep_id)
     }
 
     with open(output_path_hyp, "w") as file:
@@ -705,10 +851,14 @@ def main():
 
     for epoch in range(n_epochs):
         print('running epoch:', epoch)
-        if epoch - last_save > patience: break #early stop
+        if epoch - last_save > patience: 
+            print('early stop - val loss has not decreased in last 100 epochs')
+            break #early stop
         
         if epoch > patience:
-            if ssim_0 < 0.5: break #early stop
+            if ssim_0 < 0.5:
+                print('early stop - SSIM is smaller than 0.5 after 100 epochs')
+                break #early stop
 
         #Perform gradient descent for all the batches every epoch
         loss_0     = 0
@@ -721,33 +871,31 @@ def main():
             loss, decoded    = train_step(U_train[j], enc_mods, dec_mods)
             loss_0          += loss
 
-            # Compute SSIM
             original = U_train[j]  # Validation input
+
+            decoded_unscaled = ss_inverse_transform(decoded.numpy(), scaler)
+            original_unscaled = ss_inverse_transform(original, scaler)
+
+            # Compute SSIM
             #print(np.shape(original), np.shape(decoded))
             #print(f"Type of original: {type(original)}")
             #print(f"Type of decoded: {type(decoded)}")
-            batch_ssim = compute_ssim_for_4d(original, decoded)
+            batch_ssim = compute_ssim_for_4d(original_unscaled, decoded_unscaled)
             ssim_0 += batch_ssim
-            print(ssim_0)
-            print(np.shape(original))
-            print(np.shape(decoded))
 
             ### new metrics from POD ###
-            evr_value          = EVR_recon(original, decoded.numpy())
+            evr_value          = EVR_recon(original_unscaled, decoded_unscaled)
             evr_0             += evr_value
-            nrmse_value        = NRMSE(original, decoded.numpy())
+            nrmse_value        = NRMSE(original_unscaled, decoded_unscaled)
             nrmse_0           += nrmse_value
-            mse_value          = MSE(original, decoded.numpy())
-            mse_0             += mse_value     
+            mse_value          = MSE(original_unscaled, decoded_unscaled)
+            mse_0             += mse_value  
+
             print('metrics saved')
             if j == 0:
-                if (epoch % N_check == 0):
-                    decoded = decoded.numpy()
-                    decoded_unscaled = ss_inverse_transform(decoded, scaler)
-                    original_unscaled = ss_inverse_transform(original, scaler)
-        
+                if (epoch % N_check == 0):        
                     fig, ax =plt.subplots(1, figsize=(6,4), tight_layout=True)
-                    plot_reconstruction(original_unscaled, decoded_unscaled, 32, 20, 'train'+name)
+                    plot_reconstruction_and_error(original_unscaled, decoded_unscaled, 32, 8, '/train')
 
         #save train loss
         tloss_plot[epoch]        = loss_0.numpy()/n_batches
@@ -772,24 +920,25 @@ def main():
 
                 # Compute SSIM
                 original = U_val[j]  # Validation input
-                batch_ssim = compute_ssim_for_4d(original, decoded)
+
+                decoded_unscaled = ss_inverse_transform(decoded.numpy(), scaler)
+                original_unscaled = ss_inverse_transform(original, scaler)
+
+                batch_ssim = compute_ssim_for_4d(original_unscaled, decoded_unscaled)
                 ssim_val += batch_ssim
 
+
                 ### new metrics from POD ###
-                evr_value          = EVR_recon(original, decoded.numpy())
-                evr_val           += evr_value
-                nrmse_value        = NRMSE(original, decoded.numpy())
-                nrmse_val         += nrmse_value
-                mse_value          = MSE(original, decoded.numpy())
-                mse_val           += mse_value
+                evr_value            = EVR_recon(original_unscaled, decoded_unscaled)
+                evr_val             += evr_value
+                nrmse_value          = NRMSE(original_unscaled, decoded_unscaled)
+                nrmse_val           += nrmse_value
+                mse_value            = MSE(original_unscaled, decoded_unscaled)
+                mse_val             += mse_value
 
                 if j == 0:
-                    decoded = decoded.numpy()
-                    decoded_unscaled = ss_inverse_transform(decoded, scaler)
-                    original_unscaled = ss_inverse_transform(original, scaler)
-
                     fig, ax =plt.subplots(1, figsize=(6,4), tight_layout=True)
-                    plot_reconstruction(original_unscaled, decoded_unscaled, 32, 20, 'test'+name)
+                    plot_reconstruction_and_error(original_unscaled, decoded_unscaled, 32, 8, '/test')
 
             #save validation loss
             vloss_epoch       = loss_val.numpy()/val_batches
@@ -902,10 +1051,11 @@ def main():
             ax.legend()
             fig.savefig(images_dir +'/EVR.png')
 
-
-
+    K.clear_session()
+    gc.collect()
     print('finished job')
 
-wandb.agent(sweep_id=sweep_id, function=main)
+wandb.agent(sweep_id=sweep_id, function=main, entity="mm17ktn-university-of-leeds", project=project_name)
+
 
 

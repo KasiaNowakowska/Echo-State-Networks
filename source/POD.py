@@ -118,6 +118,8 @@ def POD(data, c,  file_str, Plotting=True):
     # Calculate cumulative explained variance
     cumulative_explained_variance = np.cumsum(explained_variance_ratio)
     print('cumulative explained variance for', c, 'components is', cumulative_explained_variance[-1])
+    np.save(output_path+file_str+'_components.npy', components)
+    np.save(output_path+file_str+'_cumEV.npy', cumulative_explained_variance)
 
     if Plotting:
         # Plot cumulative explained variance
@@ -584,7 +586,7 @@ variables = ['q_all', 'w_all', 'u_all', 'b_all']
 names = ['q', 'w', 'u', 'b']
 x = np.load(input_path+'/x.npy')
 z = np.load(input_path+'/z.npy')
-snapshots = 20000 #snapshots
+snapshots = 11200 #snapshots
 data_set, time_vals = load_data_set(input_path+'/data_4var_5000_48000.h5', variables, snapshots)
 #variables = ['q_vertical', 'w_vertical', 'u_vertical', 'b_vertical']
 #data_set, time_vals = load_data_set_Ra2e7(input_path+'/data_all.h5', variables, snapshots)
@@ -601,7 +603,7 @@ if reduce_data_set:
     print('reduced x domain', len(x))
     print(x[0], x[-1])
 
-reduce_data_set2 = True
+reduce_data_set2 = False
 if reduce_data_set2:
     data_set = data_set[:4650,128:160,:,:] # 10LTs washout, 200LTs train, 1000LTs test
     x = x[128:160]
