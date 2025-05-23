@@ -15,8 +15,8 @@ import json
 import sys
 sys.stdout.reconfigure(line_buffering=True)
 
-input_path='./ToyData/'
-output_path='./ToyData/scaled/Noise0_5/'
+input_path='./ToyData/smallergrid/'
+output_path='./ToyData/POD/smallergrid/SS/Noise01/'
 
 projection = False
 
@@ -165,7 +165,7 @@ def plot_reconstruction(original, reconstruction, z_value, t_value, file_str):
 def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, time_vals, file_str):
     abs_error = np.abs(original-reconstruction)
     residual  = original - reconstruction
-    vmax_res = np.max(np.abs(res))  # Get maximum absolute value
+    vmax_res = np.max(np.abs(residual))  # Get maximum absolute value
     vmin_res = -vmax_res
     if original.ndim == 3: #len(time_vals), len(x), len(z)
 
@@ -204,6 +204,49 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, ti
             ax[v].set_ylabel('x')
         ax[-1].set_xlabel('time')
         fig.savefig(output_path+file_str+'_hovmoller_recon_error.png')
+
+
+        fig, ax = plt.subplots(3, figsize=(12,6), tight_layout=True, sharex=True)
+        minm = min(np.min(original[t_value, :, :]), np.min(reconstruction[t_value, :, :]))
+        maxm = max(np.max(original[t_value, :, :]), np.max(reconstruction[t_value, :, :]))
+        c1 = ax[0].pcolormesh(x, z, original[t_value,:,:].T, vmin=minm, vmax=maxm)
+        fig.colorbar(c1, ax=ax[0])
+        ax[0].set_title('true')
+        c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:].T, vmin=minm, vmax=maxm)
+        fig.colorbar(c2, ax=ax[1])
+        ax[1].set_title('reconstruction')
+        c3 = ax[2].pcolormesh(x, z, residual[t_value,:,:].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
+        fig.colorbar(c3, ax=ax[2])
+        ax[2].set_title('error')
+        for v in range(2):
+            ax[v].set_ylabel('z')
+            ax[v].tick_params(axis='both', labelsize=12)
+        ax[-1].set_xlabel('x')
+        fig.savefig(output_path+file_str+'_hovmoller_recon_residual.png')
+
+        fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+        minm = min(np.min(original[:, :, z_value]), np.min(reconstruction[:, :, z_value]))
+        maxm = max(np.max(original[:, :, z_value]), np.max(reconstruction[:, :, z_value]))
+        print(np.max(original[:, :, z_value]))
+        print(minm, maxm)
+        print("time shape:", np.shape(time_vals))
+        print("x shape:", np.shape(x))
+        print("original[:, :, z_value] shape:", original[:, :, z_value].T.shape)
+        c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value].T, vmin=minm, vmax=maxm)
+        fig.colorbar(c1, ax=ax[0])
+        ax[0].set_title('true')
+        c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value].T, vmin=minm, vmax=maxm)
+        fig.colorbar(c2, ax=ax[1])
+        ax[1].set_title('reconstruction')
+        c3 = ax[2].pcolormesh(time_vals, x,  residual[:,:,z_value].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
+        fig.colorbar(c3, ax=ax[2])
+        ax[2].set_title('error')
+        for v in range(2):
+            ax[v].set_ylabel('x')
+            ax[v].tick_params(axis='both', labelsize=12)
+        ax[-1].set_xlabel('time')
+        fig.savefig(output_path+file_str+'_snapshot_recon_residual.png')
+
 
     elif original.ndim == 4: #len(time_vals), len(x), len(z), var
         for i in range(original.shape[3]):
@@ -427,7 +470,7 @@ for index, name in enumerate(data_names):
     #data_set, x, z, time = load_data(input_path+'/moderate_dataset.h5', name)
     print('shape of dataset', np.shape(data_set))
 
-    noise_level = 0.5
+    noise_level = 0.1
     data_set = add_noise(data_set, noise_level=noise_level)
     fig, ax =plt.subplots(1, figsize=(12,3), tight_layout=True)
     c=ax.contourf(time_vals, x, data_set[:,:,32].T)
@@ -456,7 +499,8 @@ for index, name in enumerate(data_names):
     
     
     data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_, cev = POD(data_scaled, n_modes[index], name)
-    data_reconstructed = ss_inverse_transform(data_reconstructed, scaler)
+    if scaling == 'SS':
+        data_reconstructed = ss_inverse_transform(data_reconstructed, scaler)
     plot_reconstruction_and_error(data_set, data_reconstructed, 32, 20, time_vals, name+'_scaled')
     nrmse = NRMSE(data_set, data_reconstructed)
     mse   = MSE(data_set, data_reconstructed)

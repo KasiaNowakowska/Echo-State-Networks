@@ -1,15 +1,16 @@
 """
 python script for convolutional autoencoder.
 
-Usage: CAE.py [--input_path=<input_path> --output_path=<output_path> --model_path=<model_path> --hyperparam_file=<hyperparam_file>]
+Usage: CAE.py [--input_path=<input_path> --output_path=<output_path> --model_path=<model_path> --hyperparam_file=<hyperparam_file> --job_id=<job_id> --sweep_id=<sweep_id>]
 
 Options:
     --input_path=<input_path>            file path to use for data
     --output_path=<output_path>          file path to save images output [default: ./images]
     --model_path=<model_path>            file path to location of job 
     --hyperparam_file=<hyperparam_file>  file with hyperparmas
+    --job_id=<job_id>                    job_id
+    --sweep_id=<sweep_id>                sweep_id
 """
-
 
 # import packages
 import time
@@ -50,17 +51,29 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error
 
 import wandb
-wandb.login()
+#wandb.login()
 
 input_path = args['--input_path']
 output_path = args['--output_path']
 model_path = args['--model_path']
 hyperparam_file = args['--hyperparam_file']
+job_id = args['--job_id']
+sweep_id = args['--sweep_id']
 
+### make output_directories ###
 if not os.path.exists(output_path):
     os.makedirs(output_path)
     print('made directory')
 
+output_path = output_path+f"/sweep_{sweep_id}"
+if not os.path.exists(output_path):
+    os.makedirs(output_path)
+    print('made directory')
+
+output_path = output_path+f"/job_{job_id}"
+if not os.path.exists(output_path):
+    os.makedirs(output_path)
+    print('made directory')
 
 def load_data(file, name):
     with h5py.File(file, 'r') as hf:
@@ -74,25 +87,44 @@ def load_data(file, name):
 
     return data, x, z, time
 
+def add_noise(data, noise_level=0.01, seed=42):
+    """
+    Add Gaussian noise to a dataset of shape (time, x, z, channels).
+    
+    Parameters:
+        data (np.ndarray): Input data of shape (T, X, Z, C).
+        noise_level (float): Standard deviation of Gaussian noise.
+    
+    Returns:
+        noisy_data (np.ndarray): Noisy version of the input data.
+    """
+    np.random.seed(seed)
+    noise = noise_level * np.random.randn(*data.shape)
+    noisy_data = data + noise
+    return noisy_data
 
-#### LOAD DATA AND POD ####
+#### LOAD DATA ####
 name='combined'
 data_set, x, z, time_vals = load_data(input_path+'/plume_wave_dataset.h5', name)
 print('shape of data', np.shape(data_set))
 
+noise_level = 0
+data_set = add_noise(data_set, noise_level=noise_level)
+fig, ax =plt.subplots(1, figsize=(12,3), tight_layout=True)
+c=ax.contourf(time_vals, x, data_set[:,:,32].T)
+fig.colorbar(c, ax=ax)
+ax.set_xlabel('Time', fontsize=14)
+ax.set_ylabel('x', fontsize=14)
+fig.savefig(output_path+f"/combined_data_noise{noise_level}.png")
+
 data_set = data_set.reshape(len(time_vals), len(x), len(z), 1)
 print('shape of reshaped data set', np.shape(data_set))
-data_set = data_set[:, 73:105, :, :]
-x = x[73:105]
-print('reduced domain shape', np.shape(data_set))
-print('reduced x domain', np.shape(x))
-print('reduced x domain', len(x))
-print(x[0], x[-1])
 
 U = data_set
 dt = time_vals[1]-time_vals[0]
 print('dt:', dt)
-variables = 1
+num_variables = 1
+variables = names = ['A']
 
 # Load hyperparameters from a YAML file
 with open(hyperparam_file, 'r') as file:
@@ -280,56 +312,198 @@ def plot_reconstruction(original, reconstruction, z_value, t_value, file_str):
     ax[-1].set_xlabel('time')
     fig.savefig(output_path+file_str+'_hovmoller_recon.png')
 
-def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, file_str):
-    if original.ndim == 4:
-        original = original.reshape(original.shape[0], original.shape[1], original.shape[2])
-    if reconstruction.ndim == 4:
-        reconstruction = reconstruction.reshape(reconstruction.shape[0], reconstruction.shape[1], reconstruction.shape[2])
-        
-    # Check if both data arrays have the same dimensions and the dimension is 2
-    if original.ndim == reconstruction.ndim == 3:
-        print("Both data arrays have the same dimensions and are 3D.")
-    else:
-        print("The data arrays either have different dimensions or are not 3D.")
-
-    abs_error = np.abs(original-reconstruction)
-    
-    fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
-    minm = min(np.min(original[t_value, :, :]), np.min(reconstruction[t_value, :, :]))
-    maxm = max(np.max(original[t_value, :, :]), np.max(reconstruction[t_value, :, :]))
-    c1 = ax[0].pcolormesh(x, z, original[t_value,:,:].T, vmin=minm, vmax=maxm)
-    fig.colorbar(c1, ax=ax[0])
-    ax[0].set_title('true')
-    c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:].T, vmin=minm, vmax=maxm)
-    fig.colorbar(c2, ax=ax[1])
-    ax[1].set_title('reconstruction')
-    c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:].T, cmap='Reds')
-    fig.colorbar(c3, ax=ax[2])
-    ax[2].set_title('error')
-    for v in range(3):
-        ax[v].set_ylabel('z')
-    ax[-1].set_xlabel('x')
-    fig.savefig(output_path+file_str+'_snapshot_recon_error_t%i.png' % t_value)
-
-    fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
-    minm = min(np.min(original[:, :, z_value]), np.min(reconstruction[:, :, z_value]))
-    maxm = max(np.max(original[:, :, z_value]), np.max(reconstruction[:, :, z_value]))
-    print(np.max(original[:, :, z_value]))
-    print(minm, maxm)
+def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, time_vals, file_str):
     time_zone = np.linspace(0, original.shape[0],  original.shape[0])
-    c1 = ax[0].pcolormesh(time_zone, x, original[:, :, z_value].T, vmin=minm, vmax=maxm)
-    fig.colorbar(c1, ax=ax[0])
-    ax[0].set_title('true')
-    c2 = ax[1].pcolormesh(time_zone, x, reconstruction[:, :, z_value].T, vmin=minm, vmax=maxm)
-    fig.colorbar(c1, ax=ax[1])
-    ax[1].set_title('reconstruction')
-    c3 = ax[2].pcolormesh(time_zone, x, abs_error[:, :, z_value].T, cmap='Reds')
-    fig.colorbar(c3, ax=ax[2])
-    ax[2].set_title('reconstruction')
-    for v in range(2):
-        ax[v].set_ylabel('x')
-    ax[-1].set_xlabel('time')
-    fig.savefig(output_path+file_str+'_hovmoller_recon_error.png')
+    abs_error = np.abs(original-reconstruction)
+    residual  = original - reconstruction
+    vmax_res = np.max(np.abs(residual))  # Get maximum absolute value
+    vmin_res = -vmax_res
+    if original.ndim == 3: #len(time_vals), len(x), len(z)
+
+        fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+        minm = min(np.min(original[t_value, :, :]), np.min(reconstruction[t_value, :, :]))
+        maxm = max(np.max(original[t_value, :, :]), np.max(reconstruction[t_value, :, :]))
+        c1 = ax[0].pcolormesh(x, z, original[t_value,:,:].T, vmin=minm, vmax=maxm)
+        fig.colorbar(c1, ax=ax[0])
+        ax[0].set_title('true')
+        c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:].T, vmin=minm, vmax=maxm)
+        fig.colorbar(c1, ax=ax[1])
+        ax[1].set_title('reconstruction')
+        c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:].T, cmap='Reds')
+        fig.colorbar(c3, ax=ax[2])
+        ax[2].set_title('error')
+        for v in range(3):
+            ax[v].set_ylabel('z')
+        ax[-1].set_xlabel('x')
+        fig.savefig(output_path+file_str+'_hovmoller_recon_error.png')
+
+        fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+        minm = min(np.min(original[:, :, z_value]), np.min(reconstruction[:, :, z_value]))
+        maxm = max(np.max(original[:, :, z_value]), np.max(reconstruction[:, :, z_value]))
+        print(np.max(original[:, :, z_value]))
+        print(minm, maxm)
+        c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value].T)
+        fig.colorbar(c1, ax=ax[0])
+        ax[0].set_title('true')
+        c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value].T)
+        fig.colorbar(c1, ax=ax[1])
+        ax[1].set_title('reconstruction')
+        c3 = ax[2].pcolormesh(time_vals, x, abs_error[:, :, z_value].T, cmap='Reds')
+        fig.colorbar(c3, ax=ax[2])
+        ax[2].set_title('error')
+        for v in range(2):
+            ax[v].set_ylabel('x')
+        ax[-1].set_xlabel('time')
+        fig.savefig(output_path+file_str+'_snapshot_recon_error.png')
+
+        fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+        minm = min(np.min(original[t_value, :, :]), np.min(reconstruction[t_value, :, :]))
+        maxm = max(np.max(original[t_value, :, :]), np.max(reconstruction[t_value, :, :]))
+        c1 = ax[0].pcolormesh(x, z, original[t_value,:,:].T, vmin=minm, vmax=maxm)
+        fig.colorbar(c1, ax=ax[0])
+        ax[0].set_title('true')
+        c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:].T, vmin=minm, vmax=maxm)
+        fig.colorbar(c1, ax=ax[1])
+        ax[1].set_title('reconstruction')
+        c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:].T, cmap='Reds')
+        fig.colorbar(c3, ax=ax[2])
+        ax[2].set_title('error')
+        for v in range(3):
+            ax[v].set_ylabel('z')
+        ax[-1].set_xlabel('x')
+        fig.savefig(output_path+file_str+'_hovmoller_recon_error.png')
+
+        fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+        minm = min(np.min(original[:, :, z_value]), np.min(reconstruction[:, :, z_value]))
+        maxm = max(np.max(original[:, :, z_value]), np.max(reconstruction[:, :, z_value]))
+        print(np.max(original[:, :, z_value]))
+        print(minm, maxm)
+        c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value].T)
+        fig.colorbar(c1, ax=ax[0])
+        ax[0].set_title('true')
+        c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value].T)
+        fig.colorbar(c1, ax=ax[1])
+        ax[1].set_title('reconstruction')
+        c3 = ax[2].pcolormesh(time_vals, x, abs_error[:, :, z_value].T, cmap='Reds')
+        fig.colorbar(c3, ax=ax[2])
+        ax[2].set_title('error')
+        for v in range(2):
+            ax[v].set_ylabel('x')
+        ax[-1].set_xlabel('time')
+        fig.savefig(output_path+file_str+'_snapshot_recon_error.png')
+    
+
+    elif original.ndim == 4: #len(time_vals), len(x), len(z), var
+        for i in range(original.shape[3]):
+            name = names[i]
+            print(name)
+            fig, ax = plt.subplots(3, figsize=(12,6), tight_layout=True, sharex=True)
+            minm = min(np.min(original[t_value, :, :, i]), np.min(reconstruction[t_value, :, :, i]))
+            maxm = max(np.max(original[t_value, :, :, i]), np.max(reconstruction[t_value, :, :, i]))
+            c1 = ax[0].pcolormesh(x, z, original[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:, i].T, cmap='Reds')
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('z')
+            ax[-1].set_xlabel('x')
+            fig.savefig(output_path+file_str+name+'_snapshot_recon_error.png')
+            plt.close()
+
+            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+            minm = min(np.min(original[:, :, z_value,i]), np.min(reconstruction[:, :, z_value,i]))
+            maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
+            print(np.max(original[:, :, z_value,i]))
+            print(minm, maxm)
+            print("time shape:", np.shape(time_zone))
+            print("x shape:", np.shape(x))
+            print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
+            c1 = ax[0].pcolormesh(time_zone, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(time_zone, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(time_zone, x,  abs_error[:,:,z_value, i].T, cmap='Reds')
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('x')
+            ax[-1].set_xlabel('time')
+            fig.savefig(output_path+file_str+name+'_hovmoller_recon_error.png')
+            plt.close()
+
+            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+            minm = min(np.min(original[:, :, z_value,i]), np.min(reconstruction[:, :, z_value,i]))
+            maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
+            print(np.max(original[:, :, z_value,i]))
+            print(minm, maxm)
+            print("time shape:", np.shape(time_zone))
+            print("x shape:", np.shape(x))
+            print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
+            c1 = ax[0].pcolormesh(time_zone, x, original[:, :, z_value, i].T)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(time_zone, x, reconstruction[:, :, z_value, i].T)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(time_zone, x,  abs_error[:,:,z_value, i].T, cmap='Reds')
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('x')
+            ax[-1].set_xlabel('time')
+            fig.savefig(output_path+file_str+name+'_hovmoller_recon_diffbar_error.png')
+            plt.close()
+
+
+            fig, ax = plt.subplots(3, figsize=(12,6), tight_layout=True, sharex=True)
+            minm = min(np.min(original[t_value, :, :, i]), np.min(reconstruction[t_value, :, :, i]))
+            maxm = max(np.max(original[t_value, :, :, i]), np.max(reconstruction[t_value, :, :, i]))
+            c1 = ax[0].pcolormesh(x, z, original[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(x, z, residual[t_value,:,:, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('z')
+                ax[v].tick_params(axis='both', labelsize=12)
+            ax[-1].set_xlabel('x')
+            fig.savefig(output_path+file_str+name+'_hovmoller_recon_residual.png')
+
+            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+            minm = min(np.min(original[:, :, z_value,i]), np.min(reconstruction[:, :, z_value,i]))
+            maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
+            print(np.max(original[:, :, z_value,i]))
+            print(minm, maxm)
+            print("time shape:", np.shape(time_zone))
+            print("x shape:", np.shape(x))
+            print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
+            c1 = ax[0].pcolormesh(time_zone, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(time_zone, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(time_zone, x,  residual[:,:,z_value, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('x')
+                ax[v].tick_params(axis='both', labelsize=12)
+            ax[-1].set_xlabel('time')
+            fig.savefig(output_path+file_str+name+'_snapshot_recon_residual.png')
+
+
 
 #### Metrics ####
 from sklearn.metrics import mean_squared_error
@@ -386,7 +560,7 @@ def compute_ssim_for_4d(original, decoded):
             #print(t, c)
             # Extract the 2D slice for each timestep and channel
             orig_slice = original[t, :, :, c]
-            dec_slice = decoded[t, :, :, c].numpy()
+            dec_slice = decoded[t, :, :, c]
             #print(orig_slice, dec_slice)
             
             # Compute SSIM for the current slice
@@ -480,9 +654,9 @@ def ss_inverse_transform(data, scaler):
 
 #### load in data ###
 #b_size      = wandb.config.b_size   #batch_size
-n_batches   = int((U.shape[0]/b_size) *0.6)  #number of batches #20
+n_batches   = int((U.shape[0]/b_size) *0.7)  #number of batches #20
 val_batches = int((U.shape[0]/b_size) *0.2)    #int(n_batches*0.2) # validation set size is 0.2 the size of the training set #2
-test_batches = int((U.shape[0]/b_size) *0.2)
+test_batches = int((U.shape[0]/b_size) *0.1)
 skip        = 1
 print(n_batches, val_batches, test_batches)
 
@@ -526,20 +700,20 @@ test_times = time_vals[b_size*n_batches*skip+b_size*val_batches*skip:
 U_train     = split_data(U_tt_scaled, b_size, n_batches).astype('float32') #to be used for randomly shuffled batches
 U_val       = split_data(U_vv_scaled, b_size, val_batches).astype('float32')
 
-del U_vv, U_tt, U_vv_scaled, U_tt_scaled
+del U_vv, U_tt, U_tt_scaled
 
 # define the model
 # we do not have pooling and upsampling, instead we use stride=2
 
-#lat_dep       = wandb.config.lat_dep       #latent space depth
-#kernel_choice = wandb.config.kernel_choice
-n_fil         = [6,12,24,lat_dep]          #number of filters ecnoder
-n_dec         = [24,12,6,3]                #number of filters decoder
-#N_parallel    = wandb.config.N_parallel    #number of parallel CNNs for multiscale
+# define the model
+# we do not have pooling and upsampling, instead we use stride=2
+#global lat_dep                 #latent space depth
+#global N_parallel                       #number of parallel CNNs for multiscale
+#global kernel_choice
 ker_size      = [(3,3), (5,5), (7,7)]      #kernel sizes
 if N_parallel == 1:
     ker_size  = [ker_size[kernel_choice]]
-#N_layers      = wandb.config.N_layers    #number of layers in every CNN
+#global N_layers    #number of layers in every CNN
 if N_layers == 4:
     n_fil         = [6,12,24,lat_dep]          #number of filters ecnoder
     n_dec         = [24,12,6,3]                #number of filters decoder
@@ -571,25 +745,31 @@ for i in range(N_parallel):
 for j in range(N_parallel):
     for i in range(N_layers):
 
-        #stride=2 padding and conv
-        enc_mods[j].add(PerPad2D(padding=p_size[j], asym=True,
-                                          name='Enc_' + str(j)+'_PerPad_'+str(i)))
-        enc_mods[j].add(tf.keras.layers.Conv2D(
-            filters=n_fil[i], kernel_size=ker_size[j],
-            activation=act, padding=pad_enc, strides=2,  # Keep stride-2 for earlier layers
-            name='Enc_' + str(j)+'_ConvLayer_'+str(i)))
-
+        if i == N_layers-1:
+            #stride=2 padding and conv
+            enc_mods[j].add(PerPad2D(padding=p_size[j], asym=True,
+                                            name='Enc_' + str(j)+'_PerPad_'+str(i)))
+            enc_mods[j].add(tf.keras.layers.Conv2D(filters = n_fil[i], kernel_size=ker_size[j],
+                                        activation=act, padding=pad_enc, strides=4,
+                            name='Enc_' + str(j)+'_ConvLayer_'+str(i)))
+        else:
+            #stride=2 padding and conv
+            enc_mods[j].add(PerPad2D(padding=p_size[j], asym=True,
+                                            name='Enc_' + str(j)+'_PerPad_'+str(i)))
+            enc_mods[j].add(tf.keras.layers.Conv2D(filters = n_fil[i], kernel_size=ker_size[j],
+                                        activation=act, padding=pad_enc, strides=2,
+                            name='Enc_' + str(j)+'_ConvLayer_'+str(i)))
+        
 
         #stride=1 padding and conv
         if i<N_layers-1:
             enc_mods[j].add(PerPad2D(padding=p_fin[j], asym=False,
-                                                      name='Enc_'+str(j)+'_Add_PerPad1_'+str(i)))
+                                                        name='Enc_'+str(j)+'_Add_PerPad1_'+str(i)))
             enc_mods[j].add(tf.keras.layers.Conv2D(filters=n_fil[i],
                                                     kernel_size=ker_size[j],
                                                 activation=act,padding=pad_dec,strides=1,
                                                     name='Enc_'+str(j)+'_Add_Layer1_'+str(i)))
 
-print('shape of U_train', np.shape(U_train))
 # Obtain the shape of the latent space
 output = enc_mods[-1](U_train[0])
 N_1 = output.shape
@@ -606,30 +786,33 @@ for j in range(N_parallel):
         #initial padding of latent space
         if i==0: 
             dec_mods[j].add(PerPad2D(padding=p_dec, asym=False,
-                                          name='Dec_' + str(j)+'_PerPad_'+str(i))) 
-        
-        # Transpose convolution with normal stride = 2 
-        dec_mods[j].add(tf.keras.layers.Conv2DTranspose(filters=n_dec[i],
-                                      output_padding=None, kernel_size=ker_size[j],
-                                      activation=act, padding=pad_dec, strides=2,  # Regular stride
-                                      name='Dec_' + str(j)+'_ConvLayer_'+str(i)))
+                                            name='Dec_' + str(j)+'_PerPad_'+str(i))) 
+            dec_mods[j].add(tf.keras.layers.Conv2DTranspose(filters = n_dec[i],
+                            output_padding=None,kernel_size=ker_size[j],
+                            activation=act, padding=pad_dec, strides=4,
+                name='Dec_' + str(j)+'_ConvLayer_'+str(i)))
+        else:
+            #Transpose convolution with stride = 2 
+            dec_mods[j].add(tf.keras.layers.Conv2DTranspose(filters = n_dec[i],
+                                        output_padding=None,kernel_size=ker_size[j],
+                                        activation=act, padding=pad_dec, strides=2,
+                                name='Dec_' + str(j)+'_ConvLayer_'+str(i)))
         
         #Convolution with stride=1
         if  i<N_layers-1:       
             dec_mods[j].add(tf.keras.layers.Conv2D(filters=n_dec[i],
                                         kernel_size=ker_size[j], 
-                                       activation=act,padding=pad_dec,strides=1,
-                                      name='Dec_' + str(j)+'_ConvLayer1_'+str(i)))
+                                        activation=act,padding=pad_dec,strides=1,
+                                        name='Dec_' + str(j)+'_ConvLayer1_'+str(i)))
 
     #crop and final linear convolution with stride=1
     dec_mods[j].add(tf.keras.layers.CenterCrop(p_crop[0] + 2*p_fin[j],
-                                                   p_crop[1]+ 2*p_fin[j],
+                                                    p_crop[1]+ 2*p_fin[j],
                             name='Dec_' + str(j)+'_Crop_'+str(i)))
     dec_mods[j].add(tf.keras.layers.Conv2D(filters=U.shape[3],
                                             kernel_size=ker_size[j], 
                                             activation='linear',padding=pad_dec,strides=1,
-                                              name='Dec_' + str(j)+'_Final_Layer'))
-
+                                                name='Dec_' + str(j)+'_Final_Layer'))
 
 # run the model once to print summary
 enc0, dec0 = model(U_train[0], enc_mods, dec_mods)
@@ -656,60 +839,174 @@ for i in range(N_parallel):
     b[i] = tf.keras.models.load_model(models_dir + '/dec_mod'+str(ker_size[i])+'_'+str(N_latent)+'.h5',
                                           custom_objects={"PerPad2D": PerPad2D})
 
-#### NRMSE across x,z and averaged in time ####
-truth = U_tv_scaled
-decoded = model(truth,a,b)[1]
-print(np.shape(decoded), np.shape(truth))
+validation_data = True
+test_data       = True
+all_data        = True
 
-test_times = time_vals[b_size*n_batches*skip+b_size*val_batches*skip:
-                         b_size*n_batches*skip+b_size*val_batches*skip+b_size*test_batches*skip] 
-print(test_times[0], test_times[-1])
+if validation_data:
+    print('VALIDATION DATA')
+    truth = U_vv_scaled
+    decoded = model(truth,a,b)[1]
+    print(np.shape(decoded), np.shape(truth))
 
-#SSIM
-test_ssim = compute_ssim_for_4d(truth, decoded)
+    test_times = time_vals[b_size*n_batches*skip+b_size*val_batches*skip:
+                                b_size*n_batches*skip+b_size*val_batches*skip+b_size*test_batches*skip] 
+    print(test_times[0], test_times[-1])
 
-#MSE
-mse = MSE(truth, decoded.numpy())
+    decoded = decoded.numpy()
 
-#NRMSE
-nrmse = NRMSE(truth, decoded.numpy())
+    decoded_unscaled = ss_inverse_transform(decoded, scaler)
+    truth_unscaled = ss_inverse_transform(truth, scaler)
+    print('shape of validation prediction', np.shape(decoded_unscaled))
+    print('shape of validation truth', np.shape(truth_unscaled))
 
-#EVR 
-evr = EVR_recon(truth, decoded.numpy())
+    #SSIM
+    test_ssim = compute_ssim_for_4d(truth_unscaled, decoded_unscaled)
 
-print("nrmse:", nrmse)
-print("mse:", mse)
-print("test_ssim:", test_ssim)
-print("EVR:", evr)
+    #MSE
+    mse = MSE(truth_unscaled, decoded_unscaled)
 
-import json
+    #NRMSE
+    nrmse = NRMSE(truth_unscaled, decoded_unscaled)
 
-# Full path for saving the file
-output_file = "test_metrics.json"
+    #EVR 
+    evr = EVR_recon(truth_unscaled, decoded_unscaled)
 
-output_path_met = os.path.join(output_path, output_file)
+    print("nrmse:", nrmse)
+    print("mse:", mse)
+    print("test_ssim:", test_ssim)
+    print("EVR:", evr)
 
-metrics = {
-"MSE": mse,
-"NRMSE": nrmse,
-"SSIM": test_ssim,
-"EVR": evr,
-}
+    import json
+    # Full path for saving the file
+    output_file = "validation_metrics.json"
 
-with open(output_path_met, "w") as file:
-    json.dump(metrics, file, indent=4)
+    output_path_met = os.path.join(output_path, output_file)
 
-decoded = decoded.numpy()
-decoded_unscaled = ss_inverse_transform(decoded, scaler)
-truth_unscaled = ss_inverse_transform(truth, scaler)
+    metrics = {
+    "MSE": mse,
+    "NRMSE": nrmse,
+    "SSIM": test_ssim,
+    "EVR": evr,
+    }
 
-n       =  4
+    with open(output_path_met, "w") as file:
+        json.dump(metrics, file, indent=4)
 
-start   = b_size*n_batches*skip+b_size*val_batches*skip  #b_size*n_batches*skip+b_size*val_batches*skip #start after validation set
+    ### plot from index 0
+    index = 0
+    print(np.shape(truth_unscaled[index:index+500]))
+    print(np.shape(decoded_unscaled[index:index+500]))
+    print(np.shape(x))
+    print(np.shape(test_times[index:index+500]))
+    plot_reconstruction_and_error(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], 32, 0, test_times[index:index+500], f"/validation_{index}")
 
-skips = 10
-for i in range(n):
-    index = 0 + skips*i
+if test_data:
+    print('TEST DATA')
+    truth = U_tv_scaled
+    decoded = model(truth,a,b)[1]
+    print(np.shape(decoded), np.shape(truth))
 
-    plot_reconstruction(truth_unscaled, decoded_unscaled, 32, index, name)
-    plot_reconstruction_and_error(truth_unscaled, decoded_unscaled, 32, index, name)
+    test_times = time_vals[b_size*n_batches*skip+b_size*val_batches*skip:
+                                b_size*n_batches*skip+b_size*val_batches*skip+b_size*test_batches*skip] 
+    print(test_times[0], test_times[-1])
+
+    decoded = decoded.numpy()
+
+    decoded_unscaled = ss_inverse_transform(decoded, scaler)
+    truth_unscaled = ss_inverse_transform(truth, scaler)
+    print('shape of test prediction', np.shape(decoded_unscaled))
+    print('shape of test truth', np.shape(truth_unscaled))
+
+    #SSIM
+    test_ssim = compute_ssim_for_4d(truth_unscaled, decoded_unscaled)
+
+    #MSE
+    mse = MSE(truth_unscaled, decoded_unscaled)
+
+    #NRMSE
+    nrmse = NRMSE(truth_unscaled, decoded_unscaled)
+
+    #EVR 
+    evr = EVR_recon(truth_unscaled, decoded_unscaled)
+
+    print("nrmse:", nrmse)
+    print("mse:", mse)
+    print("test_ssim:", test_ssim)
+    print("EVR:", evr)
+
+    import json
+    # Full path for saving the file
+    output_file = "test_metrics.json"
+
+    output_path_met = os.path.join(output_path, output_file)
+
+    metrics = {
+    "MSE": mse,
+    "NRMSE": nrmse,
+    "SSIM": test_ssim,
+    "EVR": evr,
+    }
+
+    with open(output_path_met, "w") as file:
+        json.dump(metrics, file, indent=4)
+
+    ### plot from index 0
+    index = 0
+    plot_reconstruction_and_error(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], 32, 0, test_times[index:index+500], f"/test_{index}")
+
+
+if test_data:
+    print('ALL DATA')
+    scaled_data = ss_transform(U, scaler)
+    truth = scaled_data
+    decoded = model(truth,a,b)[1]
+    print(np.shape(decoded), np.shape(truth))
+
+    test_times = time_vals[b_size*n_batches*skip+b_size*val_batches*skip:
+                                b_size*n_batches*skip+b_size*val_batches*skip+b_size*test_batches*skip] 
+    print(test_times[0], test_times[-1])
+
+    decoded = decoded.numpy()
+
+    decoded_unscaled = ss_inverse_transform(decoded, scaler)
+    truth_unscaled = ss_inverse_transform(truth, scaler)
+    print('shape of test prediction', np.shape(decoded_unscaled))
+    print('shape of test truth', np.shape(truth_unscaled))
+
+    #SSIM
+    test_ssim = compute_ssim_for_4d(truth_unscaled, decoded_unscaled)
+
+    #MSE
+    mse = MSE(truth_unscaled, decoded_unscaled)
+
+    #NRMSE
+    nrmse = NRMSE(truth_unscaled, decoded_unscaled)
+
+    #EVR 
+    evr = EVR_recon(truth_unscaled, decoded_unscaled)
+
+    print("nrmse:", nrmse)
+    print("mse:", mse)
+    print("test_ssim:", test_ssim)
+    print("EVR:", evr)
+
+    import json
+    # Full path for saving the file
+    output_file = "all_metrics.json"
+
+    output_path_met = os.path.join(output_path, output_file)
+
+    metrics = {
+    "MSE": mse,
+    "NRMSE": nrmse,
+    "SSIM": test_ssim,
+    "EVR": evr,
+    }
+
+    with open(output_path_met, "w") as file:
+        json.dump(metrics, file, indent=4)
+
+    ### plot from index 0
+    index = 0
+    plot_reconstruction_and_error(truth_unscaled[index:index+2000], decoded_unscaled[index:index+500], 32, 0, test_times[index:index+500], f"/all_{index}")
