@@ -839,8 +839,8 @@ for i in range(N_parallel):
     b[i] = tf.keras.models.load_model(models_dir + '/dec_mod'+str(ker_size[i])+'_'+str(N_latent)+'.h5',
                                           custom_objects={"PerPad2D": PerPad2D})
 
-validation_data = True
-test_data       = True
+validation_data = False
+test_data       = False
 all_data        = True
 
 if validation_data:
@@ -956,7 +956,7 @@ if test_data:
     plot_reconstruction_and_error(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], 32, 0, test_times[index:index+500], f"/test_{index}")
 
 
-if test_data:
+if all_data:
     print('ALL DATA')
     scaled_data = ss_transform(U, scaler)
     truth = scaled_data
@@ -1009,4 +1009,4 @@ if test_data:
 
     ### plot from index 0
     index = 0
-    plot_reconstruction_and_error(truth_unscaled[index:index+2000], decoded_unscaled[index:index+500], 32, 0, test_times[index:index+500], f"/all_{index}")
+    plot_reconstruction_and_error(truth_unscaled, decoded_unscaled, 32, 0, test_times, f"/all_{index}")

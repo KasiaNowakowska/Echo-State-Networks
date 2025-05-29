@@ -1,35 +1,34 @@
 """
 python script for convolutional autoencoder.
 
-Usage: CAE.py [--input_path=<input_path> --output_path=<output_path> --model_path=<model_path> --CAE_hyperparam_file=<CAE_hyperparam_file> --ESN_hyperparam_file=<ESN_hyperparam_file> --config_number=<config_number>]
+Usage: CAE.py [--input_path=<input_path> --output_path=<output_path> --CAE_model_path=<CAE_model_path> --CAE_hyperparam_file=<CAE_hyperparam_file> --ESN_hyperparam_file=<ESN_hyperparam_file> --number_of_tests=<number_of_tests> --encoded_data=<encoded_data>]
 
 Options:
     --input_path=<input_path>                   file path to use for data
     --output_path=<output_path>                 file path to save images output [default: ./images]
-    --model_path=<model_path>                   file path to location of job 
+    --CAE_model_path=<CAE_model_path>           file path to location of job 
     --CAE_hyperparam_file=<CAE_hyperparam_file> file with hyperparmas from CAE
     --ESN_hyperparam_file=<ESN_hyperparam_file> file with hyperparams for ESN
-    --config_number=<config_number>             config number 
+    --number_of_tests=<number_of_tests>         number of tests [default: 5]
+    --encoded_data=<encoded_data>               encoded data exists already [default: True]  
 """
-
 
 # import packages
 import time
 
-import sys
-sys.path.append('/nobackup/mm17ktn/ENS/skesn/skesn/')
-
-import time
-
 import os
+import sys
 sys.path.append(os.getcwd())
 import matplotlib
 matplotlib.use('Agg')  # Set the backend to Agg
 import matplotlib.pyplot as plt
+from matplotlib.colors import TwoSlopeNorm
 #import pandas as pd
 import numpy as np
 import h5py
 import yaml
+import skopt
+from skopt.space import Real
 
 from docopt import docopt
 args = docopt(__doc__)
@@ -49,31 +48,43 @@ for gpu in gpus:
 import time
 from pathlib import Path
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_squared_error
 
+import matplotlib.colors as mcolors
+import h5py
 from scipy.sparse import csr_matrix, csc_matrix, lil_matrix
 from scipy.sparse.linalg import eigs as sparse_eigs
-import skopt
-from skopt.space import Real
+from skopt.plots import plot_convergence
 from skopt.learning import GaussianProcessRegressor as GPR
 from skopt.learning.gaussian_process.kernels import Matern, WhiteKernel, Product, ConstantKernel
 from scipy.io import loadmat, savemat
-from skopt.plots import plot_convergence
-
-import wandb
-#wandb.login()
+import sys
+sys.stdout.reconfigure(line_buffering=True)
 
 exec(open("Val_Functions.py").read())
 exec(open("Functions.py").read())
 print('run functions files')
 
+import wandb
+#wandb.login()
+
 input_path = args['--input_path']
 output_path = args['--output_path']
-model_path = args['--model_path']
+CAE_model_path = args['--CAE_model_path']
+ESN_model_path = output_path
 CAE_hyperparam_file = args['--CAE_hyperparam_file']
 ESN_hyperparam_file = args['--ESN_hyperparam_file']
-config_number = args['--config_number']
+number_of_tests = int(args['--number_of_tests'])
 
+encoded_data = args['--encoded_data']
+if encoded_data == 'False':
+    encoded_data = False
+    print('data not already encoded so', encoded_data)
+elif encoded_data == 'True':
+    encoded_data = True
+    print('data already encoded so', encoded_data)
+
+
+output_path = output_path + '/testing/'
 if not os.path.exists(output_path):
     os.makedirs(output_path)
     print('made directory')
@@ -100,18 +111,22 @@ with open(ESN_hyperparam_file, "r") as f:
     alpha0 = hyperparams["alpha0"]
     n_forward = hyperparams["n_forward"]
 
-
-def load_data(file, name):
+def load_data_set(file, names, snapshots):
     with h5py.File(file, 'r') as hf:
-        print(name)
-        print(hf[name])
-        data = np.array(hf[name])
+        print(hf.keys())
+        time_vals = np.array(hf['total_time_all'][:snapshots])
+        
+        data = np.zeros((len(time_vals), len(x), len(z), len(names)))
+        
+        index=0
+        for name in names:
+            print(name)
+            print(hf[name])
+            Var = np.array(hf[name])
+            data[:,:,:,index] = Var[:snapshots,:,0,:]
+            index+=1
 
-        x = hf['x'][:]  # 1D x-axis
-        z = hf['z'][:]  # 1D z-axis
-        time = hf['time'][:]  # 1D time vector
-
-    return data, x, z, time
+    return data, time_vals
 
 def split_data(U, b_size, n_batches):
 
@@ -137,13 +152,16 @@ def model(inputs, enc_mods, dec_mods, is_train=False):
     encoded = 0
     for enc_mod in enc_mods:
         encoded += enc_mod(inputs, training=is_train)
+    print('encoded shape', np.shape(encoded))
 
     decoded = 0
     for dec_mod in dec_mods:
         decoded += dec_mod(encoded, training=is_train)
+    print('decoded shape', np.shape(decoded))
+    
 
     return encoded, decoded
-    
+  
 @tf.function #this creates the tf graph  
 def Decoder(encoded, dec_mods, is_train=False):
     '''
@@ -183,7 +201,7 @@ def train_step(inputs, enc_mods, dec_mods, train=True):
         grads   = tf.gradients(loss, varss)
         optimizer.apply_gradients(zip(grads, varss))
 
-    return loss, decoded
+    return loss
 
 class PerPad2D(tf.keras.layers.Layer):
     """
@@ -253,50 +271,7 @@ def periodic_padding(image, padding=1, asym=False):
     #print("shape of padded image: ", padded_image.shape)
     return padded_image
 
-def plot_reconstruction(original, reconstruction, z_value, t_value, time_vals, file_str):
-    if original.ndim == 4:
-        original = original.reshape(original.shape[0], original.shape[1], original.shape[2])
-    if reconstruction.ndim == 4:
-        reconstruction = reconstruction.reshape(reconstruction.shape[0], reconstruction.shape[1], reconstruction.shape[2])
-        
-    # Check if both data arrays have the same dimensions and the dimension is 2
-    if original.ndim == reconstruction.ndim == 3:
-        print("Both data arrays have the same dimensions and are 3D.")
-    else:
-        print("The data arrays either have different dimensions or are not 3D.")
-
-    fig, ax = plt.subplots(2, figsize=(12,6), tight_layout=True, sharex=True)
-    minm = min(np.min(original[t_value, :, :]), np.min(reconstruction[t_value, :, :]))
-    maxm = max(np.max(original[t_value, :, :]), np.max(reconstruction[t_value, :, :]))
-    c1 = ax[0].pcolormesh(x, z, original[t_value,:,:].T, vmin=minm, vmax=maxm)
-    fig.colorbar(c1, ax=ax[0])
-    ax[0].set_title('true')
-    c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:].T, vmin=minm, vmax=maxm)
-    fig.colorbar(c1, ax=ax[1])
-    ax[1].set_title('reconstruction')
-    for v in range(2):
-        ax[v].set_ylabel('z')
-    ax[-1].set_xlabel('x')
-    fig.savefig(output_path+'/snapshot_recon'+file_str+'.png')
-
-    fig, ax = plt.subplots(2, figsize=(12,6), tight_layout=True, sharex=True)
-    minm = min(np.min(original[:, :, z_value]), np.min(reconstruction[:, :, z_value]))
-    maxm = max(np.max(original[:, :, z_value]), np.max(reconstruction[:, :, z_value]))
-    print(np.max(original[:, :, z_value]))
-    print(minm, maxm)
-    c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value].T)
-    fig.colorbar(c1, ax=ax[0])
-    ax[0].set_title('true')
-    c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value].T)
-    fig.colorbar(c1, ax=ax[1])
-    ax[1].set_title('reconstruction')
-    for v in range(2):
-        ax[v].set_ylabel('x')
-    ax[-1].set_xlabel('time')
-    fig.savefig(output_path+'/hovmoller_recon'+file_str+'.png')
-
 def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, time_vals, file_str):
-    time_zone = np.linspace(0, original.shape[0],  original.shape[0])
     abs_error = np.abs(original-reconstruction)
     residual  = original - reconstruction
     vmax_res = np.max(np.abs(residual))  # Get maximum absolute value
@@ -338,44 +313,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, ti
             ax[v].set_ylabel('x')
         ax[-1].set_xlabel('time')
         fig.savefig(output_path+file_str+'_snapshot_recon_error.png')
-
-        fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
-        minm = min(np.min(original[t_value, :, :]), np.min(reconstruction[t_value, :, :]))
-        maxm = max(np.max(original[t_value, :, :]), np.max(reconstruction[t_value, :, :]))
-        c1 = ax[0].pcolormesh(x, z, original[t_value,:,:].T, vmin=minm, vmax=maxm)
-        fig.colorbar(c1, ax=ax[0])
-        ax[0].set_title('true')
-        c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:].T, vmin=minm, vmax=maxm)
-        fig.colorbar(c1, ax=ax[1])
-        ax[1].set_title('reconstruction')
-        c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:].T, cmap='Reds')
-        fig.colorbar(c3, ax=ax[2])
-        ax[2].set_title('error')
-        for v in range(3):
-            ax[v].set_ylabel('z')
-        ax[-1].set_xlabel('x')
-        fig.savefig(output_path+file_str+'_hovmoller_recon_error.png')
-
-        fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
-        minm = min(np.min(original[:, :, z_value]), np.min(reconstruction[:, :, z_value]))
-        maxm = max(np.max(original[:, :, z_value]), np.max(reconstruction[:, :, z_value]))
-        print(np.max(original[:, :, z_value]))
-        print(minm, maxm)
-        c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value].T)
-        fig.colorbar(c1, ax=ax[0])
-        ax[0].set_title('true')
-        c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value].T)
-        fig.colorbar(c1, ax=ax[1])
-        ax[1].set_title('reconstruction')
-        c3 = ax[2].pcolormesh(time_vals, x, abs_error[:, :, z_value].T, cmap='Reds')
-        fig.colorbar(c3, ax=ax[2])
-        ax[2].set_title('error')
-        for v in range(2):
-            ax[v].set_ylabel('x')
-        ax[-1].set_xlabel('time')
-        fig.savefig(output_path+file_str+'_snapshot_recon_error.png')
     
-
     elif original.ndim == 4: #len(time_vals), len(x), len(z), var
         for i in range(original.shape[3]):
             name = names[i]
@@ -403,16 +341,16 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, ti
             maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
             print(np.max(original[:, :, z_value,i]))
             print(minm, maxm)
-            print("time shape:", np.shape(time_zone))
+            print("time shape:", np.shape(time_vals))
             print("x shape:", np.shape(x))
             print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
-            c1 = ax[0].pcolormesh(time_zone, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm)
             fig.colorbar(c1, ax=ax[0])
             ax[0].set_title('true')
-            c2 = ax[1].pcolormesh(time_zone, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
             fig.colorbar(c2, ax=ax[1])
             ax[1].set_title('reconstruction')
-            c3 = ax[2].pcolormesh(time_zone, x,  abs_error[:,:,z_value, i].T, cmap='Reds')
+            c3 = ax[2].pcolormesh(time_vals, x,  abs_error[:,:,z_value, i].T, cmap='Reds')
             fig.colorbar(c3, ax=ax[2])
             ax[2].set_title('error')
             for v in range(2):
@@ -426,16 +364,16 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, ti
             maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
             print(np.max(original[:, :, z_value,i]))
             print(minm, maxm)
-            print("time shape:", np.shape(time_zone))
+            print("time shape:", np.shape(time_vals))
             print("x shape:", np.shape(x))
             print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
-            c1 = ax[0].pcolormesh(time_zone, x, original[:, :, z_value, i].T)
+            c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value, i].T)
             fig.colorbar(c1, ax=ax[0])
             ax[0].set_title('true')
-            c2 = ax[1].pcolormesh(time_zone, x, reconstruction[:, :, z_value, i].T)
+            c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T)
             fig.colorbar(c2, ax=ax[1])
             ax[1].set_title('reconstruction')
-            c3 = ax[2].pcolormesh(time_zone, x,  abs_error[:,:,z_value, i].T, cmap='Reds')
+            c3 = ax[2].pcolormesh(time_vals, x,  abs_error[:,:,z_value, i].T, cmap='Reds')
             fig.colorbar(c3, ax=ax[2])
             ax[2].set_title('error')
             for v in range(2):
@@ -468,16 +406,16 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, ti
             maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
             print(np.max(original[:, :, z_value,i]))
             print(minm, maxm)
-            print("time shape:", np.shape(time_zone))
+            print("time shape:", np.shape(time_vals))
             print("x shape:", np.shape(x))
             print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
-            c1 = ax[0].pcolormesh(time_zone, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm)
             fig.colorbar(c1, ax=ax[0])
             ax[0].set_title('true')
-            c2 = ax[1].pcolormesh(time_zone, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
             fig.colorbar(c2, ax=ax[1])
             ax[1].set_title('reconstruction')
-            c3 = ax[2].pcolormesh(time_zone, x,  residual[:,:,z_value, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
+            c3 = ax[2].pcolormesh(time_vals, x,  residual[:,:,z_value, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
             fig.colorbar(c3, ax=ax[2])
             ax[2].set_title('error')
             for v in range(2):
@@ -485,6 +423,17 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, ti
                 ax[v].tick_params(axis='both', labelsize=12)
             ax[-1].set_xlabel('time')
             fig.savefig(output_path+file_str+name+'_snapshot_recon_residual.png')
+
+
+def global_parameters(data):
+    if data.ndim == 4:
+        print("data is 4D.")
+    else:
+        print("wrong format needs to be 4D.")
+
+    avg_data = np.mean(data[:,:,:,0], axis=(1,2))
+
+    return avg_data
 
 #### Metrics ####
 from sklearn.metrics import mean_squared_error
@@ -548,8 +497,6 @@ def compute_ssim_for_4d(original, decoded):
     return avg_ssim
 
 def EVR_recon(original_data, reconstructed_data):
-    print(original_data.ndim)
-    print(reconstructed_data.ndim)
     if original_data.ndim == 3:
         original_data = original_data.reshape(original_data.shape[0], original_data.shape[1]*original_data.shape[2])
     elif original_data.ndim == 4:
@@ -557,9 +504,8 @@ def EVR_recon(original_data, reconstructed_data):
     if reconstructed_data.ndim == 3:
         reconstructed_data = reconstructed_data.reshape(reconstructed_data.shape[0], reconstructed_data.shape[1]*reconstructed_data.shape[2])
     elif reconstructed_data.ndim == 4:
-        print('reshape')
         reconstructed_data = reconstructed_data.reshape(reconstructed_data.shape[0], reconstructed_data.shape[1]*reconstructed_data.shape[2]*reconstructed_data.shape[3])
-
+    
     # Check if both data arrays have the same dimensions and the dimension is 2
     if original_data.ndim == reconstructed_data.ndim == 2:
         print("Both data arrays have the same dimensions and are 2D.")
@@ -588,7 +534,37 @@ def MSE(original_data, reconstructed_data):
         print("The data arrays either have different dimensions or are not 2D.")
     mse = mean_squared_error(original_data, reconstructed_data)
     return mse
+
+def active_array_calc(original_data, reconstructed_data, z):
+    beta = 1.201
+    alpha = 3.0
+    T = original_data[:,:,:,3] - beta*z
+    T_reconstructed = reconstructed_data[:,:,:,3] - beta*z
+    q_s = np.exp(alpha*T)
+    q_s_reconstructed = np.exp(alpha*T)
+    rh = original_data[:,:,:,0]/q_s
+    rh_reconstructed = reconstructed_data[:,:,:,0]/q_s_reconstructed
+    mean_b = np.mean(original_data[:,:,:,3], axis=1, keepdims=True)
+    mean_b_reconstructed= np.mean(reconstructed_data[:,:,:,3], axis=1, keepdims=True)
+    b_anom = original_data[:,:,:,3] - mean_b
+    b_anom_reconstructed = reconstructed_data[:,:,:,3] - mean_b_reconstructed
+    w = original_data[:,:,:,1]
+    w_reconstructed = reconstructed_data[:,:,:,1]
     
+    mask = (rh[:, :, :] >= 1) & (w[:, :, :] > 0) & (b_anom[:, :, :] > 0)
+    mask_reconstructed = (rh_reconstructed[:, :, :] >= 1) & (w_reconstructed[:, :, :] > 0) & (b_anom_reconstructed[:, :, :] > 0)
+    
+    active_array = np.zeros((original_data.shape[0], len(x), len(z)))
+    active_array[mask] = 1
+    active_array_reconstructed = np.zeros((original_data.shape[0], len(x), len(z)))
+    active_array_reconstructed[mask_reconstructed] = 1
+    
+    # Expand the mask to cover all features (optional, depending on use case)
+    mask_expanded       =  np.repeat(mask[:, :, :, np.newaxis], 4, axis=-1)  # Shape: (256, 64, 1)
+    mask_expanded_recon =  np.repeat(mask_reconstructed[:, :, :, np.newaxis], 4, axis=-1) # Shape: (256, 64, 1)
+    
+    return active_array, active_array_reconstructed, mask_expanded, mask_expanded_recon
+
 def ss_transform(data, scaler):
     if data.ndim == 4: #len(time_vals), len(x), len(z), len(var)
         data_reshape = data.reshape(-1, data.shape[-1])
@@ -615,6 +591,8 @@ def ss_inverse_transform(data, scaler):
     else:
         print("data array is not 2D")
         
+    print('shape before inverse scaling', np.shape(data_reshape))
+
     data_unscaled = scaler.inverse_transform(data_reshape)
     data_unscaled = data_unscaled.reshape(data.shape)
     
@@ -625,27 +603,26 @@ def ss_inverse_transform(data, scaler):
         
     return data_unscaled
 
-#### LOAD DATA ####
-name='combined'
-data_set, x, z, time_vals = load_data(input_path+'/plume_wave_dataset.h5', name)
-print('shape of data', np.shape(data_set))
+#### LOAD DATA  ####
+name=['combined']
+names = ['combined']
+n_components = 3
+# name=['upgraded']
+# names = ['upgraded']
+# n_components = 5
 
-noise_level = 0
-fig, ax =plt.subplots(1, figsize=(12,3), tight_layout=True)
-c=ax.contourf(time_vals, x, data_set[:,:,32].T)
-fig.colorbar(c, ax=ax)
-ax.set_xlabel('Time', fontsize=14)
-ax.set_ylabel('x', fontsize=14)
-fig.savefig(output_path+f"/combined_data_noise{noise_level}.png")
+num_variables = 1
+snapshots = 1000
+data_set, x, z, time_vals = load_data_set(input_path+'/plume_wave_dataset.h5', name, snapshots)
+#data_set, x, z, time_vals = load_data_set(input_path+'/upgraded_dataset.h5', name, snapshots)
+print(np.shape(data_set))
 
-data_set = data_set.reshape(len(time_vals), len(x), len(z), 1)
-print('shape of reshaped data set', np.shape(data_set))
+data_reshape = data_set.reshape(-1, data_set.shape[-1])
+print('shape of data reshaped', np.shape(data_reshape))
 
 U = data_set
 dt = time_vals[1]-time_vals[0]
 print('dt:', dt)
-num_variables = 1
-variables = names = ['A']
 
 # Load hyperparameters from a YAML file
 with open(CAE_hyperparam_file, 'r') as file:
@@ -664,7 +641,6 @@ kernel_choice = hyperparameters.get("kernel_choice", {}).get("value")
 print(f"Building Model with learning_rate: {l_rate}, batch_size: {b_size}, N_parallel: {N_parallel}, latent_depth: {lat_dep}, kernel_choice: {kernel_choice}")
 
 #### load in data ###
-#b_size      = wandb.config.b_size   #batch_size
 n_batches   = int((U.shape[0]/b_size) *0.7)  #number of batches #20
 val_batches = int((U.shape[0]/b_size) *0.2)    #int(n_batches*0.2) # validation set size is 0.2 the size of the training set #2
 test_batches = int((U.shape[0]/b_size) *0.1)
@@ -679,16 +655,8 @@ print('Test   Data%  :',b_size*test_batches*skip/U.shape[0])
 
 # training data
 U_tt        = np.array(U[:b_size*n_batches*skip])            #to be used for random batches
-# validation data
-U_vv        = np.array(U[b_size*n_batches*skip:
-                         b_size*n_batches*skip+b_size*val_batches*skip])
-# test data
-U_tv        = np.array(U[b_size*n_batches*skip+b_size*val_batches*skip:
-                         b_size*n_batches*skip+b_size*val_batches*skip+b_size*test_batches*skip])
 
 U_tt_reshape = U_tt.reshape(-1, U_tt.shape[-1])
-U_vv_reshape = U_vv.reshape(-1, U_vv.shape[-1])
-U_tv_reshape = U_tv.reshape(-1, U_tv.shape[-1])
 
 # fit the scaler
 scaler = StandardScaler()
@@ -697,31 +665,19 @@ print('means', scaler.mean_)
 
 #transform training, val and test sets
 U_tt_scaled = scaler.transform(U_tt_reshape)
-U_vv_scaled = scaler.transform(U_vv_reshape)
-U_tv_scaled = scaler.transform(U_tv_reshape)
 
 #reshape 
 U_tt_scaled = U_tt_scaled.reshape(U_tt.shape)
-U_vv_scaled = U_vv_scaled.reshape(U_vv.shape)
-U_tv_scaled = U_tv_scaled.reshape(U_tv.shape)
-
-test_times = time_vals[b_size*n_batches*skip+b_size*val_batches*skip:
-                         b_size*n_batches*skip+b_size*val_batches*skip+b_size*test_batches*skip] 
 
 U_train     = split_data(U_tt_scaled, b_size, n_batches).astype('float32') #to be used for randomly shuffled batches
-U_val       = split_data(U_vv_scaled, b_size, val_batches).astype('float32')
 
-del U_vv, U_tt, U_tt_scaled
-
+del U_tt, U_tt_scaled
 
 ## scale all the data ##
 U_scaled = ss_transform(U, scaler)
 
-# define the model
+# LOAD THE MODEL
 # we do not have pooling and upsampling, instead we use stride=2
-#global lat_dep                 #latent space depth
-#global N_parallel                       #number of parallel CNNs for multiscale
-#global kernel_choice
 ker_size      = [(3,3), (5,5), (7,7)]      #kernel sizes
 if N_parallel == 1:
     ker_size  = [ker_size[kernel_choice]]
@@ -746,10 +702,10 @@ p_dec         = 1               #padding in the first decoder layer
 p_crop        = U.shape[1], U.shape[2]      #crop size of the output equal to input size
 
 
-
 #initialize the encoders and decoders with different kernel sizes
 enc_mods      = [None]*(N_parallel)
 dec_mods      = [None]*(N_parallel)
+
 for i in range(N_parallel):
     enc_mods[i] = tf.keras.Sequential(name='Enc_' + str(i))
     dec_mods[i] = tf.keras.Sequential(name='Dec_' + str(i))
@@ -836,11 +792,11 @@ for j in range(N_parallel):
     enc_mods[j].summary()
 for j in range(N_parallel):
     dec_mods[j].summary()
-
+    
 # Load best model
 # Restore the checkpoint (this will restore the optimizer, encoder, and decoder states)
 #how to load saved model
-models_dir = model_path
+models_dir = CAE_model_path
 a = [None]*N_parallel
 b = [None]*N_parallel
 for i in range(N_parallel):
@@ -850,7 +806,6 @@ for i in range(N_parallel):
     b[i] = tf.keras.models.load_model(models_dir + '/dec_mod'+str(ker_size[i])+'_'+str(N_latent)+'.h5',
                                           custom_objects={"PerPad2D": PerPad2D})
 
-   
 ##### Compute encoded time_series #####
 #set U to the standard scaler version
 U = U_scaled
@@ -881,7 +836,7 @@ print(shape)
 U = U.reshape(shape[0], shape[1]*shape[2]*shape[3])
 
 # number of time steps for washout, train, validation, test
-t_lyap    = 2/3
+t_lyap    = t_lyap
 dt        = dt
 N_lyap    = int(t_lyap//dt)
 print('N_lyap', N_lyap)
@@ -890,9 +845,8 @@ N_washout_val = int(washout_len_val*N_lyap)
 N_train   = train_len*N_lyap #600
 N_val     = val_len*N_lyap #45
 N_test    = test_len*N_lyap #45
-dim       = U.shape[1]
 
-indexes_to_plot = np.array([1, 2, 3, 4] ) -1
+indexes_to_plot = np.array([1, 2, 8, 16, 32, dim] ) -1
 indexes_to_plot = indexes_to_plot[indexes_to_plot <= (dim-1)]
 
 # compute normalization factor (range component-wise)
@@ -953,263 +907,46 @@ N_units      = Nr #neurons
 connectivity = 3   
 sparseness   = 1 - connectivity/(N_units-1) 
 
-tikh = np.array([1])  # Tikhonov factor (optimize among the values in this list)
+fln = ESN_model_path+'/ESN_matrices.mat'
+data = loadmat(fln)
+print(data.keys())
 
-#### hyperparamter search ####
-n_in  = 0           #Number of Initial random points
+Winn             = data['Win'][0] #gives Winn
+fix_hyp          = data['fix_hyp']
+bias_in_value    = data['fix_hyp'][:,0]
+N_washout        = data['fix_hyp'][:,1][0]
+opt_hyp          = data['opt_hyp']
+Ws               = data['W'][0]
+Woutt            = data['Wout']
+norm             = data['norm'][0]
+bias_in          = np.ones((1))*bias_in_value
 
-spec_in     = 0.7    #range for hyperparameters (spectral radius and input scaling)
-spec_end    = 0.99
-in_scal_in  = np.log10(0.05)
-in_scal_end = np.log10(5.)
+print('fix_hyp shape:', np.shape(fix_hyp))
+print('bias_in_value:', bias_in_value, 'N_washout:', N_washout)
+print('shape of bias_in:', np.shape(bias_in))
+print('opt_hyp shape:', np.shape(opt_hyp))
+print('W shape:', np.shape(Ws))
+print('Win shape:', np.shape(Winn))
+print('Wout shape:', np.shape(Woutt))
+print('norm:', norm)
+print('u_mean:', u_mean)
+print('shape of norm:', np.shape(norm))
 
-# In case we want to start from a grid_search, the first n_grid_x*n_grid_y points are from grid search
-n_grid_x = grid_x
-n_grid_y = grid_y
-n_bo     = added_points  #number of points to be acquired through BO after grid search
-n_tot    = n_grid_x*n_grid_y + n_bo #Total Number of Function Evaluatuions
-
-# computing the points in the grid
-if n_grid_x > 0:
-    x1    = [[None] * 2 for i in range(n_grid_x*n_grid_y)]
-    k     = 0
-    for i in range(n_grid_x):
-        for j in range(n_grid_y):
-            x1[k] = [spec_in + (spec_end - spec_in)/(n_grid_x-1)*i,
-                     in_scal_in + (in_scal_end - in_scal_in)/(n_grid_y-1)*j]
-            k   += 1
-
-# range for hyperparameters
-search_space = [Real(spec_in, spec_end, name='spectral_radius'),
-                Real(in_scal_in, in_scal_end, name='input_scaling')]
-
-# ARD 5/2 Matern Kernel with sigma_f in front for the Gaussian Process
-kernell = ConstantKernel(constant_value=1.0, constant_value_bounds=(1e-1, 3e0))*\
-                  Matern(length_scale=[0.2,0.2], nu=2.5, length_scale_bounds=(5e-2, 1e1)) 
-
-
-#Hyperparameter Optimization using Grid Search plus Bayesian Optimization
-def g(val):
-    
-    #Gaussian Process reconstruction
-    b_e = GPR(kernel = kernell,
-            normalize_y = True, #if true mean assumed to be equal to the average of the obj function data, otherwise =0
-            n_restarts_optimizer = 3,  #number of random starts to find the gaussian process hyperparameters
-            noise = 1e-10, # only for numerical stability
-            random_state = 10) # seed
-    
-    
-    #Bayesian Optimization
-    res = skopt.gp_minimize(val,                         # the function to minimize
-                      search_space,                      # the bounds on each dimension of x
-                      base_estimator       = b_e,        # GP kernel
-                      acq_func             = "gp_hedge",       # the acquisition function
-                      n_calls              = n_tot,      # total number of evaluations of f
-                      x0                   = x1,         # Initial grid search points to be evaluated at
-                      n_random_starts      = n_in,       # the number of additional random initialization points
-                      n_restarts_optimizer = 3,          # number of tries for each acquisition
-                      random_state         = 10,         # seed
-                           )   
-    return res
-
-
-#Number of Networks in the ensemble
-ensemble = ens
-
-data_dir = '/Run_n_units{0:}_ensemble{1:}_normalisation{2:}_washout{3:}_config{4:}/'.format(N_units, ensemble, normalisation, washout_len, config_number)
-output_path = output_path+data_dir
-print(output_path)
-if not os.path.exists(output_path):
-    os.makedirs(output_path)
-    print('made directory')
-    
-data_dir = '/GP{0:}_{1:}/'.format(n_grid_x*n_grid_y, n_bo)
-output_path = output_path+data_dir
-print(output_path)
-if not os.path.exists(output_path):
-    os.makedirs(output_path)
-    print('made directory')
-
-# Which validation strategy (implemented in Val_Functions.ipynb)
-val      = eval(val)
-alpha = alpha
-N_fw     = n_forward*N_lyap
-N_fo     = (N_train-N_val-N_washout)//N_fw + 1 
-#N_fo     = 33                     # number of validation intervals
-N_in     = N_washout                 # timesteps before the first validation interval (can't be 0 due to implementation)
-#N_fw     = (N_train-N_val-N_washout)//(N_fo-1) # how many steps forward the validation interval is shifted (in this way they are evenly spaced)
-N_splits = 4                         # reduce memory requirement by increasing N_splits
-print('Number of folds', N_fo)
-print('how many steps forward validation interval moves', N_fw)
-print('how many LTs forward validation interval moves', N_fw//N_lyap)
-
-#Quantities to be saved
-par      = np.zeros((ensemble, 4))      # GP parameters
-x_iters  = np.zeros((ensemble,n_tot,2)) # coordinates in hp space where f has been evaluated
-f_iters  = np.zeros((ensemble,n_tot))   # values of f at those coordinates
-minimum  = np.zeros((ensemble, 4))      # minima found per each member of the ensemble
-
-# to store optimal hyperparameters and matrices
-tikh_opt = np.zeros(n_tot)
-Woutt    = np.zeros(((ensemble, N_units+1,dim)))
-Winn     = [] #save as list to keep single elements sparse
-Ws       = []
-Xa1_states =  np.zeros(((ensemble, N_train-1, N_units+1))) ####added  
-
-# save the final gp reconstruction for each network
-gps        = [None]*ensemble
-
-# to print performance of every set of hyperparameters
-print_flag = False
-
-# optimize ensemble networks (to account for the random initialization of the input and state matrices)
-for i in range(ensemble):
-
-    print('Realization    :',i+1)
-
-    k   = 0
-
-    # Win and W generation
-    seed= i+1
-    rnd = np.random.RandomState(seed)
-
-    #sparse syntax for the input and state matrices
-    Win  = lil_matrix((N_units,dim+1))
-    for j in range(N_units):
-        Win[j,rnd.randint(0, dim+1)] = rnd.uniform(-1, 1) #only one element different from zero
-    Win = Win.tocsr()
-
-    W = csr_matrix( #on average only connectivity elements different from zero
-        rnd.uniform(-1, 1, (N_units, N_units)) * (rnd.rand(N_units, N_units) < (1-sparseness)))
-
-    spectral_radius = np.abs(sparse_eigs(W, k=1, which='LM', return_eigenvectors=False))[0]
-    W = (1/spectral_radius)*W #scaled to have unitary spec radius
-
-    # Bayesian Optimization
-    tt       = time.time()
-    res      = g(val)
-    print('Total time for the network:', time.time() - tt)
-
-
-    #Saving Quantities for post_processing
-    gps[i]     = res.models[-1]
-    gp         = gps[i]
-    x_iters[i] = np.array(res.x_iters)
-    f_iters[i] = np.array(res.func_vals)
-    minimum[i] = np.append(res.x,[tikh_opt[np.argmin(f_iters[i])],res.fun])
-    params     = gp.kernel_.get_params()
-    key        = sorted(params)
-    par[i]     = np.array([params[key[2]],params[key[5]][0], params[key[5]][1], gp.noise_])
-
-    #saving matrices
-    train      = train_save_n(U_washout, U_tv, Y_tv,
-                              minimum[i,2],10**minimum[i,1], minimum[i,0], minimum[i,3]) ###changed
-    Woutt[i]   = train[0] ###changed
-    Winn    += [Win]
-    Ws      += [W]
-    
-    Xa1_states[i]  = train[1] ###changed
-
-
-    #Plotting Optimization Convergence for each network
-    print('Best Results: x', minimum[i,0], 10**minimum[i,1], minimum[i,2],
-          'f', -minimum[i,-1])
-    
-    # Full path for saving the file
-    hyp_file = '_ESN_hyperparams_ens%i.json' % i
-
-    output_path_hyp = os.path.join(output_path, hyp_file)
-
-    hyps = {
-    "test": int(i),
-    "no. modes": int(n_components),
-    "spec rad": float(minimum[i,0]),
-    "input scaling": float(10**minimum[i,1]),
-    "tikh": float(minimum[i,2]),
-    "min f": float(minimum[i,-1]),
-    }
-
-    with open(output_path_hyp, "w") as file:
-        json.dump(hyps, file, indent=4)
-
-    fig, ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
-    plot_convergence(res)
-    fig.savefig(output_path+'/convergence_realisation%i.png' % i)
-    plt.close()
-
-##### visualise grid search #####
-# Plot Gaussian Process reconstruction for each network in the ensemble after n_tot evaluations
-# The GP reconstruction is based on the n_tot function evaluations decided in the search
-# points to evaluate the GP at
-n_length    = 100
-xx, yy      = np.meshgrid(np.linspace(spec_in, spec_end,n_length), np.linspace(in_scal_in, in_scal_end,n_length))
-x_x         = np.column_stack((xx.flatten(),yy.flatten()))
-x_gp        = res.space.transform(x_x.tolist())     ##gp prediction needs this normalized format
-y_pred      = np.zeros((ensemble,n_length,n_length))
-
-for i in range(ensemble):
-    # retrieve the gp reconstruction
-    gp         = gps[i]
-
-    pred, pred_std = gp.predict(x_gp, return_std=True)
-
-    fig, ax  = plt.subplots(1, figsize=(12,10), tight_layout=True)
-
-    amin = np.amin([10,f_iters.max()])
-
-    y_pred[i] = np.clip(-pred, a_min=-amin,
-                        a_max=-f_iters.min()).reshape(n_length,n_length)
-                        # Final GP reconstruction for each realization at the evaluation points
-
-    ax.set_title('Mean GP of realization \#'+ str(i+1))
-
-    #Plot GP Mean
-    ax.set_xlabel('Spectral Radius')
-    ax.set_ylabel('$\log_{10}$Input Scaling')
-    CS      = ax.contourf(xx, yy, y_pred[i],levels=10,cmap='Blues')
-    cbar = fig.colorbar(CS, ax=ax)
-    cbar.set_label('-$\log_{10}$(MSE)',labelpad=15)
-    CSa     = ax.contour(xx, yy, y_pred[i],levels=10,colors='black',
-                          linewidths=1, linestyles='solid')
-
-    #   Plot the n_tot search points
-    ax.scatter(x_iters[i,:n_grid_x*n_grid_y,0],
-                x_iters[i,:n_grid_x*n_grid_y,1], c='r', marker='^') #grid points
-    ax.scatter(x_iters[i,n_grid_x*n_grid_y:,0],
-                x_iters[i,n_grid_x*n_grid_y:,1], c='lime', marker='s') #bayesian opt points
-
-    fig.savefig(output_path + '/GP_%i.png' % i)
-    plt.close()
-np.save(output_path + '/f_iters.npy', f_iters)
-
-#Save the details and results of the search for post-process
-opt_specs = [spec_in,spec_end,in_scal_in,in_scal_end]
-
-fln = output_path + '/ESN_matrices' + '.mat'
-with open(fln,'wb') as f:  # need 'wb' in Python3
-    savemat(f, {"norm": norm})
-    savemat(f, {"fix_hyp": np.array([bias_in, N_washout],dtype='float64')})
-    savemat(f, {'opt_hyp': np.column_stack((minimum[:,0], 10**minimum[:,1]))})
-    savemat(f, {"Win": Winn})
-    savemat(f, {'W': Ws})
-    savemat(f, {"Wout": Woutt})
-
-ESN_params = 'ESN_params.json' 
-
-output_ESN_params = os.path.join(output_path, ESN_params)
-with open(output_ESN_params, "w") as f:
-    json.dump(hyperparams, f, indent=4) 
-
+test_interval = True
 validation_interval = True
-test_interval       = True
+statistics_interval = True
+fourier = False
+vertical_profiles = False
+reservoir_investigation = False
 
 if validation_interval:
     ##### quick test #####
     print('VALIDATION (TEST)')
     print(N_washout_val)
-    N_test   = n_tests                    #number of intervals in the test set
-    N_tstart = N_washout                    #where the first test interval starts
-    N_intt   = test_len*N_lyap            #length of each test set interval
+    N_test   = 8                    #number of intervals in the test set
+    N_tstart = int(N_washout)                    #where the first test interval starts
+    N_intt   = int(test_len*N_lyap)            #length of each test set interval
+    N_gap    = int(3*N_lyap)
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
@@ -1232,8 +969,8 @@ if validation_interval:
         Wout     = Woutt[j].copy()
         Win      = Winn[j] #csr_matrix(Winn[j])
         W        = Ws[j]   #csr_matrix(Ws[j])
-        rho      = minimum[j,0].copy()
-        sigma_in = 10**minimum[j,1].copy()
+        rho      = opt_hyp[j,0].copy()
+        sigma_in = opt_hyp[j,1].copy()
         print('Hyperparameters:',rho, sigma_in)
 
         # to store prediction horizon in the test set
@@ -1251,11 +988,12 @@ if validation_interval:
 
         #run different test intervals
         for i in range(N_test):
-            print('index:', N_tstart + i*N_intt)
-            print('start_time:', time_vals[N_tstart + i*N_intt])
+            print('index:', N_tstart + i*N_gap)
+            print('start_time:', time_vals[N_tstart + i*N_gap])
             # data for washout and target in each interval
-            U_wash    = U[N_tstart - N_washout_val +i*N_intt : N_tstart + i*N_intt].copy()
-            Y_t       = U[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt].copy()
+            U_wash    = U[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap].copy()
+            Y_t       = U[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt].copy()
+            
 
             #washout for each interval
             Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
@@ -1382,8 +1120,8 @@ if validation_interval:
 
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                        ax.plot(time_vals[N_tstart - N_washout_val +i*N_intt : N_tstart + i*N_intt], np.linalg.norm(Xa1[:-1, :N_units], axis=1), color='red')
-                        ax.plot(time_vals[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt], np.linalg.norm(Xa2[:, :N_units], axis=1), color='blue')
+                        ax.plot(time_vals[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap], np.linalg.norm(Xa1[:-1, :N_units], axis=1), color='red')
+                        ax.plot(time_vals[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt], np.linalg.norm(Xa2[:, :N_units], axis=1), color='blue')
                         ax.grid()
                         ax.set_ylabel('res_norm')
                         fig.savefig(output_path+'/resnorm_validation_ens%i_test%i.png' % (j,i))
@@ -1391,8 +1129,8 @@ if validation_interval:
 
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                        ax.plot(time_vals[N_tstart - N_washout_val +i*N_intt : N_tstart + i*N_intt], np.linalg.norm(U_wash, axis=1), color='red')
-                        ax.plot(time_vals[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt], np.linalg.norm(Y_t, axis=1), color='blue')
+                        ax.plot(time_vals[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap], np.linalg.norm(U_wash, axis=1), color='red')
+                        ax.plot(time_vals[N_tstart + i*N_gap           : N_tstart + i*N_gap + N_gap], np.linalg.norm(Y_t, axis=1), color='blue')
                         ax.grid()
                         ax.set_ylabel('input_norm')
                         fig.savefig(output_path+'/inputnorm_validation_ens%i_test%i.png' % (j,i))
@@ -1400,8 +1138,7 @@ if validation_interval:
 
                         # reconstruction after scaling
                         print('reconstruction and error plot')
-                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, xx, 'ESN_validation_ens%i_test%i' %(j,i))
-
+                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, xx, 'ESN_validation_ens%i_test%i_time%i' %(j,i, time_vals[N_tstart + i*N_intt + 1*N_lyap]))
 
         # accumulation for each ensemble member
         ens_nrmse[j]       = ens_nrmse[j] / N_test
@@ -1431,12 +1168,16 @@ if validation_interval:
         json.dump(metrics_ens_ALL, file, indent=4)
     print('finished validations')
 
+
 if test_interval:
     ##### quick test #####
     print('TESTING')
-    N_test   = n_tests                    #number of intervals in the test set
-    N_tstart = N_train + N_washout #850    #where the first test interval starts
-    N_intt   = test_len*N_lyap             #length of each test set interval
+    N_test   = 8                    #number of intervals in the test set
+    N_tstart = int(N_train + N_washout) #850    #where the first test interval starts
+    N_intt   = int(test_len*N_lyap)             #length of each test set interval
+    N_gap    = int(3*N_lyap)
+
+    print('N_intt=', N_intt)
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
@@ -1459,8 +1200,8 @@ if test_interval:
         Wout     = Woutt[j].copy()
         Win      = Winn[j] #csr_matrix(Winn[j])
         W        = Ws[j]   #csr_matrix(Ws[j])
-        rho      = minimum[j,0].copy()
-        sigma_in = 10**minimum[j,1].copy()
+        rho      = opt_hyp[j,0].copy()
+        sigma_in = opt_hyp[j,1].copy()
         print('Hyperparameters:',rho, sigma_in)
 
         # to store prediction horizon in the test set
@@ -1478,11 +1219,11 @@ if test_interval:
 
         #run different test intervals
         for i in range(N_test):
-            print(N_tstart + i*N_intt)
-            print('start_time:', time_vals[N_tstart + i*N_intt])
+            print(N_tstart + i*N_gap)
+            print('start_time:', time_vals[N_tstart + i*N_gap])
             # data for washout and target in each interval
-            U_wash    = U[N_tstart - N_washout_val +i*N_intt : N_tstart + i*N_intt].copy()
-            Y_t       = U[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt].copy()
+            U_wash    = U[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap].copy()
+            Y_t       = U[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt].copy()
 
             #washout for each interval
             Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
@@ -1607,8 +1348,8 @@ if test_interval:
 
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                        ax.plot(time_vals[N_tstart - N_washout_val +i*N_intt : N_tstart + i*N_intt], np.linalg.norm(Xa1[:-1, :N_units], axis=1), color='red')
-                        ax.plot(time_vals[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt], np.linalg.norm(Xa2[:, :N_units], axis=1), color='blue')
+                        ax.plot(time_vals[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap], np.linalg.norm(Xa1[:-1, :N_units], axis=1), color='red')
+                        ax.plot(time_vals[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt], np.linalg.norm(Xa2[:, :N_units], axis=1), color='blue')
                         ax.grid()
                         ax.set_ylabel('res_norm')
                         fig.savefig(output_path+'/resnorm_test_ens%i_test%i.png' % (j,i))
@@ -1616,8 +1357,8 @@ if test_interval:
 
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                        ax.plot(time_vals[N_tstart - N_washout_val +i*N_intt : N_tstart + i*N_intt], np.linalg.norm(U_wash, axis=1), color='red')
-                        ax.plot(time_vals[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt], np.linalg.norm(Y_t, axis=1), color='blue')
+                        ax.plot(time_vals[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap], np.linalg.norm(U_wash, axis=1), color='red')
+                        ax.plot(time_vals[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt], np.linalg.norm(Y_t, axis=1), color='blue')
                         ax.grid()
                         ax.set_ylabel('input_norm')
                         fig.savefig(output_path+'/inputnorm_test_ens%i_test%i.png' % (j,i))
@@ -1625,9 +1366,7 @@ if test_interval:
 
                         # reconstruction after scaling
                         print('reconstruction and error plot')
-                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, xx, 'ESN_test_ens%i_test%i' %(j,i))
-
-
+                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, xx, 'ESN_ens%i_test%i_time%i' %(j,i, time_vals[N_tstart + i*N_intt + 1*N_lyap]))
 
         # accumulation for each ensemble member
         ens_nrmse[j]       = ens_nrmse[j] / N_test
@@ -1656,4 +1395,172 @@ if test_interval:
     with open(output_path_met_ALL, "w") as file:
         json.dump(metrics_ens_ALL, file, indent=4)
     print('finished testing')
+
+if statistics_interval:
+    #### STATISTICS ####
+    output_path = output_path + '/statistics/'
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
+        print('made directory')
+
+    N_test   = 1                    #number of intervals in the test set
+    N_tstart = int(N_washout)   #where the first test interval starts
+    N_intt   = int(24*N_lyap)             #length of each test set interval
+    N_washout = int(N_washout_val)
+    N_gap = int(N_lyap)
+
+    print('N_tstart:', N_tstart)
+    print('N_intt:', N_intt)
+    print('N_washout:', N_washout)
+
+    # #prediction horizon normalization factor and threshold
+    sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
+    threshold_ph = 0.2
+
+    ensemble_test = ensemble_test
+
+    ens_nrmse_global= np.zeros((ensemble_test))
+    ens_mse_global  = np.zeros((ensemble_test))
+
+
+    for j in range(ensemble_test):
+
+        print('Realization    :',j+1)
+
+        #load matrices and hyperparameters
+        Wout     = Woutt[j].copy()
+        Win      = Winn[j] #csr_matrix(Winn[j])
+        W        = Ws[j]   #csr_matrix(Ws[j])
+        rho      = opt_hyp[j,0].copy()
+        sigma_in = opt_hyp[j,1].copy()
+        print('Hyperparameters:',rho, sigma_in)
+
+        # to store prediction horizon in the test set
+        PH             = np.zeros(N_test)
+        nrmse_error    = np.zeros((N_test, N_intt))
+
+        # to plot results
+        plot = True
+        Plotting = True
+        if plot:
+            n_plot = 3
+            plt.rcParams["figure.figsize"] = (15,3*n_plot)
+            plt.figure()
+            plt.tight_layout()
+
+        #run different test intervals
+        for i in range(N_test):
+            print(N_tstart + i*N_gap)
+            print('start time:', time_vals[N_tstart + i*N_gap])
+            # data for washout and target in each interval
+            U_wash    = U[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap].copy()
+            Y_t       = U[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt].copy()
+
+            #washout for each interval
+            Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
+            Uh_wash = np.dot(Xa1, Wout)
+
+            # Prediction Horizon
+            Yh_t        = closed_loop(N_intt-1, Xa1[-1], Wout, sigma_in, rho)[0]
+            print(np.shape(Yh_t))
+            Y_err       = np.sqrt(np.mean((Y_t-Yh_t)**2,axis=1))/sigma_ph
+            PH[i]       = np.argmax(Y_err>threshold_ph)/N_lyap
+            if PH[i] == 0 and Y_err[0]<threshold_ph: PH[i] = N_intt/N_lyap #(in case PH is larger than interval)
+
+            ##### reconstructions ####
+            # 1. reshape for decoder
+            Y_t_reshaped = Y_t.reshape(Y_t.shape[0], N_1[1], N_1[2], N_1[3])
+            Yh_t_reshaped = Yh_t.reshape(Yh_t.shape[0], N_1[1], N_1[2], N_1[3])
+            # 2. put through decoder
+            reconstructed_truth = Decoder(Y_t_reshaped,b).numpy()
+            reconstructed_predictions = Decoder(Yh_t_reshaped,b).numpy()
+            # 3. scale back
+            reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
+            reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
+
+            global_var_truth = global_parameters(reconstructed_truth)
+            global_var_predictions = global_parameters(reconstructed_predictions)
+
+            nrmse_global = NRMSE(global_var_truth, global_var_predictions)
+
+            ens_nrmse_global[j]+= nrmse_global
+               
+            if plot:
+                #left column has the washout (open-loop) and right column the prediction (closed-loop)
+                # only first n_plot test set intervals are plotted
+                if i<n_plot:
+                    if ensemble_test % 1 == 0:
+
+                        ### global prediction ###
+                        fig, ax = plt.subplots(1, figsize=(12,3), sharex=True, tight_layout=True)
+                        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
+                        ax.plot(xx, global_var_truth, label='POD')
+                        ax.plot(xx, global_var_predictions, label='ESN')
+                        ax.grid()
+                        ax.legend()
+                        ax.set_ylabel('global')
+                        ax.set_xlabel('LT')
+                        fig.savefig(output_path+f"/global_prediciton_ens{j}_test{i}.png")
+                        plt.close()
+
+            from scipy.stats import gaussian_kde
+            kde_true  = gaussian_kde(global_var_truth)
+            kde_pred  = gaussian_kde(global_var_predictions)
+
+            var_vals_true      = np.linspace(min(global_var_truth), max(global_var_truth), 1000)  # X range
+            pdf_vals_true      = kde_true(var_vals_true)
+            var_vals_pred      = np.linspace(min(global_var_predictions), max(global_var_predictions), 1000)  # X range
+            pdf_vals_pred      = kde_pred(var_vals_pred)
+
+            fig, ax = plt.subplots(1, figsize=(8,6))
+            ax.plot(var_vals_true, pdf_vals_true, label="truth")
+            ax.plot(var_vals_pred, pdf_vals_pred, label="prediction")
+            ax.grid()
+            ax.set_ylabel('Denisty')
+            ax.set_xlabel('Value')
+            ax.legend()
+            fig.savefig(output_path+f"/stats_pdf_global_ens{j}_test{i}.png")
+
+            fig, ax = plt.subplots(1, figsize=(8,6))
+            ax.scatter(Y_t[:,0], Y_t[:,1], label='truth')
+            ax.scatter(Yh_t[:,0], Yh_t[:,1], label='prediction')
+            ax.grid()
+            ax.set_xlabel('mode 1')
+            ax.set_ylabel('mode 2')
+            ax.legend()
+            fig.savefig(output_path+f"/trajectories_ens{j}_test{i}.png")
+
+            fig, ax = plt.subplots(1,3, figsize=(12, 6))
+            for v in range(3):
+                kde_true  = gaussian_kde(Y_t[:,v])
+                kde_pred  = gaussian_kde(Yh_t[:,v])
+
+                var_vals_true      = np.linspace(min(Y_t[:,v]), max(Y_t[:,v]), 1000)  # X range
+                pdf_vals_true      = kde_true(var_vals_true)
+                var_vals_pred      = np.linspace(min(Yh_t[:,v]), max(Yh_t[:,v]), 1000)  # X range
+                pdf_vals_pred      = kde_pred(var_vals_pred)
+
+                ax[v].plot(var_vals_true, pdf_vals_true, label="truth")
+                ax[v].plot(var_vals_pred, pdf_vals_pred, label="prediction")
+                ax[v].grid()
+                ax[v].set_ylabel('Denisty')
+                ax[v].set_xlabel(f"Mode {v}")
+                ax[v].legend()
+            fig.savefig(output_path+f"/stats_pdf_modes_ens{j}_test{i}.png")
+
+        # accumulation for each ensemble member
+        ens_nrmse_global[j]= ens_nrmse_global[j]/N_test
+
+    # Full path for saving the file
+    output_file_ALL = 'ESN_statistics_metrics_all.json' 
+
+    output_path_met_ALL = os.path.join(output_path, output_file_ALL)
+
+    metrics_ens_ALL = {
+    "mean global NRMSE": np.mean(ens_nrmse_global),
+    }
+
+    with open(output_path_met_ALL, "w") as file:
+        json.dump(metrics_ens_ALL, file, indent=4)
+    print('finished statistics')
 

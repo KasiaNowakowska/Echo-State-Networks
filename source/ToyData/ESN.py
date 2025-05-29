@@ -531,7 +531,7 @@ data_reshape = data_set.reshape(-1, data_set.shape[-1])
 print('shape of data reshaped', np.shape(data_reshape))
 
 # fit the scaler
-scaling = 'SS'
+scaling = 'None'
 if scaling == 'SS':
     print('applying standard scaler')
     scaler = StandardScaler()
@@ -956,8 +956,9 @@ if validation_interval:
             _, reconstructed_truth       = inverse_POD(Y_t, pca_)
             _, reconstructed_predictions = inverse_POD(Yh_t, pca_)
             
-            reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
-            reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
+            if scaling == 'SS':
+                reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
+                reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
 
             # metrics
             nrmse = NRMSE(reconstructed_truth, reconstructed_predictions)
@@ -1114,8 +1115,9 @@ if test_interval:
             _, reconstructed_truth       = inverse_POD(Y_t, pca_)
             _, reconstructed_predictions = inverse_POD(Yh_t, pca_)
             
-            reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
-            reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
+            if scaling == 'SS':
+                reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
+                reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
 
             # metrics
             nrmse = NRMSE(reconstructed_truth, reconstructed_predictions)
