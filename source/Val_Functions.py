@@ -168,7 +168,7 @@ def RVC_Noise_weightedloss(x):
 def RVC_Noise_PH(x):
     #Recycle Validation
     
-    global tikh_opt, k, ti 
+    global tikh_opt, k, ti, threshold_ph
     #tikh, U_washout, U_tv, Y_tv, U, N_in, N_fw, N_washout, N_val, N_units
     #print(tikh)
     #setting and initializing
@@ -183,7 +183,7 @@ def RVC_Noise_PH(x):
     Wout = train_n(U_washout, U_tv, Y_tv, tikh, sigma_in, rho)[0]
 
     sigma_ph     = np.sqrt(np.mean(np.var(U_tv,axis=1)))
-    threshold_ph = 0.2
+    threshold_ph = threshold_ph
 
     #Different Folds in the validation set
     t1   = time.time()

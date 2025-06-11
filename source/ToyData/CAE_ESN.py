@@ -296,7 +296,6 @@ def plot_reconstruction(original, reconstruction, z_value, t_value, time_vals, f
     fig.savefig(output_path+'/hovmoller_recon'+file_str+'.png')
 
 def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, time_vals, file_str):
-    time_zone = np.linspace(0, original.shape[0],  original.shape[0])
     abs_error = np.abs(original-reconstruction)
     residual  = original - reconstruction
     vmax_res = np.max(np.abs(residual))  # Get maximum absolute value
@@ -338,43 +337,116 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, ti
             ax[v].set_ylabel('x')
         ax[-1].set_xlabel('time')
         fig.savefig(output_path+file_str+'_snapshot_recon_error.png')
-
-        fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
-        minm = min(np.min(original[t_value, :, :]), np.min(reconstruction[t_value, :, :]))
-        maxm = max(np.max(original[t_value, :, :]), np.max(reconstruction[t_value, :, :]))
-        c1 = ax[0].pcolormesh(x, z, original[t_value,:,:].T, vmin=minm, vmax=maxm)
-        fig.colorbar(c1, ax=ax[0])
-        ax[0].set_title('true')
-        c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:].T, vmin=minm, vmax=maxm)
-        fig.colorbar(c1, ax=ax[1])
-        ax[1].set_title('reconstruction')
-        c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:].T, cmap='Reds')
-        fig.colorbar(c3, ax=ax[2])
-        ax[2].set_title('error')
-        for v in range(3):
-            ax[v].set_ylabel('z')
-        ax[-1].set_xlabel('x')
-        fig.savefig(output_path+file_str+'_hovmoller_recon_error.png')
-
-        fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
-        minm = min(np.min(original[:, :, z_value]), np.min(reconstruction[:, :, z_value]))
-        maxm = max(np.max(original[:, :, z_value]), np.max(reconstruction[:, :, z_value]))
-        print(np.max(original[:, :, z_value]))
-        print(minm, maxm)
-        c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value].T)
-        fig.colorbar(c1, ax=ax[0])
-        ax[0].set_title('true')
-        c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value].T)
-        fig.colorbar(c1, ax=ax[1])
-        ax[1].set_title('reconstruction')
-        c3 = ax[2].pcolormesh(time_vals, x, abs_error[:, :, z_value].T, cmap='Reds')
-        fig.colorbar(c3, ax=ax[2])
-        ax[2].set_title('error')
-        for v in range(2):
-            ax[v].set_ylabel('x')
-        ax[-1].set_xlabel('time')
-        fig.savefig(output_path+file_str+'_snapshot_recon_error.png')
     
+    elif original.ndim == 4: #len(time_vals), len(x), len(z), var
+        for i in range(original.shape[3]):
+            name = names[i]
+            print(name)
+            fig, ax = plt.subplots(3, figsize=(12,6), tight_layout=True, sharex=True)
+            minm = min(np.min(original[t_value, :, :, i]), np.min(reconstruction[t_value, :, :, i]))
+            maxm = max(np.max(original[t_value, :, :, i]), np.max(reconstruction[t_value, :, :, i]))
+            c1 = ax[0].pcolormesh(x, z, original[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:, i].T, cmap='Reds')
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('z')
+            ax[-1].set_xlabel('x')
+            fig.savefig(output_path+file_str+name+'_snapshot_recon_error.png')
+            plt.close()
+
+            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+            minm = min(np.min(original[:, :, z_value,i]), np.min(reconstruction[:, :, z_value,i]))
+            maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
+            print(np.max(original[:, :, z_value,i]))
+            print(minm, maxm)
+            print("time shape:", np.shape(time_vals))
+            print("x shape:", np.shape(x))
+            print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
+            c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(time_vals, x,  abs_error[:,:,z_value, i].T, cmap='Reds')
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('x')
+            ax[-1].set_xlabel('time')
+            fig.savefig(output_path+file_str+name+'_hovmoller_recon_error.png')
+            plt.close()
+
+            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+            minm = min(np.min(original[:, :, z_value,i]), np.min(reconstruction[:, :, z_value,i]))
+            maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
+            print(np.max(original[:, :, z_value,i]))
+            print(minm, maxm)
+            print("time shape:", np.shape(time_vals))
+            print("x shape:", np.shape(x))
+            print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
+            c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value, i].T)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(time_vals, x,  abs_error[:,:,z_value, i].T, cmap='Reds')
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('x')
+            ax[-1].set_xlabel('time')
+            fig.savefig(output_path+file_str+name+'_hovmoller_recon_diffbar_error.png')
+            plt.close()
+
+
+            fig, ax = plt.subplots(3, figsize=(12,6), tight_layout=True, sharex=True)
+            minm = min(np.min(original[t_value, :, :, i]), np.min(reconstruction[t_value, :, :, i]))
+            maxm = max(np.max(original[t_value, :, :, i]), np.max(reconstruction[t_value, :, :, i]))
+            c1 = ax[0].pcolormesh(x, z, original[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(x, z, residual[t_value,:,:, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('z')
+                ax[v].tick_params(axis='both', labelsize=12)
+            ax[-1].set_xlabel('x')
+            fig.savefig(output_path+file_str+name+'_hovmoller_recon_residual.png')
+
+            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+            minm = min(np.min(original[:, :, z_value,i]), np.min(reconstruction[:, :, z_value,i]))
+            maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
+            print(np.max(original[:, :, z_value,i]))
+            print(minm, maxm)
+            print("time shape:", np.shape(time_vals))
+            print("x shape:", np.shape(x))
+            print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
+            c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(time_vals, x,  residual[:,:,z_value, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('x')
+                ax[v].tick_params(axis='both', labelsize=12)
+            ax[-1].set_xlabel('time')
+            fig.savefig(output_path+file_str+name+'_snapshot_recon_residual.png')
 
     elif original.ndim == 4: #len(time_vals), len(x), len(z), var
         for i in range(original.shape[3]):
@@ -953,9 +1025,10 @@ N_units      = Nr #neurons
 connectivity = 3   
 sparseness   = 1 - connectivity/(N_units-1) 
 
-tikh = np.array([1])  # Tikhonov factor (optimize among the values in this list)
+tikh = np.array([1,1e-1,1e-2,1e-3,1e-4])  # Tikhonov factor (optimize among the values in this list)
 
 #### hyperparamter search ####
+threshold_ph = 0.3
 n_in  = 0           #Number of Initial random points
 
 spec_in     = 0.7    #range for hyperparameters (spectral radius and input scaling)
@@ -1207,13 +1280,12 @@ if validation_interval:
     ##### quick test #####
     print('VALIDATION (TEST)')
     print(N_washout_val)
-    N_test   = n_tests                    #number of intervals in the test set
+    N_test   = N_fo                    #number of intervals in the test set
     N_tstart = N_washout                    #where the first test interval starts
     N_intt   = test_len*N_lyap            #length of each test set interval
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.2
 
     ensemble_test = ensemble_test
 
@@ -1271,6 +1343,7 @@ if validation_interval:
             if PH[i] == 0 and Y_err[0]<threshold_ph: PH[i] = N_intt/N_lyap #(in case PH is larger than interval)
             ens_PH[i,j] = PH[i]
             nrmse_error[i, :] = Y_err
+            ens_PH[i,j] = PH[i]
 
             ##### reconstructions ####
             # 1. reshape for decoder
@@ -1295,7 +1368,7 @@ if validation_interval:
             print('SSIM', SSIM)
 
             # Full path for saving the file
-            output_file = 'ESN_test_metrics_ens%i_test%i.json' % (j,i)
+            output_file = 'ESN_validation_metrics_ens%i_test%i.json' % (j,i)
 
             output_path_met = os.path.join(output_path, output_file)
 
@@ -1440,7 +1513,6 @@ if test_interval:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.2
 
     ensemble_test = ensemble_test
 

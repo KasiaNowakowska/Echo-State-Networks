@@ -111,23 +111,18 @@ with open(ESN_hyperparam_file, "r") as f:
     alpha0 = hyperparams["alpha0"]
     n_forward = hyperparams["n_forward"]
 
-def load_data_set(file, names, snapshots):
+
+def load_data(file, name):
     with h5py.File(file, 'r') as hf:
-        print(hf.keys())
-        time_vals = np.array(hf['total_time_all'][:snapshots])
-        
-        data = np.zeros((len(time_vals), len(x), len(z), len(names)))
-        
-        index=0
-        for name in names:
-            print(name)
-            print(hf[name])
-            Var = np.array(hf[name])
-            data[:,:,:,index] = Var[:snapshots,:,0,:]
-            index+=1
+        print(name)
+        print(hf[name])
+        data = np.array(hf[name])
 
-    return data, time_vals
+        x = hf['x'][:]  # 1D x-axis
+        z = hf['z'][:]  # 1D z-axis
+        time = hf['time'][:]  # 1D time vector
 
+    return data, x, z, time
 def split_data(U, b_size, n_batches):
 
     '''
@@ -424,6 +419,116 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, ti
             ax[-1].set_xlabel('time')
             fig.savefig(output_path+file_str+name+'_snapshot_recon_residual.png')
 
+    elif original.ndim == 4: #len(time_vals), len(x), len(z), var
+        for i in range(original.shape[3]):
+            name = names[i]
+            print(name)
+            fig, ax = plt.subplots(3, figsize=(12,6), tight_layout=True, sharex=True)
+            minm = min(np.min(original[t_value, :, :, i]), np.min(reconstruction[t_value, :, :, i]))
+            maxm = max(np.max(original[t_value, :, :, i]), np.max(reconstruction[t_value, :, :, i]))
+            c1 = ax[0].pcolormesh(x, z, original[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:, i].T, cmap='Reds')
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('z')
+            ax[-1].set_xlabel('x')
+            fig.savefig(output_path+file_str+name+'_snapshot_recon_error.png')
+            plt.close()
+
+            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+            minm = min(np.min(original[:, :, z_value,i]), np.min(reconstruction[:, :, z_value,i]))
+            maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
+            print(np.max(original[:, :, z_value,i]))
+            print(minm, maxm)
+            print("time shape:", np.shape(time_zone))
+            print("x shape:", np.shape(x))
+            print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
+            c1 = ax[0].pcolormesh(time_zone, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(time_zone, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(time_zone, x,  abs_error[:,:,z_value, i].T, cmap='Reds')
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('x')
+            ax[-1].set_xlabel('time')
+            fig.savefig(output_path+file_str+name+'_hovmoller_recon_error.png')
+            plt.close()
+
+            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+            minm = min(np.min(original[:, :, z_value,i]), np.min(reconstruction[:, :, z_value,i]))
+            maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
+            print(np.max(original[:, :, z_value,i]))
+            print(minm, maxm)
+            print("time shape:", np.shape(time_zone))
+            print("x shape:", np.shape(x))
+            print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
+            c1 = ax[0].pcolormesh(time_zone, x, original[:, :, z_value, i].T)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(time_zone, x, reconstruction[:, :, z_value, i].T)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(time_zone, x,  abs_error[:,:,z_value, i].T, cmap='Reds')
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('x')
+            ax[-1].set_xlabel('time')
+            fig.savefig(output_path+file_str+name+'_hovmoller_recon_diffbar_error.png')
+            plt.close()
+
+
+            fig, ax = plt.subplots(3, figsize=(12,6), tight_layout=True, sharex=True)
+            minm = min(np.min(original[t_value, :, :, i]), np.min(reconstruction[t_value, :, :, i]))
+            maxm = max(np.max(original[t_value, :, :, i]), np.max(reconstruction[t_value, :, :, i]))
+            c1 = ax[0].pcolormesh(x, z, original[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(x, z, residual[t_value,:,:, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('z')
+                ax[v].tick_params(axis='both', labelsize=12)
+            ax[-1].set_xlabel('x')
+            fig.savefig(output_path+file_str+name+'_hovmoller_recon_residual.png')
+
+            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+            minm = min(np.min(original[:, :, z_value,i]), np.min(reconstruction[:, :, z_value,i]))
+            maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
+            print(np.max(original[:, :, z_value,i]))
+            print(minm, maxm)
+            print("time shape:", np.shape(time_zone))
+            print("x shape:", np.shape(x))
+            print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
+            c1 = ax[0].pcolormesh(time_zone, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(time_zone, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(time_zone, x,  residual[:,:,z_value, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('x')
+                ax[v].tick_params(axis='both', labelsize=12)
+            ax[-1].set_xlabel('time')
+            fig.savefig(output_path+file_str+name+'_snapshot_recon_residual.png')
+
 
 def global_parameters(data):
     if data.ndim == 4:
@@ -604,25 +709,18 @@ def ss_inverse_transform(data, scaler):
     return data_unscaled
 
 #### LOAD DATA  ####
-name=['combined']
-names = ['combined']
-n_components = 3
-# name=['upgraded']
-# names = ['upgraded']
-# n_components = 5
+name='combined'
+data_set, x, z, time_vals = load_data(input_path+'/plume_wave_dataset.h5', name)
+print('shape of data', np.shape(data_set))
 
-num_variables = 1
-snapshots = 1000
-data_set, x, z, time_vals = load_data_set(input_path+'/plume_wave_dataset.h5', name, snapshots)
-#data_set, x, z, time_vals = load_data_set(input_path+'/upgraded_dataset.h5', name, snapshots)
-print(np.shape(data_set))
-
-data_reshape = data_set.reshape(-1, data_set.shape[-1])
-print('shape of data reshaped', np.shape(data_reshape))
+data_set = data_set.reshape(len(time_vals), len(x), len(z), 1)
+print('shape of reshaped data set', np.shape(data_set))
 
 U = data_set
 dt = time_vals[1]-time_vals[0]
 print('dt:', dt)
+num_variables = 1
+variables = names = ['A']
 
 # Load hyperparameters from a YAML file
 with open(CAE_hyperparam_file, 'r') as file:
@@ -846,7 +944,7 @@ N_train   = train_len*N_lyap #600
 N_val     = val_len*N_lyap #45
 N_test    = test_len*N_lyap #45
 
-indexes_to_plot = np.array([1, 2, 8, 16, 32, dim] ) -1
+indexes_to_plot = np.array([1, 2, 3, 4, 8, 16, 32, dim] ) -1
 indexes_to_plot = indexes_to_plot[indexes_to_plot <= (dim-1)]
 
 # compute normalization factor (range component-wise)
@@ -950,7 +1048,7 @@ if validation_interval:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.2
+    threshold_ph = 0.3
 
     ensemble_test = ensemble_test
 
@@ -1181,9 +1279,9 @@ if test_interval:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.2
+    threshold_ph = 0.3
 
-    ensemble_test = ensemble_test
+    ensemble_test = ens
 
     ens_pred        = np.zeros((N_intt, dim, ensemble_test))
     ens_PH          = np.zeros((N_test, ensemble_test))
@@ -1308,15 +1406,16 @@ if test_interval:
                         fig.savefig(output_path+'/washout_ens%i_test%i.png' % (j,i))
                         plt.close()
 
-                        fig,ax =plt.subplots(len(indexes_to_plot),sharex=True, tight_layout=True)
+                        fig,ax =plt.subplots(len(indexes_to_plot), figsize=(12,9), sharex=True, tight_layout=True)
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
                         for v in range(len(indexes_to_plot)):
                             index = indexes_to_plot[v]
                             ax[v].plot(xx,Y_t[:,index], 'b')
                             ax[v].plot(xx,Yh_t[:,index], '--r')
                             ax[v].grid()
-                            ax[v].set_ylabel('mode %i' % (index+1))
-                        ax[-1].set_xlabel('Time [Lyapunov Times]')
+                            ax[v].set_ylabel('Latent Variable %i' % (index+1), fontsize=16)
+                            ax[v].tick_params(axis='both', labelsize=14)
+                        ax[-1].set_xlabel('Time [Lyapunov Times]', fontsize=16)
                         fig.savefig(output_path+'/prediction_ens%i_test%i.png' % (j,i))
                         plt.close()
                         
@@ -1415,9 +1514,9 @@ if statistics_interval:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.2
+    threshold_ph = 0.3
 
-    ensemble_test = ensemble_test
+    ensemble_test = ens
 
     ens_nrmse_global= np.zeros((ensemble_test))
     ens_mse_global  = np.zeros((ensemble_test))
@@ -1530,8 +1629,8 @@ if statistics_interval:
             ax.legend()
             fig.savefig(output_path+f"/trajectories_ens{j}_test{i}.png")
 
-            fig, ax = plt.subplots(1,3, figsize=(12, 6))
-            for v in range(3):
+            fig, ax = plt.subplots(1,4, figsize=(12, 6))
+            for v in range(4):
                 kde_true  = gaussian_kde(Y_t[:,v])
                 kde_pred  = gaussian_kde(Yh_t[:,v])
 

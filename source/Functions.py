@@ -99,7 +99,7 @@ def train_n(U_washout, U_train, Y_train, tikh, sigma_in, rho):
         xf  = Xa1[-1,:N_units].copy()
         if ii == 0 and k==0: print('open_loop time:', (time.time()-t1)*N_splits)
         cond_number = np.linalg.cond(Xa1)
-        print("Condition number of reservoir state matrix:", cond_number)
+        #print("Condition number of reservoir state matrix:", cond_number)
 
         ##computing the matrices for the linear system
         t1  = time.time()

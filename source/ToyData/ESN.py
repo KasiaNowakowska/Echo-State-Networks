@@ -627,13 +627,14 @@ N_units      = Nr #neurons
 connectivity = 3
 sparseness   = 1 - connectivity/(N_units-1)
 
-tikh = np.array([1e-1,1e-2]) #np.array([1e-3,1e-6,1e-9,1e-12])  # Tikhonov factor (optimize among the values in this list)
+tikh = np.array([1,1e-1,1e-2,1e-3,1e-4]) #np.array([1e-3,1e-6,1e-9,1e-12])  # Tikhonov factor (optimize among the values in this list)
 
 print('tikh:', tikh)
 print('N_r:', N_units, 'sparsity:', sparseness)
 print('bias_in:', bias_in, 'bias_out:', bias_out)
 
 #### Grid Search and BO #####
+threshold_ph = 0.3
 n_in  = 0           #Number of Initial random points
 
 spec_in     = .7    #range for hyperparameters (spectral radius and input scaling)
@@ -890,18 +891,19 @@ if validation_interval:
     ##### quick test #####
     print('VALIDATION (TEST)')
     print(N_washout_val)
-    N_test   = n_tests                    #number of intervals in the test set
+    N_test   = N_fo                     #number of intervals in the test set
     N_tstart = N_washout_val                    #where the first test interval starts
     N_intt   = test_len*N_lyap            #length of each test set interval
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.2
+    threshold_ph = 0.3
 
     ensemble_test = ensemble_test
 
     ens_pred        = np.zeros((N_intt, dim, ensemble_test))
-    ens_PH          = np.zeros((N_intt, ensemble_test))
+    ens_PH          = np.zeros((N_test, ensemble_test))
+    ens_PH2         = np.zeros((ensemble_test))
     ens_nrmse       = np.zeros((ensemble_test))
     ens_ssim        = np.zeros((ensemble_test))
     ens_evr         = np.zeros((ensemble_test))
@@ -933,7 +935,8 @@ if validation_interval:
 
         #run different test intervals
         for i in range(N_test):
-            print(N_tstart + i*N_intt)
+            print('test number:', i+1)
+            print('index of test start:', N_tstart + i*N_intt)
             # data for washout and target in each interval
             U_wash    = U[N_tstart - N_washout +i*N_intt : N_tstart + i*N_intt].copy()
             Y_t       = U[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt].copy()
@@ -951,6 +954,7 @@ if validation_interval:
             PH[i]       = np.argmax(Y_err>threshold_ph)/N_lyap
             if PH[i] == 0 and Y_err[0]<threshold_ph: PH[i] = N_intt/N_lyap #(in case PH is larger than interval)
             nrmse_error[i, :] = Y_err
+            ens_PH[i,j] = PH[i]
 
             ##### reconstructions ####
             _, reconstructed_truth       = inverse_POD(Y_t, pca_)
@@ -983,10 +987,16 @@ if validation_interval:
             "MSE": mse,
             "NRMSE": nrmse,
             "SSIM": SSIM,
+            "PH": float(PH[i]),
             }
 
             with open(output_path_met, "w") as file:
                 json.dump(metrics, file, indent=4)
+
+            ens_nrmse[j]       += nrmse
+            ens_ssim[j]        += SSIM
+            ens_evr[j]         += evr
+            ens_PH2[j]         += PH[i]
                 
             if plot:
                 #left column has the washout (open-loop) and right column the prediction (closed-loop)
@@ -1045,6 +1055,35 @@ if validation_interval:
                         print('reconstruction and error plot')
                         plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, xx, 'ESN_validation_ens%i_test%i' %(j,i))
 
+
+        # accumulation for each ensemble member
+        ens_nrmse[j]       = ens_nrmse[j] / N_test
+        ens_ssim[j]        = ens_ssim[j] / N_test
+        ens_evr[j]         = ens_evr[j] / N_test
+        ens_PH2[j]         = ens_PH2[j] / N_test  
+             
+    # Full path for saving the file
+    output_file_ALL = 'ESN_validation_metrics_all.json' 
+
+    output_path_met_ALL = os.path.join(output_path, output_file_ALL)
+
+    flatten_PH = ens_PH.flatten()
+    print('flat PH', flatten_PH)
+
+    metrics_ens_ALL = {
+    "mean PH": np.mean(ens_PH2),
+    "lower PH": np.quantile(flatten_PH, 0.75),
+    "uppper PH": np.quantile(flatten_PH, 0.25),
+    "median PH": np.median(flatten_PH),
+    "mean NRMSE": np.mean(ens_nrmse),
+    "mean EVR": np.mean(ens_evr),
+    "mean ssim": np.mean(ens_ssim),
+    }
+
+    with open(output_path_met_ALL, "w") as file:
+        json.dump(metrics_ens_ALL, file, indent=4)
+    print('finished validations')
+
 if test_interval:
     ##### quick test #####
     print('TESTING')
@@ -1055,7 +1094,7 @@ if test_interval:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.2
+    threshold_ph = 0.3
 
     ensemble_test = ensemble_test
 

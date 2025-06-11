@@ -367,7 +367,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, ti
             c3 = ax[2].pcolormesh(x, z, residual[t_value,:,:, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
             fig.colorbar(c3, ax=ax[2])
             ax[2].set_title('error')
-            for v in range(2):
+            for v in range(3):
                 ax[v].set_ylabel('z')
                 ax[v].tick_params(axis='both', labelsize=12)
             ax[-1].set_xlabel('x')
@@ -382,22 +382,22 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, ti
             print("x shape:", np.shape(x))
             print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
             c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm)
-            fig.colorbar(c1, ax=ax[0])
-            ax[0].set_title('true')
+            cbar = fig.colorbar(c1, ax=ax[0])
+            cbar.ax.tick_params(labelsize=14)
+            ax[0].set_title('POD', fontsize=16)
             c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
-            fig.colorbar(c2, ax=ax[1])
-            ax[1].set_title('reconstruction')
+            cbar = fig.colorbar(c2, ax=ax[1])
+            cbar.ax.tick_params(labelsize=14)
+            ax[1].set_title('ESN', fontsize=16)
             c3 = ax[2].pcolormesh(time_vals, x,  residual[:,:,z_value, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
-            fig.colorbar(c3, ax=ax[2])
-            ax[2].set_title('error')
-            for v in range(2):
-                ax[v].set_ylabel('x')
-                ax[v].tick_params(axis='both', labelsize=12)
-            ax[-1].set_xlabel('time')
+            cbar = fig.colorbar(c3, ax=ax[2])
+            cbar.ax.tick_params(labelsize=14)
+            ax[2].set_title('Error', fontsize=16)
+            for v in range(3):
+                ax[v].set_ylabel('x', fontsize=16)
+                ax[v].tick_params(axis='both', labelsize=14)
+            ax[-1].set_xlabel('Time [LTs]', fontsize=16)
             fig.savefig(output_path+file_str+name+'_snapshot_recon_residual.png')
-
-
-
 
 def global_parameters(data):
     if data.ndim == 4:
@@ -539,7 +539,7 @@ def add_noise(data, noise_level=0.01, seed=42):
     noisy_data = data + noise
     return noisy_data
 
-noise_level = 0.5
+noise_level = 0
 data_set = add_noise(data_set, noise_level=noise_level)
 fig, ax =plt.subplots(1)
 ax.contourf(data_set[:,:,32,0].T)
@@ -651,7 +651,7 @@ print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
 test_interval = True
-validation_interval = True
+validation_interval = False
 statistics_interval = True
 
 if validation_interval:
@@ -664,7 +664,7 @@ if validation_interval:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.2
+    threshold_ph = 0.3
 
     ensemble_test = ensemble_test
 
@@ -860,9 +860,9 @@ if test_interval:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.2
+    threshold_ph = 0.3
 
-    ensemble_test = ensemble_test
+    ensemble_test = ens
 
     ens_pred        = np.zeros((N_intt, dim, ensemble_test))
     ens_PH          = np.zeros((N_test, ensemble_test))
@@ -949,6 +949,7 @@ if test_interval:
             "MSE": mse,
             "NRMSE": nrmse,
             "SSIM": SSIM,
+            "PH[i]": float(PH[i]),
             }
 
             with open(output_path_met, "w") as file:
@@ -964,7 +965,7 @@ if test_interval:
                 #left column has the washout (open-loop) and right column the prediction (closed-loop)
                 # only first n_plot test set intervals are plotted
                 if i<n_plot:
-                    if ensemble_test % 1 == 0:
+                    if ensemble_test % 5 == 0:
                     
                         #### modes prediction ####
                         fig,ax =plt.subplots(len(indexes_to_plot),sharex=True, tight_layout=True)
@@ -983,15 +984,16 @@ if test_interval:
                         fig.savefig(output_path+'/washout_test_ens%i_test%i.png' % (j,i))
                         plt.close()
 
-                        fig,ax =plt.subplots(len(indexes_to_plot),sharex=True, tight_layout=True)
+                        fig,ax =plt.subplots(len(indexes_to_plot), figsize=(12,9), sharex=True, tight_layout=True)
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
                         for v in range(len(indexes_to_plot)):
                             index = indexes_to_plot[v]
                             ax[v].plot(xx,Y_t[:,index], 'b')
                             ax[v].plot(xx,Yh_t[:,index], '--r')
                             ax[v].grid()
-                            ax[v].set_ylabel('mode %i' % (index+1))
-                        ax[-1].set_xlabel('Time [Lyapunov Times]')
+                            ax[v].set_ylabel('Mode %i' % (index+1), fontsize=16)
+                            ax[v].tick_params(axis='both', labelsize=14)
+                        ax[-1].set_xlabel('Time [Lyapunov Times]', fontsize=16)
                         fig.savefig(output_path+'/prediction_test_ens%i_test%i.png' % (j,i))
                         plt.close()
                         
@@ -1059,9 +1061,9 @@ if statistics_interval:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.2
+    threshold_ph = 0.3
 
-    ensemble_test = ensemble_test
+    ensemble_test = ens
 
     ens_nrmse_global= np.zeros((ensemble_test))
     ens_mse_global  = np.zeros((ensemble_test))
