@@ -273,6 +273,10 @@ def periodic_padding(image, padding=1, asym=False):
 
 def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, time_vals, file_str):
     abs_error = np.abs(original-reconstruction)
+    residual  = original - reconstruction
+    vmax_res = np.max(np.abs(residual))  # Get maximum absolute value
+    vmin_res = -vmax_res
+    abs_error = np.abs(original-reconstruction)
     if original.ndim == 3: #len(time_vals), len(x), len(z)
 
         fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
@@ -291,7 +295,6 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, ti
             ax[v].set_ylabel('z')
         ax[-1].set_xlabel('x')
         fig.savefig(output_path+file_str+'_hovmoller_recon_error.png')
-        plt.close()
 
         fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
         minm = min(np.min(original[:, :, z_value]), np.min(reconstruction[:, :, z_value]))
@@ -311,7 +314,6 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, ti
             ax[v].set_ylabel('x')
         ax[-1].set_xlabel('time')
         fig.savefig(output_path+file_str+'_snapshot_recon_error.png')
-        plt.close()
     
     elif original.ndim == 4: #len(time_vals), len(x), len(z), var
         for i in range(original.shape[3]):
@@ -332,7 +334,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, ti
             for v in range(2):
                 ax[v].set_ylabel('z')
             ax[-1].set_xlabel('x')
-            fig.savefig(output_path+file_str+name+'_hovmoller_recon_error.png')
+            fig.savefig(output_path+file_str+name+'_snapshot_recon_error.png')
             plt.close()
 
             fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
@@ -355,9 +357,72 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, ti
             for v in range(2):
                 ax[v].set_ylabel('x')
             ax[-1].set_xlabel('time')
-            fig.suptitle(f"time=")
-            fig.savefig(output_path+file_str+name+'_snapshot_recon_error.png')
+            fig.savefig(output_path+file_str+name+'_hovmoller_recon_error.png')
             plt.close()
+
+            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+            minm = min(np.min(original[:, :, z_value,i]), np.min(reconstruction[:, :, z_value,i]))
+            maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
+            print(np.max(original[:, :, z_value,i]))
+            print(minm, maxm)
+            print("time shape:", np.shape(time_vals))
+            print("x shape:", np.shape(x))
+            print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
+            c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value, i].T)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(time_vals, x,  abs_error[:,:,z_value, i].T, cmap='Reds')
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('x')
+            ax[-1].set_xlabel('time')
+            fig.savefig(output_path+file_str+name+'_hovmoller_recon_diffbar_error.png')
+            plt.close()
+
+            fig, ax = plt.subplots(3, figsize=(12,6), tight_layout=True, sharex=True)
+            minm = min(np.min(original[t_value, :, :, i]), np.min(reconstruction[t_value, :, :, i]))
+            maxm = max(np.max(original[t_value, :, :, i]), np.max(reconstruction[t_value, :, :, i]))
+            c1 = ax[0].pcolormesh(x, z, original[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(x, z, residual[t_value,:,:, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('z')
+                ax[v].tick_params(axis='both', labelsize=12)
+            ax[-1].set_xlabel('x')
+            fig.savefig(output_path+file_str+name+'_hovmoller_recon_residual.png')
+
+            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+            minm = min(np.min(original[:, :, z_value,i]), np.min(reconstruction[:, :, z_value,i]))
+            maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
+            print(np.max(original[:, :, z_value,i]))
+            print(minm, maxm)
+            print("time shape:", np.shape(time_vals))
+            print("x shape:", np.shape(x))
+            print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
+            c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(time_vals, x,  residual[:,:,z_value, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('x')
+                ax[v].tick_params(axis='both', labelsize=12)
+            ax[-1].set_xlabel('time')
+            fig.savefig(output_path+file_str+name+'_snapshot_recon_residual.png')
 
 def global_parameters(data):
     if data.ndim == 4:
@@ -754,7 +819,7 @@ for i in range(N_parallel):
 ##### Compute encoded time_series #####
 #set U to the standard scaler version
 if encoded_data:
-    with h5py.File(output_path+'/encoded_data'+str(N_latent)+'.h5', 'r') as df:
+    with h5py.File('Ra2e8/CAE_ESN/LS64/encoded_data'+str(N_latent)+'.h5', 'r') as df:
         U_enc = np.array(df['U_enc'])
 else:
     U = U_scaled
@@ -883,9 +948,9 @@ print('norm:', norm)
 print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
-test_interval = False
+test_interval = True
 validation_interval = False
-statistics_interval = True
+statistics_interval = False
 fourier = False
 vertical_profiles = False
 reservoir_investigation = False
@@ -894,7 +959,7 @@ if validation_interval:
     ##### quick test #####
     print('VALIDATION (TEST)')
     print(N_washout_val)
-    N_test   = 20                    #number of intervals in the test set
+    N_test   = 63 #N_fo=63                   #number of intervals in the test set
     if reduce_domain2:
         N_tstart = N_washout
     else:
@@ -904,9 +969,9 @@ if validation_interval:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.2
+    threshold_ph = 0.3
 
-    ensemble_test = ensemble_test
+    ensemble_test = ens
 
     ens_pred        = np.zeros((N_intt, dim, ensemble_test))
     ens_PH          = np.zeros((N_test, ensemble_test))
@@ -915,6 +980,15 @@ if validation_interval:
     ens_ssim        = np.zeros((ensemble_test))
     ens_evr         = np.zeros((ensemble_test))
     ens_nrmse_plume = np.zeros((ensemble_test))
+
+    images_val_path = output_path+'/validation_images/'
+    if not os.path.exists(images_val_path):
+        os.makedirs(images_val_path)
+        print('made directory')
+    metrics_val_path = output_path+'/validation_metrics/'
+    if not os.path.exists(metrics_val_path):
+        os.makedirs(metrics_val_path)
+        print('made directory')
 
     for j in range(ensemble_test):
 
@@ -1006,10 +1080,11 @@ if validation_interval:
             print('SSIM', SSIM)
             print('NRMSE plume', nrmse_plume)
 
-            # Full path for saving the file
-            output_file = 'ESN_test_metrics_ens%i_test%i.json' % (j,i)
 
-            output_path_met = os.path.join(output_path, output_file)
+            # Full path for saving the file
+            output_file = 'ESN_validation_metrics_ens%i_test%i.json' % (j,i)
+
+            output_path_met = os.path.join(metrics_val_path, output_file)
 
             metrics = {
             "test": int(i),
@@ -1053,7 +1128,7 @@ if validation_interval:
                         if i==0:
                             ax[0].legend(ncol=2)
                         fig.suptitle('washout_ens%i_test%i' % (j,i))
-                        fig.savefig(output_path+'/washout_validation_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_val_path+'/washout_validation_ens%i_test%i.png' % (j,i))
                         plt.close()
 
                         fig,ax =plt.subplots(len(indexes_to_plot),sharex=True, tight_layout=True)
@@ -1065,7 +1140,7 @@ if validation_interval:
                             ax[v].grid()
                             ax[v].set_ylabel('mode %i' % (index+1))
                         ax[-1].set_xlabel('Time [Lyapunov Times]')
-                        fig.savefig(output_path+'/prediction_validation_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_val_path+'/prediction_validation_ens%i_test%i.png' % (j,i))
                         plt.close()
                         
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
@@ -1075,7 +1150,7 @@ if validation_interval:
                         ax.grid()
                         ax.set_ylabel('PH')
                         ax.set_xlabel('Time')
-                        fig.savefig(output_path+'/PH_validation_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_val_path+'/PH_validation_ens%i_test%i.png' % (j,i))
                         plt.close()
 
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
@@ -1083,7 +1158,7 @@ if validation_interval:
                         ax.plot(np.linalg.norm(Xa1[:, :N_units], axis=1))
                         ax.grid()
                         ax.set_ylabel('res_states')
-                        fig.savefig(output_path+'/res_states_washout_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_val_path+'/res_states_washout_ens%i_test%i.png' % (j,i))
                         plt.close()
 
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
@@ -1091,7 +1166,7 @@ if validation_interval:
                         ax.plot(xx, np.linalg.norm(Xa2[:, :N_units], axis=1))
                         ax.grid()
                         ax.set_ylabel('res_states')
-                        fig.savefig(output_path+'/res_states_validation_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_val_path+'/res_states_validation_ens%i_test%i.png' % (j,i))
                         plt.close()
 
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
@@ -1100,7 +1175,7 @@ if validation_interval:
                         ax.plot(time_vals[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt], np.linalg.norm(Xa2[:, :N_units], axis=1), color='blue')
                         ax.grid()
                         ax.set_ylabel('res_norm')
-                        fig.savefig(output_path+'/resnorm_validation_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_val_path+'/resnorm_validation_ens%i_test%i.png' % (j,i))
                         plt.close()
 
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
@@ -1109,7 +1184,7 @@ if validation_interval:
                         ax.plot(time_vals[N_tstart + i*N_gap           : N_tstart + i*N_gap + N_gap], np.linalg.norm(Y_t, axis=1), color='blue')
                         ax.grid()
                         ax.set_ylabel('input_norm')
-                        fig.savefig(output_path+'/inputnorm_validation_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_val_path+'/inputnorm_validation_ens%i_test%i.png' % (j,i))
                         plt.close()
 
                         # reconstruction after scaling
@@ -1127,7 +1202,7 @@ if validation_interval:
                             for v in range(2):
                                 ax[v].set_xlabel('time')
                                 ax[v].set_ylabel('x')
-                            fig.savefig(output_path+f"/active_plumes_validation_ens{j}_test{i}.png")
+                            fig.savefig(images_val_path+f"/active_plumes_validation_ens{j}_test{i}.png")
                             plt.close()
                         else:
                             print('no image')
@@ -1180,9 +1255,9 @@ if test_interval:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.2
+    threshold_ph = 0.3
 
-    ensemble_test = ensemble_test
+    ensemble_test = ens
 
     ens_pred        = np.zeros((N_intt, dim, ensemble_test))
     ens_PH          = np.zeros((N_test, ensemble_test))
@@ -1191,6 +1266,15 @@ if test_interval:
     ens_ssim        = np.zeros((ensemble_test))
     ens_evr         = np.zeros((ensemble_test))
     ens_nrmse_plume = np.zeros((ensemble_test))
+
+    images_test_path = output_path+'/test_images/'
+    if not os.path.exists(images_test_path):
+        os.makedirs(images_test_path)
+        print('made directory')
+    metrics_test_path = output_path+'/test_metrics/'
+    if not os.path.exists(metrics_test_path):
+        os.makedirs(metrics_test_path)
+        print('made directory')
 
     for j in range(ensemble_test):
 
@@ -1284,7 +1368,7 @@ if test_interval:
             # Full path for saving the file
             output_file = 'ESN_test_metrics_ens%i_test%i.json' % (j,i)
 
-            output_path_met = os.path.join(output_path, output_file)
+            output_path_met = os.path.join(metrics_test_path, output_file)
 
             metrics = {
             "test": int(i),
@@ -1326,7 +1410,7 @@ if test_interval:
                         if i==0:
                             ax[0].legend(ncol=2)
                         fig.suptitle('washout_ens%i_test%i' % (j,i))
-                        fig.savefig(output_path+'/washout_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_test_path+'/washout_ens%i_test%i.png' % (j,i))
                         plt.close()
 
                         fig,ax =plt.subplots(len(indexes_to_plot),sharex=True, tight_layout=True)
@@ -1338,7 +1422,7 @@ if test_interval:
                             ax[v].grid()
                             ax[v].set_ylabel('mode %i' % (index+1))
                         ax[-1].set_xlabel('Time [Lyapunov Times]')
-                        fig.savefig(output_path+'/prediction_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_test_path+'/prediction_ens%i_test%i.png' % (j,i))
                         plt.close()
                         
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
@@ -1348,7 +1432,7 @@ if test_interval:
                         ax.grid()
                         ax.set_ylabel('PH')
                         ax.set_xlabel('Time')
-                        fig.savefig(output_path+'/PH_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_test_path+'/PH_ens%i_test%i.png' % (j,i))
                         plt.close()
 
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
@@ -1356,7 +1440,7 @@ if test_interval:
                         ax.plot(np.linalg.norm(Xa1[:, :N_units], axis=1))
                         ax.grid()
                         ax.set_ylabel('res_states')
-                        fig.savefig(output_path+'/res_states_test_washout_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_test_path+'/res_states_test_washout_ens%i_test%i.png' % (j,i))
                         plt.close()
 
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
@@ -1364,7 +1448,7 @@ if test_interval:
                         ax.plot(xx, np.linalg.norm(Xa2[:, :N_units], axis=1))
                         ax.grid()
                         ax.set_ylabel('res_states')
-                        fig.savefig(output_path+'/res_states_test_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_test_path+'/res_states_test_ens%i_test%i.png' % (j,i))
                         plt.close()
 
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
@@ -1373,7 +1457,7 @@ if test_interval:
                         ax.plot(time_vals[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt], np.linalg.norm(Xa2[:, :N_units], axis=1), color='blue')
                         ax.grid()
                         ax.set_ylabel('res_norm')
-                        fig.savefig(output_path+'/resnorm_test_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_test_path+'/resnorm_test_ens%i_test%i.png' % (j,i))
                         plt.close()
 
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
@@ -1382,7 +1466,7 @@ if test_interval:
                         ax.plot(time_vals[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt], np.linalg.norm(Y_t, axis=1), color='blue')
                         ax.grid()
                         ax.set_ylabel('input_norm')
-                        fig.savefig(output_path+'/inputnorm_test_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_test_path+'/inputnorm_test_ens%i_test%i.png' % (j,i))
                         plt.close()
 
                         # reconstruction after scaling
@@ -1400,7 +1484,7 @@ if test_interval:
                             for v in range(2):
                                 ax[v].set_xlabel('time')
                                 ax[v].set_ylabel('x')
-                            fig.savefig(output_path+f"/active_plumes_ens{j}_test{i}.png")
+                            fig.savefig(images_test_path+f"/active_plumes_ens{j}_test{i}.png")
                             plt.close()
                         else:
                             print('no image')
@@ -1454,7 +1538,7 @@ if statistics_interval:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.2
+    threshold_ph = 0.3
 
     ensemble_test = ensemble_test
 

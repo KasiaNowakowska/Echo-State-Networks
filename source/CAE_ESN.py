@@ -1,7 +1,7 @@
 """
 python script for convolutional autoencoder.
 
-Usage: CAE.py [--input_path=<input_path> --output_path=<output_path> --model_path=<model_path> --CAE_hyperparam_file=<CAE_hyperparam_file> --ESN_hyperparam_file=<ESN_hyperparam_file> --config_number=<config_number>]
+Usage: CAE.py [--input_path=<input_path> --output_path=<output_path> --model_path=<model_path> --CAE_hyperparam_file=<CAE_hyperparam_file> --ESN_hyperparam_file=<ESN_hyperparam_file> --encoded_data=<encoded_data> --config_number=<config_number>]
 
 Options:
     --input_path=<input_path>                   file path to use for data
@@ -9,6 +9,7 @@ Options:
     --model_path=<model_path>                   file path to location of job 
     --CAE_hyperparam_file=<CAE_hyperparam_file> file with hyperparmas from CAE
     --ESN_hyperparam_file=<ESN_hyperparam_file> file with hyperparams for ESN
+    --encoded_data=<encoded_data>               data already encoded [default: False]
     --config_number=<config_number>             config number 
 """
 
@@ -72,6 +73,14 @@ model_path = args['--model_path']
 CAE_hyperparam_file = args['--CAE_hyperparam_file']
 ESN_hyperparam_file = args['--ESN_hyperparam_file']
 config_number = args['--config_number']
+
+encoded_data = args['--encoded_data']
+if encoded_data == 'False':
+    encoded_data = False
+    print('data not already encoded so', encoded_data)
+elif encoded_data == 'True':
+    encoded_data = True
+    print('data already encoded so', encoded_data)
 
 if not os.path.exists(output_path):
     os.makedirs(output_path)
@@ -293,6 +302,10 @@ def plot_reconstruction(original, reconstruction, z_value, t_value, time_vals, f
 
 def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, time_vals, file_str):
     abs_error = np.abs(original-reconstruction)
+    residual  = original - reconstruction
+    vmax_res = np.max(np.abs(residual))  # Get maximum absolute value
+    vmin_res = -vmax_res
+    abs_error = np.abs(original-reconstruction)
     if original.ndim == 3: #len(time_vals), len(x), len(z)
 
         fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
@@ -398,6 +411,47 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, ti
             ax[-1].set_xlabel('time')
             fig.savefig(output_path+file_str+name+'_hovmoller_recon_diffbar_error.png')
             plt.close()
+
+            fig, ax = plt.subplots(3, figsize=(12,6), tight_layout=True, sharex=True)
+            minm = min(np.min(original[t_value, :, :, i]), np.min(reconstruction[t_value, :, :, i]))
+            maxm = max(np.max(original[t_value, :, :, i]), np.max(reconstruction[t_value, :, :, i]))
+            c1 = ax[0].pcolormesh(x, z, original[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(x, z, residual[t_value,:,:, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('z')
+                ax[v].tick_params(axis='both', labelsize=12)
+            ax[-1].set_xlabel('x')
+            fig.savefig(output_path+file_str+name+'_hovmoller_recon_residual.png')
+
+            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+            minm = min(np.min(original[:, :, z_value,i]), np.min(reconstruction[:, :, z_value,i]))
+            maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
+            print(np.max(original[:, :, z_value,i]))
+            print(minm, maxm)
+            print("time shape:", np.shape(time_vals))
+            print("x shape:", np.shape(x))
+            print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
+            c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('true')
+            c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            fig.colorbar(c2, ax=ax[1])
+            ax[1].set_title('reconstruction')
+            c3 = ax[2].pcolormesh(time_vals, x,  residual[:,:,z_value, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
+            fig.colorbar(c3, ax=ax[2])
+            ax[2].set_title('error')
+            for v in range(2):
+                ax[v].set_ylabel('x')
+                ax[v].tick_params(axis='both', labelsize=12)
+            ax[-1].set_xlabel('time')
+            fig.savefig(output_path+file_str+name+'_snapshot_recon_residual.png')
 
 
 #### Metrics ####
@@ -786,17 +840,21 @@ for i in range(N_parallel):
     
 ##### Compute encoded time_series #####
 #set U to the standard scaler version
-U = U_scaled
-train_leng = 0
-N_pos = 2000
-k     = (U.shape[0] - train_leng)//N_pos
+if encoded_data:
+    with h5py.File(output_path+'/encoded_data'+str(N_latent)+'.h5', 'r') as df:
+        U_enc = np.array(df['U_enc'])
+else:
+    U = U_scaled
+    train_leng = 0
+    N_pos = 2000
+    k     = (U.shape[0] - train_leng)//N_pos
 
-U_enc = np.empty((k*N_pos, N_1[1], N_1[2], N_1[3]))
-for i in range(k):
-        U_enc[i*N_pos:(i+1)*N_pos]= model(U[i*N_pos:(i+1)*N_pos], a, b)[0]
+    U_enc = np.empty((k*N_pos, N_1[1], N_1[2], N_1[3]))
+    for i in range(k):
+            U_enc[i*N_pos:(i+1)*N_pos]= model(U[i*N_pos:(i+1)*N_pos], a, b)[0]
 
-with h5py.File(output_path+'/encoded_data'+str(N_latent)+'.h5', 'w') as df:
-    df['U_enc'] = U_enc
+    with h5py.File(output_path+'/encoded_data'+str(N_latent)+'.h5', 'w') as df:
+        df['U_enc'] = U_enc
 
 
 ###### ESN #######
@@ -887,9 +945,10 @@ N_units      = Nr #neurons
 connectivity = 3   
 sparseness   = 1 - connectivity/(N_units-1) 
 
-tikh = np.array([1])  # Tikhonov factor (optimize among the values in this list)
+tikh = np.array([1,1e-1,1e-2,1e-3,1e-4])  # Tikhonov factor (optimize among the values in this list)
 
 #### hyperparamter search ####
+threshold_ph = 0.3
 n_in  = 0           #Number of Initial random points
 
 spec_in     = 0.8    #range for hyperparameters (spectral radius and input scaling)
@@ -1141,7 +1200,7 @@ if validation_interval:
     ##### quick test #####
     print('VALIDATION (TEST)')
     print(N_washout_val)
-    N_test   = n_tests                    #number of intervals in the test set
+    N_test   = N_fo                    #number of intervals in the test set
     if reduce_domain:
         N_tstart = N_washout
     elif reduce_domain2:
@@ -1152,9 +1211,9 @@ if validation_interval:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.2
+    
 
-    ensemble_test = ensemble_test
+    ensemble_test = ens
 
     ens_pred        = np.zeros((N_intt, dim, ensemble_test))
     ens_PH          = np.zeros((N_test, ensemble_test))
@@ -1281,6 +1340,12 @@ if validation_interval:
             if plot:
                 #left column has the washout (open-loop) and right column the prediction (closed-loop)
                 # only first n_plot test set intervals are plotted
+
+                images_val_path = output_path+'/validation_images/'
+                if not os.path.exists(images_val_path):
+                    os.makedirs(images_val_path)
+                    print('made directory')
+
                 if i<n_plot:
                     if ensemble_test % 1 == 0:
                         
@@ -1300,7 +1365,7 @@ if validation_interval:
                         if i==0:
                             ax[0].legend(ncol=2)
                         fig.suptitle('washout_ens%i_test%i' % (j,i))
-                        fig.savefig(output_path+'/washout_validation_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_val_path+'/washout_validation_ens%i_test%i.png' % (j,i))
                         plt.close()
 
                         fig,ax =plt.subplots(len(indexes_to_plot),sharex=True, tight_layout=True)
@@ -1312,7 +1377,7 @@ if validation_interval:
                             ax[v].grid()
                             ax[v].set_ylabel('mode %i' % (index+1))
                         ax[-1].set_xlabel('Time [Lyapunov Times]')
-                        fig.savefig(output_path+'/prediction_validation_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_val_path+'/prediction_validation_ens%i_test%i.png' % (j,i))
                         plt.close()
                         
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
@@ -1322,7 +1387,7 @@ if validation_interval:
                         ax.grid()
                         ax.set_ylabel('PH')
                         ax.set_xlabel('Time')
-                        fig.savefig(output_path+'/PH_validation_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_val_path+'/PH_validation_ens%i_test%i.png' % (j,i))
                         plt.close()
 
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
@@ -1330,7 +1395,7 @@ if validation_interval:
                         ax.plot(np.linalg.norm(Xa1[:, :N_units], axis=1))
                         ax.grid()
                         ax.set_ylabel('res_states')
-                        fig.savefig(output_path+'/res_states_washout_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_val_path+'/res_states_washout_ens%i_test%i.png' % (j,i))
                         plt.close()
 
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
@@ -1338,7 +1403,7 @@ if validation_interval:
                         ax.plot(xx, np.linalg.norm(Xa2[:, :N_units], axis=1))
                         ax.grid()
                         ax.set_ylabel('res_states')
-                        fig.savefig(output_path+'/res_states_validation_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_val_path+'/res_states_validation_ens%i_test%i.png' % (j,i))
                         plt.close()
 
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
@@ -1347,7 +1412,7 @@ if validation_interval:
                         ax.plot(time_vals[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt], np.linalg.norm(Xa2[:, :N_units], axis=1), color='blue')
                         ax.grid()
                         ax.set_ylabel('res_norm')
-                        fig.savefig(output_path+'/resnorm_validation_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_val_path+'/resnorm_validation_ens%i_test%i.png' % (j,i))
                         plt.close()
 
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
@@ -1356,7 +1421,7 @@ if validation_interval:
                         ax.plot(time_vals[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt], np.linalg.norm(Y_t, axis=1), color='blue')
                         ax.grid()
                         ax.set_ylabel('input_norm')
-                        fig.savefig(output_path+'/inputnorm_validation_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_val_path+'/inputnorm_validation_ens%i_test%i.png' % (j,i))
                         plt.close()
 
                         # reconstruction after scaling
@@ -1374,7 +1439,7 @@ if validation_interval:
                             for v in range(2):
                                 ax[v].set_xlabel('time')
                                 ax[v].set_ylabel('x')
-                            fig.savefig(output_path+f"/active_plumes_validation_ens{j}_test{i}.png")
+                            fig.savefig(images_val_path+f"/active_plumes_validation_ens{j}_test{i}.png")
                             plt.close()
                         else:
                             print('no image')
@@ -1414,16 +1479,15 @@ if test_interval:
     print('TESTING')
     N_test   = n_tests                    #number of intervals in the test set
     if reduce_domain:
-        N_tstart = N_train + N_washout_val
+        N_tstart = N_train + N_washout
     elif reduce_domain2:
-        N_tstart = N_train + N_washout_val
+        N_tstart = N_train + N_washout
     else:
         N_tstart = N_train + N_washout #850    #where the first test interval starts
     N_intt   = test_len*N_lyap             #length of each test set interval
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.2
 
     ensemble_test = ensemble_test
 
@@ -1552,6 +1616,12 @@ if test_interval:
             if plot:
                 #left column has the washout (open-loop) and right column the prediction (closed-loop)
                 # only first n_plot test set intervals are plotted
+
+                images_test_path = output_path+'/test_images/'
+                if not os.path.exists(images_test_path):
+                    os.makedirs(images_test_path)
+                    print('made directory')
+
                 if i<n_plot:
                     if ensemble_test % 1 == 0:
                         
@@ -1569,7 +1639,7 @@ if test_interval:
                         if i==0:
                             ax[0].legend(ncol=2)
                         fig.suptitle('washout_ens%i_test%i' % (j,i))
-                        fig.savefig(output_path+'/washout_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_test_path+'/washout_ens%i_test%i.png' % (j,i))
                         plt.close()
 
                         fig,ax =plt.subplots(len(indexes_to_plot),sharex=True, tight_layout=True)
@@ -1581,7 +1651,7 @@ if test_interval:
                             ax[v].grid()
                             ax[v].set_ylabel('mode %i' % (index+1))
                         ax[-1].set_xlabel('Time [Lyapunov Times]')
-                        fig.savefig(output_path+'/prediction_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_test_path+'/prediction_ens%i_test%i.png' % (j,i))
                         plt.close()
                         
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
@@ -1591,7 +1661,7 @@ if test_interval:
                         ax.grid()
                         ax.set_ylabel('PH')
                         ax.set_xlabel('Time')
-                        fig.savefig(output_path+'/PH_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_test_path+'/PH_ens%i_test%i.png' % (j,i))
                         plt.close()
 
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
@@ -1599,7 +1669,7 @@ if test_interval:
                         ax.plot(np.linalg.norm(Xa1[:, :N_units], axis=1))
                         ax.grid()
                         ax.set_ylabel('res_states')
-                        fig.savefig(output_path+'/res_states_test_washout_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_test_path+'/res_states_test_washout_ens%i_test%i.png' % (j,i))
                         plt.close()
 
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
@@ -1607,7 +1677,7 @@ if test_interval:
                         ax.plot(xx, np.linalg.norm(Xa2[:, :N_units], axis=1))
                         ax.grid()
                         ax.set_ylabel('res_states')
-                        fig.savefig(output_path+'/res_states_test_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_test_path+'/res_states_test_ens%i_test%i.png' % (j,i))
                         plt.close()
 
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
@@ -1616,7 +1686,7 @@ if test_interval:
                         ax.plot(time_vals[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt], np.linalg.norm(Xa2[:, :N_units], axis=1), color='blue')
                         ax.grid()
                         ax.set_ylabel('res_norm')
-                        fig.savefig(output_path+'/resnorm_test_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_test_path+'/resnorm_test_ens%i_test%i.png' % (j,i))
                         plt.close()
 
                         fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
@@ -1625,7 +1695,7 @@ if test_interval:
                         ax.plot(time_vals[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt], np.linalg.norm(Y_t, axis=1), color='blue')
                         ax.grid()
                         ax.set_ylabel('input_norm')
-                        fig.savefig(output_path+'/inputnorm_test_ens%i_test%i.png' % (j,i))
+                        fig.savefig(images_test_path+'/inputnorm_test_ens%i_test%i.png' % (j,i))
                         plt.close()
 
                         # reconstruction after scaling
@@ -1643,7 +1713,7 @@ if test_interval:
                             for v in range(2):
                                 ax[v].set_xlabel('time')
                                 ax[v].set_ylabel('x')
-                            fig.savefig(output_path+f"/active_plumes_ens{j}_test{i}.png")
+                            fig.savefig(images_test_path+f"/active_plumes_ens{j}_test{i}.png")
                             plt.close()
                         else:
                             print('no image')
