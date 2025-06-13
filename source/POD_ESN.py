@@ -36,6 +36,10 @@ from skopt.learning import GaussianProcessRegressor as GPR
 from skopt.learning.gaussian_process.kernels import Matern, WhiteKernel, Product, ConstantKernel
 from scipy.io import loadmat, savemat
 from skopt.plots import plot_convergence
+from sklearn.metrics import mean_squared_error
+from skimage.metrics import structural_similarity as ssim
+from Eval_Functions import *
+from Plotting_Functions import *
 
 import json
 import time as time
@@ -253,361 +257,6 @@ def transform_POD(data, pca_):
     data_reduced = pca_.transform(data_matrix)
     print('shape of reduced_data:', np.shape(data_reduced))
     return data_reduced
-
-def plot_reconstruction(original, reconstruction, z_value, t_value, time_vals, file_str):
-    fig, ax = plt.subplots(2, figsize=(12,6), tight_layout=True, sharex=True)
-    minm = min(np.min(original[t_value, :, :]), np.min(reconstruction[t_value, :, :]))
-    maxm = max(np.max(original[t_value, :, :]), np.max(reconstruction[t_value, :, :]))
-    c1 = ax[0].pcolormesh(x, z, original[t_value,:,:].T, vmin=minm, vmax=maxm)
-    fig.colorbar(c1, ax=ax[0])
-    ax[0].set_title('true')
-    c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:].T, vmin=minm, vmax=maxm)
-    fig.colorbar(c1, ax=ax[1])
-    ax[1].set_title('reconstruction')
-    for v in range(2):
-        ax[v].set_ylabel('z')
-    ax[-1].set_xlabel('x')
-    fig.savefig(output_path+'/snapshot_recon'+file_str+'.png')
-
-    fig, ax = plt.subplots(2, figsize=(12,6), tight_layout=True, sharex=True)
-    minm = min(np.min(original[:, :, z_value]), np.min(reconstruction[:, :, z_value]))
-    maxm = max(np.max(original[:, :, z_value]), np.max(reconstruction[:, :, z_value]))
-    print(np.max(original[:, :, z_value]))
-    print(minm, maxm)
-    c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value].T)
-    fig.colorbar(c1, ax=ax[0])
-    ax[0].set_title('true')
-    c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value].T)
-    fig.colorbar(c1, ax=ax[1])
-    ax[1].set_title('reconstruction')
-    for v in range(2):
-        ax[v].set_ylabel('x')
-    ax[-1].set_xlabel('time')
-    fig.savefig(output_path+'/hovmoller_recon'+file_str+'.png')
-
-def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, time_vals, file_str):
-    abs_error = np.abs(original-reconstruction)
-    residual  = original - reconstruction
-    vmax_res = np.max(np.abs(residual))  # Get maximum absolute value
-    vmin_res = -vmax_res
-    if original.ndim == 3: #len(time_vals), len(x), len(z)
-
-        fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
-        minm = min(np.min(original[t_value, :, :]), np.min(reconstruction[t_value, :, :]))
-        maxm = max(np.max(original[t_value, :, :]), np.max(reconstruction[t_value, :, :]))
-        c1 = ax[0].pcolormesh(x, z, original[t_value,:,:].T, vmin=minm, vmax=maxm)
-        fig.colorbar(c1, ax=ax[0])
-        ax[0].set_title('true')
-        c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:].T, vmin=minm, vmax=maxm)
-        fig.colorbar(c1, ax=ax[1])
-        ax[1].set_title('reconstruction')
-        c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:].T, cmap='Reds')
-        fig.colorbar(c3, ax=ax[2])
-        ax[2].set_title('error')
-        for v in range(3):
-            ax[v].set_ylabel('z')
-        ax[-1].set_xlabel('x')
-        fig.savefig(output_path+file_str+'_hovmoller_recon_error.png')
-
-        fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
-        minm = min(np.min(original[:, :, z_value]), np.min(reconstruction[:, :, z_value]))
-        maxm = max(np.max(original[:, :, z_value]), np.max(reconstruction[:, :, z_value]))
-        print(np.max(original[:, :, z_value]))
-        print(minm, maxm)
-        c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value].T)
-        fig.colorbar(c1, ax=ax[0])
-        ax[0].set_title('true')
-        c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value].T)
-        fig.colorbar(c1, ax=ax[1])
-        ax[1].set_title('reconstruction')
-        c3 = ax[2].pcolormesh(time_vals, x, abs_error[:, :, z_value].T, cmap='Reds')
-        fig.colorbar(c3, ax=ax[2])
-        ax[2].set_title('error')
-        for v in range(2):
-            ax[v].set_ylabel('x')
-        ax[-1].set_xlabel('time')
-        fig.savefig(output_path+file_str+'_snapshot_recon_error.png')
-    
-    elif original.ndim == 4: #len(time_vals), len(x), len(z), var
-        for i in range(original.shape[3]):
-            name = names[i]
-            print(name)
-            fig, ax = plt.subplots(3, figsize=(12,6), tight_layout=True, sharex=True)
-            minm = min(np.min(original[t_value, :, :, i]), np.min(reconstruction[t_value, :, :, i]))
-            maxm = max(np.max(original[t_value, :, :, i]), np.max(reconstruction[t_value, :, :, i]))
-            c1 = ax[0].pcolormesh(x, z, original[t_value,:,:,i].T, vmin=minm, vmax=maxm)
-            fig.colorbar(c1, ax=ax[0])
-            ax[0].set_title('true')
-            c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm)
-            fig.colorbar(c2, ax=ax[1])
-            ax[1].set_title('reconstruction')
-            c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:, i].T, cmap='Reds')
-            fig.colorbar(c3, ax=ax[2])
-            ax[2].set_title('error')
-            for v in range(2):
-                ax[v].set_ylabel('z')
-            ax[-1].set_xlabel('x')
-            fig.savefig(output_path+file_str+name+'_snapshot_recon_error.png')
-            plt.close()
-
-            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
-            minm = min(np.min(original[:, :, z_value,i]), np.min(reconstruction[:, :, z_value,i]))
-            maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
-            print(np.max(original[:, :, z_value,i]))
-            print(minm, maxm)
-            print("time shape:", np.shape(time_vals))
-            print("x shape:", np.shape(x))
-            print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
-            c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm)
-            fig.colorbar(c1, ax=ax[0])
-            ax[0].set_title('true')
-            c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
-            fig.colorbar(c2, ax=ax[1])
-            ax[1].set_title('reconstruction')
-            c3 = ax[2].pcolormesh(time_vals, x,  abs_error[:,:,z_value, i].T, cmap='Reds')
-            fig.colorbar(c3, ax=ax[2])
-            ax[2].set_title('error')
-            for v in range(2):
-                ax[v].set_ylabel('x')
-            ax[-1].set_xlabel('time')
-            fig.savefig(output_path+file_str+name+'_hovmoller_recon_error.png')
-            plt.close()
-
-            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
-            minm = min(np.min(original[:, :, z_value,i]), np.min(reconstruction[:, :, z_value,i]))
-            maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
-            print(np.max(original[:, :, z_value,i]))
-            print(minm, maxm)
-            print("time shape:", np.shape(time_vals))
-            print("x shape:", np.shape(x))
-            print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
-            c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value, i].T)
-            fig.colorbar(c1, ax=ax[0])
-            ax[0].set_title('true')
-            c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T)
-            fig.colorbar(c2, ax=ax[1])
-            ax[1].set_title('reconstruction')
-            c3 = ax[2].pcolormesh(time_vals, x,  abs_error[:,:,z_value, i].T, cmap='Reds')
-            fig.colorbar(c3, ax=ax[2])
-            ax[2].set_title('error')
-            for v in range(2):
-                ax[v].set_ylabel('x')
-            ax[-1].set_xlabel('time')
-            fig.savefig(output_path+file_str+name+'_hovmoller_recon_diffbar_error.png')
-            plt.close()
-
-            fig, ax = plt.subplots(3, figsize=(12,6), tight_layout=True, sharex=True)
-            minm = min(np.min(original[t_value, :, :, i]), np.min(reconstruction[t_value, :, :, i]))
-            maxm = max(np.max(original[t_value, :, :, i]), np.max(reconstruction[t_value, :, :, i]))
-            c1 = ax[0].pcolormesh(x, z, original[t_value,:,:,i].T, vmin=minm, vmax=maxm)
-            fig.colorbar(c1, ax=ax[0])
-            ax[0].set_title('true')
-            c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm)
-            fig.colorbar(c2, ax=ax[1])
-            ax[1].set_title('reconstruction')
-            c3 = ax[2].pcolormesh(x, z, residual[t_value,:,:, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
-            fig.colorbar(c3, ax=ax[2])
-            ax[2].set_title('error')
-            for v in range(2):
-                ax[v].set_ylabel('z')
-                ax[v].tick_params(axis='both', labelsize=12)
-            ax[-1].set_xlabel('x')
-            fig.savefig(output_path+file_str+name+'_hovmoller_recon_residual.png')
-
-            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
-            minm = min(np.min(original[:, :, z_value,i]), np.min(reconstruction[:, :, z_value,i]))
-            maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
-            print(np.max(original[:, :, z_value,i]))
-            print(minm, maxm)
-            print("time shape:", np.shape(time_zone))
-            print("x shape:", np.shape(x))
-            print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
-            c1 = ax[0].pcolormesh(time_zone, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm)
-            fig.colorbar(c1, ax=ax[0])
-            ax[0].set_title('true')
-            c2 = ax[1].pcolormesh(time_zone, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
-            fig.colorbar(c2, ax=ax[1])
-            ax[1].set_title('reconstruction')
-            c3 = ax[2].pcolormesh(time_zone, x,  residual[:,:,z_value, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
-            fig.colorbar(c3, ax=ax[2])
-            ax[2].set_title('error')
-            for v in range(2):
-                ax[v].set_ylabel('x')
-                ax[v].tick_params(axis='both', labelsize=12)
-            ax[-1].set_xlabel('time')
-            fig.savefig(output_path+file_str+name+'_snapshot_recon_residual.png')
-
-#### Metrics ####
-from sklearn.metrics import mean_squared_error
-def NRMSE(original_data, reconstructed_data):
-    if original_data.ndim == 3:
-        original_data = original_data.reshape(original_data.shape[0], original_data.shape[1]*original_data.shape[2])
-    elif original_data.ndim == 4:
-        original_data = original_data.reshape(original_data.shape[0], original_data.shape[1]*original_data.shape[2]*original_data.shape[3])
-    if reconstructed_data.ndim == 3:
-        reconstructed_data = reconstructed_data.reshape(reconstructed_data.shape[0], reconstructed_data.shape[1]*reconstructed_data.shape[2])
-    elif reconstructed_data.ndim == 4:
-        reconstructed_data = reconstructed_data.reshape(reconstructed_data.shape[0], reconstructed_data.shape[1]*reconstructed_data.shape[2]*reconstructed_data.shape[3])
-
-    # Check if both data arrays have the same dimensions and the dimension is 2
-    if original_data.ndim == reconstructed_data.ndim == 2:
-        print("Both data arrays have the same dimensions and are 2D.")
-    else:
-        print("The data arrays either have different dimensions or are not 2D.")
-    rmse = np.sqrt(mean_squared_error(original_data, reconstructed_data))
-    
-    variance = np.var(original_data)
-    std_dev  = np.sqrt(variance)
-    
-    nrmse = (rmse/std_dev)
-    
-    return nrmse
-
-from skimage.metrics import structural_similarity as ssim
-def compute_ssim_for_4d(original, decoded):
-    """
-    Compute the average SSIM across all timesteps and channels for 4D arrays.
-    """
-    if original.ndim == 3:
-        original = original.reshape(original.shape[0], original.shape[1], original.shape[2], 1)
-    if decoded.ndim == 3:
-        decoded = decoded.reshape(decoded.shape[0], decoded.shape[1], decoded.shape[2], 1)
-    
-    # Check if both data arrays have the same dimensions and the dimension is 4
-    if original.ndim == decoded.ndim == 4:
-        print("Both data arrays have the same dimensions and are 4D.")
-    else:
-        print("The data arrays either have different dimensions or are not 4D.")
-
-    # Initialize SSIM accumulator
-    total_ssim = 0
-    timesteps = original.shape[0]
-    channels = original.shape[-1]
-  
-    for t in range(timesteps):
-        for c in range(channels):
-            # Extract the 2D slice for each timestep and channel
-            orig_slice = original[t, :, :, c]
-            dec_slice = decoded[t, :, :, c]
-            
-            # Compute SSIM for the current slice
-            batch_ssim = ssim(orig_slice, dec_slice, data_range=orig_slice.max() - orig_slice.min(), win_size=3)
-            total_ssim += batch_ssim
-  
-    # Compute the average SSIM across all timesteps and channels
-    avg_ssim = total_ssim / (timesteps * channels)
-    return avg_ssim
-
-def EVR_recon(original_data, reconstructed_data):
-    if original_data.ndim == 3:
-        original_data = original_data.reshape(original_data.shape[0], original_data.shape[1]*original_data.shape[2])
-    elif original_data.ndim == 4:
-        original_data = original_data.reshape(original_data.shape[0], original_data.shape[1]*original_data.shape[2]*original_data.shape[3])
-    if reconstructed_data.ndim == 3:
-        reconstructed_data = reconstructed_data.reshape(reconstructed_data.shape[0], reconstructed_data.shape[1]*reconstructed_data.shape[2])
-    elif reconstructed_data.ndim == 4:
-        reconstructed_data = reconstructed_data.reshape(reconstructed_data.shape[0], reconstructed_data.shape[1]*reconstructed_data.shape[2]*reconstructed_data.shape[3])
-    
-    # Check if both data arrays have the same dimensions and the dimension is 2
-    if original_data.ndim == reconstructed_data.ndim == 2:
-        print("Both data arrays have the same dimensions and are 2D.")
-    else:
-        print("The data arrays either have different dimensions or are not 2D.")
-
-    numerator = np.sum((original_data - reconstructed_data) **2)
-    denominator = np.sum(original_data ** 2)
-    evr_reconstruction = 1 - (numerator/denominator)
-    return evr_reconstruction
-
-def MSE(original_data, reconstructed_data):
-    if original_data.ndim == 3:
-        original_data = original_data.reshape(original_data.shape[0], original_data.shape[1]*original_data.shape[2])
-    elif original_data.ndim == 4:
-        original_data = original_data.reshape(original_data.shape[0], original_data.shape[1]*original_data.shape[2]*original_data.shape[3])
-    if reconstructed_data.ndim == 3:
-        reconstructed_data = reconstructed_data.reshape(reconstructed_data.shape[0], reconstructed_data.shape[1]*reconstructed_data.shape[2])
-    elif reconstructed_data.ndim == 4:
-        reconstructed_data = reconstructed_data.reshape(reconstructed_data.shape[0], reconstructed_data.shape[1]*reconstructed_data.shape[2]*reconstructed_data.shape[3])
-
-    # Check if both data arrays have the same dimensions and the dimension is 2
-    if original_data.ndim == reconstructed_data.ndim == 2:
-        print("Both data arrays have the same dimensions and are 2D.")
-    else:
-        print("The data arrays either have different dimensions or are not 2D.")
-    mse = mean_squared_error(original_data, reconstructed_data)
-    return mse
-
-def active_array_calc(original_data, reconstructed_data, z):
-    beta = 1.201
-    alpha = 3.0
-    T = original_data[:,:,:,3] - beta*z
-    T_reconstructed = reconstructed_data[:,:,:,3] - beta*z
-    q_s = np.exp(alpha*T)
-    q_s_reconstructed = np.exp(alpha*T)
-    rh = original_data[:,:,:,0]/q_s
-    rh_reconstructed = reconstructed_data[:,:,:,0]/q_s_reconstructed
-    mean_b = np.mean(original_data[:,:,:,3], axis=1, keepdims=True)
-    mean_b_reconstructed= np.mean(reconstructed_data[:,:,:,3], axis=1, keepdims=True)
-    b_anom = original_data[:,:,:,3] - mean_b
-    b_anom_reconstructed = reconstructed_data[:,:,:,3] - mean_b_reconstructed
-    w = original_data[:,:,:,1]
-    w_reconstructed = reconstructed_data[:,:,:,1]
-    
-    mask = (rh[:, :, :] >= 1) & (w[:, :, :] > 0) & (b_anom[:, :, :] > 0)
-    mask_reconstructed = (rh_reconstructed[:, :, :] >= 1) & (w_reconstructed[:, :, :] > 0) & (b_anom_reconstructed[:, :, :] > 0)
-    
-    active_array = np.zeros((original_data.shape[0], len(x), len(z)))
-    active_array[mask] = 1
-    active_array_reconstructed = np.zeros((original_data.shape[0], len(x), len(z)))
-    active_array_reconstructed[mask_reconstructed] = 1
-    
-    # Expand the mask to cover all features (optional, depending on use case)
-    mask_expanded       =  np.repeat(mask[:, :, :, np.newaxis], 4, axis=-1)  # Shape: (256, 64, 1)
-    mask_expanded_recon =  np.repeat(mask_reconstructed[:, :, :, np.newaxis], 4, axis=-1) # Shape: (256, 64, 1)
-    
-    return active_array, active_array_reconstructed, mask_expanded, mask_expanded_recon
-
-def ss_transform(data, scaler):
-    if data.ndim == 4: #len(time_vals), len(x), len(z), len(var)
-        data_reshape = data.reshape(-1, data.shape[-1])
-    else:
-        print('data needs to be 4 dimensions')
-    if data_reshape.ndim == 2:
-        print("data array is 2D.")
-    else:
-        print("data array is not 2D")
-        
-    data_scaled = scaler.transform(data_reshape)
-    data_scaled = data_scaled.reshape(data.shape)
-    
-    if data_scaled.ndim == 4:
-        print('scaled and reshaped to 4 dimensions')
-    else:
-        print('not scaled properly')
-        
-    return data_scaled
-    
-def ss_inverse_transform(data, scaler):
-    if data.ndim == 4: #len(time_vals), len(x), len(z), len(var)
-        data_reshape = data.reshape(-1, data.shape[-1])
-    else:
-        print('data needs to be 4 dimensions')
-    if data_reshape.ndim == 2:
-        print("data array is 2D.")
-    else:
-        print("data array is not 2D")
-        
-    print('shape before inverse scaling', np.shape(data_reshape))
-
-    data_unscaled = scaler.inverse_transform(data_reshape)
-    data_unscaled = data_unscaled.reshape(data.shape)
-    
-    if data_unscaled.ndim == 4:
-        print('unscaled and reshaped to 4 dimensions')
-    else:
-        print('not unscaled properly')
-        
-    return data_unscaled
 
 #### LOAD DATA AND POD ####
 variables = ['q_all', 'w_all', 'u_all', 'b_all']
@@ -987,6 +636,10 @@ gps        = [None]*ensemble
 # to print performance of every set of hyperparameters
 print_flag = False
 
+hyperparams_path = output_path+'/hyperparams/'
+if not os.path.exists(hyperparams_path):
+    os.makedirs(hyperparams_path)
+    print('made directory')
 
 # optimize ensemble networks (to account for the random initialization of the input and state matrices)
 for i in range(ensemble):
@@ -1043,7 +696,7 @@ for i in range(ensemble):
     # Full path for saving the file
     hyp_file = '_ESN_hyperparams_ens%i.json' % i
 
-    output_path_hyp = os.path.join(output_path, hyp_file)
+    output_path_hyp = os.path.join(hyperparams_path, hyp_file)
 
     hyps = {
     "test": i,
@@ -1059,7 +712,7 @@ for i in range(ensemble):
     
     fig, ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
     plot_convergence(res)
-    fig.savefig(output_path+'/convergence_realisation%i.png' % i)
+    fig.savefig(hyperparams_path+'/convergence_realisation%i.png' % i)
     plt.close()
 
 ##### visualise grid search #####
@@ -1131,21 +784,19 @@ validation_interval = True
 test_interval       = True
 
 if validation_interval:
-    ##### quick test #####
     print('VALIDATION (TEST)')
-    print(N_washout_val)
     N_test   = N_fo                    #number of intervals in the test set
     if reduce_domain:
-        N_tstart = N_washout_val
+        N_tstart = N_washout
     elif reduce_domain2:
-        N_tstart = N_washout_val
+        N_tstart = N_washout
     else:
-        N_tstart = 500                    #where the first test interval starts
+        N_tstart = N_washout                    #where the first test interval starts
     N_intt   = test_len*N_lyap            #length of each test set interval
+    N_gap    = N_intt
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-
     ensemble_test = ens
 
     ens_pred        = np.zeros((N_intt, dim, ensemble_test))
@@ -1155,6 +806,11 @@ if validation_interval:
     ens_ssim        = np.zeros((ensemble_test))
     ens_evr         = np.zeros((ensemble_test))
     ens_nrmse_plume = np.zeros((ensemble_test))
+
+    metrics_val_path = output_path+'/validation_metrics/'
+    if not os.path.exists(metrics_val_path):
+        os.makedirs(metrics_val_path)
+        print('made directory')
 
     for j in range(ensemble_test):
 
@@ -1257,7 +913,7 @@ if validation_interval:
             # Full path for saving the file
             output_file = 'ESN_test_metrics_ens%i_test%i.json' % (j,i)
 
-            output_path_met = os.path.join(output_path, output_file)
+            output_path_met = os.path.join(metrics_val_path, output_file)
 
             metrics = {
             "test": i,
@@ -1289,102 +945,26 @@ if validation_interval:
                     print('made directory')
 
                 if i<n_plot:
-                    if ensemble_test % 1 == 0:
+                    if j % 5 == 0:
                         
-                        #### modes prediction ####
-                        fig,ax =plt.subplots(len(indexes_to_plot),sharex=True, tight_layout=True)
+                        print('indexes_to_plot', indexes_to_plot)
                         print(np.shape(U_wash))
                         xx = np.arange(U_wash[:,0].shape[0])/N_lyap
-                        print(np.shape(xx))
-                        print(np.shape(xx), xx[0], xx[-1])
-                        for v in range(len(indexes_to_plot)):
-                            index = indexes_to_plot[v]
-                            ax[v].plot(xx,U_wash[:,index], 'b', label='True')
-                            ax[v].plot(xx,Uh_wash[:-1,index], '--r', label='ESN')
-                            ax[v].grid()
-                            ax[v].set_ylabel('mode %i' % (index+1))
-                        ax[-1].set_xlabel('Time[Lyapunov Times]')
-                        if i==0:
-                            ax[0].legend(ncol=2)
-                        fig.suptitle('washout_ens%i_test%i' % (j,i))
-                        fig.savefig(images_val_path+'/washout_validation_ens%i_test%i.png' % (j,i))
-                        plt.close()
+                        plot_modes_washout(U_wash, Uh_wash, xx, i, j, indexes_to_plot, images_val_path+'/washout_validation', Modes=True)
 
-                        fig,ax =plt.subplots(len(indexes_to_plot),sharex=True, tight_layout=True)
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                        for v in range(len(indexes_to_plot)):
-                            index = indexes_to_plot[v]
-                            ax[v].plot(xx,Y_t[:,index], 'b')
-                            ax[v].plot(xx,Yh_t[:,index], '--r')
-                            ax[v].grid()
-                            ax[v].set_ylabel('mode %i' % (index+1))
-                        ax[-1].set_xlabel('Time [Lyapunov Times]')
-                        fig.savefig(images_val_path+'/prediction_validation_ens%i_test%i.png' % (j,i))
-                        plt.close()
+                        plot_modes_prediction(Y_t, Yh_t, xx, i, j, indexes_to_plot, images_val_path+'/prediction_validation', Modes=True)
+                        plot_PH(Y_err, threshold_ph, xx, i, j, images_val_path+'/PH_validation')
                         
-                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
-                        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                        ax.plot(xx,Y_err, 'b')
-                        ax.axhline(y=threshold_ph, xmin=xx[0], xmax=xx[-1])
-                        ax.grid()
-                        ax.set_ylabel('PH')
-                        ax.set_xlabel('Time')
-                        fig.savefig(images_val_path+'/PH_validation_ens%i_test%i.png' % (j,i))
-                        plt.close()
-
-                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
-                        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                        ax.plot(np.linalg.norm(Xa1[:, :N_units], axis=1))
-                        ax.grid()
-                        ax.set_ylabel('res_states')
-                        fig.savefig(images_val_path+'/res_states_washout_ens%i_test%i.png' % (j,i))
-                        plt.close()
-
-                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
-                        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                        ax.plot(xx, np.linalg.norm(Xa2[:, :N_units], axis=1))
-                        ax.grid()
-                        ax.set_ylabel('res_states')
-                        fig.savefig(images_val_path+'/res_states_validation_ens%i_test%i.png' % (j,i))
-                        plt.close()
-
-                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
-                        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                        ax.plot(time_vals[N_tstart - N_washout_val +i*N_intt : N_tstart + i*N_intt], np.linalg.norm(Xa1[:-1, :N_units], axis=1), color='red')
-                        ax.plot(time_vals[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt], np.linalg.norm(Xa2[:, :N_units], axis=1), color='blue')
-                        ax.grid()
-                        ax.set_ylabel('res_norm')
-                        fig.savefig(images_val_path+'/resnorm_validation_ens%i_test%i.png' % (j,i))
-                        plt.close()
-
-                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
-                        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                        ax.plot(time_vals[N_tstart - N_washout_val +i*N_intt : N_tstart + i*N_intt], np.linalg.norm(U_wash, axis=1), color='red')
-                        ax.plot(time_vals[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt], np.linalg.norm(Y_t, axis=1), color='blue')
-                        ax.grid()
-                        ax.set_ylabel('input_norm')
-                        fig.savefig(images_val_path+'/inputnorm_validation_ens%i_test%i.png' % (j,i))
-                        plt.close()
+                        plot_reservoir_states_norm(Xa1, Xa2, time_vals, N_tstart, N_washout_val, i, j, N_gap, N_intt, N_units, images_val_path+'/resnorm_validation')
+                        plot_input_states_norm(U_wash, Y_t, time_vals, N_tstart, N_washout_val, i, j, N_gap, N_intt, images_val_path+'/inputnorm_validation')
 
                         # reconstruction after scaling
                         print('reconstruction and error plot')
-                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, xx, 'ESN_validation_ens%i_test%i' %(j,i))
+                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, x, z, xx, names, images_val_path+'/ESN_validation_ens%i_test%i' %(j,i))
 
-                        if len(variables) == 4:
-                            fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
-                            c1 = ax[0].contourf(xx, x, active_array[:,:, 32].T, cmap='Reds')
-                            fig.colorbar(c1, ax=ax[0])
-                            ax[0].set_title('true')
-                            c2 = ax[1].contourf(xx, x, active_array_reconstructed[:,:, 32].T, cmap='Reds')
-                            fig.colorbar(c1, ax=ax[1])
-                            ax[1].set_title('reconstruction')
-                            for v in range(2):
-                                ax[v].set_xlabel('time')
-                                ax[v].set_ylabel('x')
-                            fig.savefig(images_val_path+f"/active_plumes_validation_ens{j}_test{i}.png")
-                            plt.close()
-                        else:
-                            print('no image')
+                        plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_val_path+'/active_plumes_validation')
+
 
         # accumulation for each ensemble member
         ens_nrmse[j]       = ens_nrmse[j] / N_test
@@ -1425,9 +1005,10 @@ if test_interval:
     elif reduce_domain2:
         N_tstart = N_train + N_washout_val
     else:
-        N_tstart = 3300 #850    #where the first test interval starts
+        N_tstart = N_train + N_washout_val #850    #where the first test interval starts
     N_intt   = test_len*N_lyap             #length of each test set interval
-
+    N_gap    = N_intt
+    
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
 
@@ -1440,6 +1021,11 @@ if test_interval:
     ens_ssim        = np.zeros((ensemble_test))
     ens_evr         = np.zeros((ensemble_test))
     ens_nrmse_plume = np.zeros((ensemble_test))
+
+    metrics_test_path = output_path+'/test_metrics/'
+    if not os.path.exists(metrics_test_path):
+        os.makedirs(metrics_test_path)
+        print('made directory')
 
     for j in range(ensemble_test):
 
@@ -1543,7 +1129,7 @@ if test_interval:
             # Full path for saving the file
             output_file = 'ESN_test_metrics_ens%i_test%i.json' % (j,i)
 
-            output_path_met = os.path.join(output_path, output_file)
+            output_path_met = os.path.join(metrics_test_path, output_file)
 
             metrics = {
             "test": i,
@@ -1573,102 +1159,28 @@ if test_interval:
                 if not os.path.exists(images_test_path):
                     os.makedirs(images_test_path)
                     print('made directory')
-
+                
                 if i<n_plot:
-                    if ensemble_test % 1 == 0:
+                    if j % 5 == 0:
                         
-                        #### modes prediction ####
-                        fig,ax =plt.subplots(len(indexes_to_plot),sharex=True, tight_layout=True)
-                        xx = np.arange(U_wash[:,-2].shape[0])/N_lyap
-                        print(np.shape(xx), xx[0], xx[-1])
-                        for v in range(len(indexes_to_plot)):
-                            index = indexes_to_plot[v]
-                            ax[v].plot(xx,U_wash[:,index], 'b', label='True')
-                            ax[v].plot(xx,Uh_wash[:-1,index], '--r', label='ESN')
-                            ax[v].grid()
-                            ax[v].set_ylabel('mode %i' % (index+1))
-                        ax[-1].set_xlabel('Time[Lyapunov Times]')
-                        if i==0:
-                            ax[0].legend(ncol=2)
-                        fig.suptitle('washout_ens%i_test%i' % (j,i))
-                        fig.savefig(images_test_path+'/washout_ens%i_test%i.png' % (j,i))
-                        plt.close()
+                        print('indexes_to_plot', indexes_to_plot)
+                        print(np.shape(U_wash))
+                        xx = np.arange(U_wash[:,0].shape[0])/N_lyap
+                        plot_modes_washout(U_wash, Uh_wash, xx, i, j, indexes_to_plot, images_test_path+'/washout_test', Modes=False)
 
-                        fig,ax =plt.subplots(len(indexes_to_plot),sharex=True, tight_layout=True)
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                        for v in range(len(indexes_to_plot)):
-                            index = indexes_to_plot[v]
-                            ax[v].plot(xx,Y_t[:,index], 'b')
-                            ax[v].plot(xx,Yh_t[:,index], '--r')
-                            ax[v].grid()
-                            ax[v].set_ylabel('mode %i' % (index+1))
-                        ax[-1].set_xlabel('Time [Lyapunov Times]')
-                        fig.savefig(images_test_path+'/prediction_ens%i_test%i.png' % (j,i))
-                        plt.close()
+                        plot_modes_prediction(Y_t, Yh_t, xx, i, j, indexes_to_plot, images_test_path+'/prediction_test', Modes=False)
+                        plot_PH(Y_err, threshold_ph, xx, i, j, images_val_path+'/PH_validation')
                         
-                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
-                        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                        ax.plot(xx,Y_err, 'b')
-                        ax.axhline(y=threshold_ph, xmin=xx[0], xmax=xx[-1])
-                        ax.grid()
-                        ax.set_ylabel('PH')
-                        ax.set_xlabel('Time')
-                        fig.savefig(images_test_path+'/PH_ens%i_test%i.png' % (j,i))
-                        plt.close()
-
-                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
-                        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                        ax.plot(np.linalg.norm(Xa1[:, :N_units], axis=1))
-                        ax.grid()
-                        ax.set_ylabel('res_states')
-                        fig.savefig(images_test_path+'/res_states_test_washout_ens%i_test%i.png' % (j,i))
-                        plt.close()
-
-                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
-                        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                        ax.plot(xx, np.linalg.norm(Xa2[:, :N_units], axis=1))
-                        ax.grid()
-                        ax.set_ylabel('res_states')
-                        fig.savefig(images_test_path+'/res_states_test_ens%i_test%i.png' % (j,i))
-                        plt.close()
-
-                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
-                        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                        ax.plot(time_vals[N_tstart - N_washout_val +i*N_intt : N_tstart + i*N_intt], np.linalg.norm(Xa1[:-1, :N_units], axis=1), color='red')
-                        ax.plot(time_vals[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt], np.linalg.norm(Xa2[:, :N_units], axis=1), color='blue')
-                        ax.grid()
-                        ax.set_ylabel('res_norm')
-                        fig.savefig(images_test_path+'/resnorm_test_ens%i_test%i.png' % (j,i))
-                        plt.close()
-
-                        fig,ax =plt.subplots(1,sharex=True, tight_layout=True)
-                        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                        ax.plot(time_vals[N_tstart - N_washout_val +i*N_intt : N_tstart + i*N_intt], np.linalg.norm(U_wash, axis=1), color='red')
-                        ax.plot(time_vals[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt], np.linalg.norm(Y_t, axis=1), color='blue')
-                        ax.grid()
-                        ax.set_ylabel('input_norm')
-                        fig.savefig(images_test_path+'/inputnorm_test_ens%i_test%i.png' % (j,i))
-                        plt.close()
+                        plot_reservoir_states_norm(Xa1, Xa2, time_vals, N_tstart, N_washout_val, i, j, N_gap, N_intt, N_units, images_test_path+'/resnorm_test')
+                        plot_input_states_norm(U_wash, Y_t, time_vals, N_tstart, N_washout_val, i, j, N_gap, N_intt, images_test_path+'/inputnorm_test')
 
                         # reconstruction after scaling
                         print('reconstruction and error plot')
-                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, xx, 'ESN_ens%i_test%i' %(j,i))
+                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, x, z, xx, names, images_test_path+'/ESN_validation_ens%i_test%i' %(j,i))
 
-                        if len(variables) == 4:
-                            fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
-                            c1 = ax[0].contourf(xx, x, active_array[:,:, 32].T, cmap='Reds')
-                            fig.colorbar(c1, ax=ax[0])
-                            ax[0].set_title('true')
-                            c2 = ax[1].contourf(xx, x, active_array_reconstructed[:,:, 32].T, cmap='Reds')
-                            fig.colorbar(c1, ax=ax[1])
-                            ax[1].set_title('reconstruction')
-                            for v in range(2):
-                                ax[v].set_xlabel('time')
-                                ax[v].set_ylabel('x')
-                            fig.savefig(images_test_path+f"/active_plumes_ens{j}_test{i}.png")
-                            plt.close()
-                        else:
-                            print('no image')
+                        plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_test_path+'/active_plumes_test')
+
 
         # accumulation for each ensemble member
         ens_nrmse[j]       = ens_nrmse[j] / N_test
