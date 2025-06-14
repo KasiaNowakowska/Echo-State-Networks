@@ -105,6 +105,7 @@ with open(ESN_hyperparam_file, "r") as f:
     alpha = hyperparams["alpha"]
     alpha0 = hyperparams["alpha0"]
     n_forward = hyperparams["n_forward"]
+    threshold_ph = hyperparams.get("threshold_ph", 0.3)
 
 def load_data_set(file, names, snapshots):
     with h5py.File(file, 'r') as hf:
@@ -587,15 +588,15 @@ N_units      = Nr #neurons
 connectivity = 3   
 sparseness   = 1 - connectivity/(N_units-1) 
 
-tikh = np.array([1,1e-1,1e-2,1e-3,1e-4])  # Tikhonov factor (optimize among the values in this list)
+tikh = np.array([1e-1,1e-3,1e-6,1e-9])  # Tikhonov factor (optimize among the values in this list)
 
 #### hyperparamter search ####
-threshold_ph = 0.3
+threshold_ph = threshold_ph
 n_in  = 0           #Number of Initial random points
 
-spec_in     = 0.8    #range for hyperparameters (spectral radius and input scaling)
-spec_end    = 0.99
-in_scal_in  = np.log10(0.5)
+spec_in     = 0.1    #range for hyperparameters (spectral radius and input scaling)
+spec_end    = 1.0
+in_scal_in  = np.log10(0.1)
 in_scal_end = np.log10(5.)
 
 # In case we want to start from a grid_search, the first n_grid_x*n_grid_y points are from grid search
@@ -853,7 +854,7 @@ if validation_interval:
     else:
         N_tstart = N_washout                    #where the first test interval starts
     N_intt   = test_len*N_lyap            #length of each test set interval
-    N_gap    = N_intt
+    N_gap    = int(3*N_lyap)
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
@@ -1052,7 +1053,7 @@ if test_interval:
     else:
         N_tstart = N_train + N_washout #850    #where the first test interval starts
     N_intt   = test_len*N_lyap             #length of each test set interval
-    N_gap    = N_intt
+    N_gap    = int(3*N_lyap)
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))

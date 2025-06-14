@@ -629,9 +629,9 @@ print('norm:', norm)
 print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
-test_interval = True
-validation_interval = False
-statistics_interval = True
+test_interval = False
+validation_interval = True
+statistics_interval = False
 fourier = False
 vertical_profiles = False
 reservoir_investigation = False
@@ -648,7 +648,7 @@ if validation_interval:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.3
+    threshold_ph = 0.1
 
     ensemble_test = ens
 
@@ -861,7 +861,7 @@ if test_interval:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.3
+    threshold_ph = 0.1
 
     ensemble_test = ens
 
@@ -1070,7 +1070,7 @@ if statistics_interval:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.3
+    threshold_ph = 0.1
 
     ensemble_test = ens
 
