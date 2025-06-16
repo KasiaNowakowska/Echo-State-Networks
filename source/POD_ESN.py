@@ -104,6 +104,7 @@ with open(hyperparam_file, "r") as f:
     alpha = hyperparams["alpha"]
     alpha0 = hyperparams["alpha0"]
     n_forward = hyperparams["n_forward"]
+    threshold_ph = hyperparams.get("threshold_ph", 0.2)
 
 def load_data(file, name):
     with h5py.File(file, 'r') as hf:
@@ -519,20 +520,20 @@ N_units      = Nr #neurons
 connectivity = 3
 sparseness   = 1 - connectivity/(N_units-1)
 
-tikh = np.array([1,1e-1,1e-2,1e-3,1e-4]) #np.array([1e-3,1e-6,1e-9,1e-12])  # Tikhonov factor (optimize among the values in this list)
+tikh = np.array([1e-1,1e-3,1e-6,1e-9]) #np.array([1e-3,1e-6,1e-9,1e-12])  # Tikhonov factor (optimize among the values in this list)
 
 print('tikh:', tikh)
 print('N_r:', N_units, 'sparsity:', sparseness)
 print('bias_in:', bias_in, 'bias_out:', bias_out)
 
 #### Grid Search and BO #####
-threshold_ph = 0.3
+threshold_ph = threshold_ph
 n_in  = 0           #Number of Initial random points
 
-spec_in     = .8    #range for hyperparameters (spectral radius and input scaling)
-spec_end    = .99  
-in_scal_in  = np.log10(0.8)
-in_scal_end = np.log10(2.5)
+spec_in     = 0.1    #range for hyperparameters (spectral radius and input scaling)
+spec_end    = 1  
+in_scal_in  = np.log10(0.5)
+in_scal_end = np.log10(5)
 
 # In case we want to start from a grid_search, the first n_grid_x*n_grid_y points are from grid search
 n_grid_x = grid_x

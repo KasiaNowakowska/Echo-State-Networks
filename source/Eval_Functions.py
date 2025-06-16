@@ -41,9 +41,6 @@ def plot_reconstruction(original, reconstruction, z_value, t_value, time_vals, f
 def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x, z, time_vals, names, file_str):
     abs_error = np.abs(original-reconstruction)
     residual  = original - reconstruction
-    vmax_res = np.max(np.abs(residual))  # Get maximum absolute value
-    vmin_res = -vmax_res
-    abs_error = np.abs(original-reconstruction)
     if original.ndim == 3: #len(time_vals), len(x), len(z)
         fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
         minm = min(np.min(original[t_value, :, :]), np.min(reconstruction[t_value, :, :]))
@@ -52,7 +49,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
         fig.colorbar(c1, ax=ax[0])
         ax[0].set_title('true')
         c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:].T, vmin=minm, vmax=maxm)
-        fig.colorbar(c1, ax=ax[1])
+        fig.colorbar(c2, ax=ax[1])
         ax[1].set_title('reconstruction')
         c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:].T, cmap='Reds')
         fig.colorbar(c3, ax=ax[2])
@@ -71,7 +68,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
         fig.colorbar(c1, ax=ax[0])
         ax[0].set_title('true')
         c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value].T)
-        fig.colorbar(c1, ax=ax[1])
+        fig.colorbar(c2, ax=ax[1])
         ax[1].set_title('reconstruction')
         c3 = ax[2].pcolormesh(time_vals, x, abs_error[:, :, z_value].T, cmap='Reds')
         fig.colorbar(c3, ax=ax[2])
@@ -80,6 +77,50 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             ax[v].set_ylabel('x')
         ax[-1].set_xlabel('time')
         fig.savefig(file_str+'_snapshot_recon_error.png')
+
+        fig, ax = plt.subplots(3, figsize=(12,6), tight_layout=True, sharex=True)
+        minm = min(np.min(original[t_value, :, :]), np.min(reconstruction[t_value, :, :]))
+        maxm = max(np.max(original[t_value, :, :]), np.max(reconstruction[t_value, :, :]))
+        vmax_res = np.max(np.abs(residual[t_value,:,:]))  # Get maximum absolute value
+        vmin_res = -vmax_res
+        c1 = ax[0].pcolormesh(x, z, original[t_value,:,:].T, vmin=minm, vmax=maxm)
+        fig.colorbar(c1, ax=ax[0])
+        ax[0].set_title('true', fontsize=18)
+        c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:].T, vmin=minm, vmax=maxm)
+        fig.colorbar(c2, ax=ax[1])
+        ax[1].set_title('reconstruction', fontsize=18)
+        c3 = ax[2].pcolormesh(x, z, residual[t_value,:,:].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
+        fig.colorbar(c3, ax=ax[2])
+        ax[2].set_title('error', fontsize=18)
+        for v in range(3):
+            ax[v].set_ylabel('z', fontsize=16)
+            ax[v].tick_params(axis='both', labelsize=12)
+        ax[-1].set_xlabel('x', fontsize=16)
+        fig.savefig(file_str+'_snapshot_recon_residual.png')
+
+        fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
+        minm = min(np.min(original[:, :, z_value]), np.min(reconstruction[:, :, z_value]))
+        maxm = max(np.max(original[:, :, z_value]), np.max(reconstruction[:, :, z_value]))
+        vmax_res = np.max(np.abs(residual[:,:,z_value]))  # Get maximum absolute value
+        vmin_res = -vmax_res
+        print(minm, maxm)
+        print("time shape:", np.shape(time_vals))
+        print("x shape:", np.shape(x))
+        print("original[:, :, z_value] shape:", original[:, :, z_value].T.shape)
+        c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value].T, vmin=minm, vmax=maxm)
+        fig.colorbar(c1, ax=ax[0])
+        ax[0].set_title('true', fontsize=18)
+        c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value].T, vmin=minm, vmax=maxm)
+        fig.colorbar(c2, ax=ax[1])
+        ax[1].set_title('reconstruction', fontsize=18)
+        c3 = ax[2].pcolormesh(time_vals, x,  residual[:,:,z_value].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
+        fig.colorbar(c3, ax=ax[2])
+        ax[2].set_title('error', fontsize=18)
+        for v in range(3):
+            ax[v].set_ylabel('x', fontsize=16)
+            ax[v].tick_params(axis='both', labelsize=12)
+        ax[-1].set_xlabel('time', fontsize=16)
+        fig.savefig(file_str+'_hovmoller_recon_residual.png')
     
     elif original.ndim == 4: #len(time_vals), len(x), len(z), var
         for i in range(original.shape[3]):
@@ -129,6 +170,8 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             fig, ax = plt.subplots(3, figsize=(12,6), tight_layout=True, sharex=True)
             minm = min(np.min(original[t_value, :, :, i]), np.min(reconstruction[t_value, :, :, i]))
             maxm = max(np.max(original[t_value, :, :, i]), np.max(reconstruction[t_value, :, :, i]))
+            vmax_res = np.max(np.abs(residual[t_value,:,:,i]))  # Get maximum absolute value
+            vmin_res = -vmax_res
             c1 = ax[0].pcolormesh(x, z, original[t_value,:,:,i].T, vmin=minm, vmax=maxm)
             fig.colorbar(c1, ax=ax[0])
             ax[0].set_title('true', fontsize=18)
@@ -147,6 +190,8 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
             minm = min(np.min(original[:, :, z_value,i]), np.min(reconstruction[:, :, z_value,i]))
             maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
+            vmax_res = np.max(np.abs(residual[:,:,z_value,i]))  # Get maximum absolute value
+            vmin_res = -vmax_res
             print(np.max(original[:, :, z_value,i]))
             print(minm, maxm)
             print("time shape:", np.shape(time_vals))
@@ -286,9 +331,9 @@ def active_array_calc(original_data, reconstructed_data, z):
     mask = (rh[:, :, :] >= 1) & (w[:, :, :] > 0) & (b_anom[:, :, :] > 0)
     mask_reconstructed = (rh_reconstructed[:, :, :] >= 1) & (w_reconstructed[:, :, :] > 0) & (b_anom_reconstructed[:, :, :] > 0)
     
-    active_array = np.zeros((original_data.shape[0], len(x), len(z)))
+    active_array = np.zeros((original_data.shape[0], original_data.shape[1], len(z)))
     active_array[mask] = 1
-    active_array_reconstructed = np.zeros((original_data.shape[0], len(x), len(z)))
+    active_array_reconstructed = np.zeros((original_data.shape[0], original_data.shape[1], len(z)))
     active_array_reconstructed[mask_reconstructed] = 1
     
     # Expand the mask to cover all features (optional, depending on use case)

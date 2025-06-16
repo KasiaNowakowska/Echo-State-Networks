@@ -780,9 +780,9 @@ for i in range(N_parallel):
                                             custom_objects={"PerPad2D": PerPad2D})
 
 validation_data = False
-test_data = True
-all_data = False
-visualisation = True
+test_data = False
+all_data = True
+visualisation = False
 
 if validation_data:
     print('VALIDATION DATA')
@@ -945,69 +945,91 @@ if test_data:
             plt.close()
 
 if all_data:
-    #### all data ####
-    U_scaled = ss_transform(U, scaler)
-    truth = U_scaled
-    decoded = model(U_scaled,a,b)[1]
+    chunk_size = 1000
+    timesteps = 16000
+    total_chunks = timesteps // chunk_size
 
-    decoded = decoded.numpy()
-    decoded_unscaled = ss_inverse_transform(decoded, scaler)
-    truth_unscaled = ss_inverse_transform(truth, scaler)
+    metrics_list = []
+    for chunk_idx in range(total_chunks):
+        start = chunk_idx * chunk_size
+        end = start + chunk_size
+        print(f"Processing chunk {chunk_idx+1}/{total_chunks}: timesteps {start} to {end}")
 
-    #SSIM
-    test_ssim = compute_ssim_for_4d(truth_unscaled, decoded_unscaled)
-    #MSE
-    mse = MSE(truth_unscaled, decoded_unscaled)
-    #NRMSE
-    nrmse = NRMSE(truth_unscaled, decoded_unscaled)
-    #EVR 
-    evr = EVR_recon(truth_unscaled, decoded_unscaled)
+        U_chunk = U[start:end]
+        U_scaled = ss_transform(U_chunk, scaler)
+        truth = U_scaled
 
-    print("nrmse:", nrmse)
-    print("mse:", mse)
-    print("test_ssim:", test_ssim)
-    print("EVR:", evr)
+        decoded = model(U_scaled, a, b)[1].numpy()
+        decoded_unscaled = ss_inverse_transform(decoded, scaler)
+        truth_unscaled = ss_inverse_transform(truth, scaler)
 
-    #Plume NRMSE
-    if len(variables) == 4:
-        active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(truth_unscaled, decoded_unscaled, z)
-        print(np.shape(active_array))
-        print(np.shape(mask))
-        nrmse_plume             = NRMSE(truth_unscaled[:,:,:,:][mask], decoded_unscaled[:,:,:,:][mask])
+        # Compute metrics
+        test_ssim = compute_ssim_for_4d(truth_unscaled, decoded_unscaled)
+        mse = MSE(truth_unscaled, decoded_unscaled)
+        nrmse = NRMSE(truth_unscaled, decoded_unscaled)
+        evr = EVR_recon(truth_unscaled, decoded_unscaled)
 
-    import json
-    # Full path for saving the file
-    output_file = "test_metrics_all_data.json"
+        chunk_metrics = {
+            "chunk": chunk_idx,
+            "MSE": mse,
+            "NRMSE": nrmse,
+            "SSIM": test_ssim,
+            "EVR": evr
+        }
 
+        # Optional plume NRMSE if variables == 4
+        if len(variables) == 4:
+            _, _, mask, _ = active_array_calc(truth_unscaled, decoded_unscaled, z)
+            nrmse_plume = NRMSE(truth_unscaled[mask], decoded_unscaled[mask])
+            chunk_metrics["plume NRMSE"] = nrmse_plume
+
+        # Save metrics per chunk
+        metrics_list.append(chunk_metrics)
+
+        # Save reconstruction plot and line plot for a sample timestep
+        if chunk_idx == 0:  # Example: only for first chunk
+            plot_reconstruction_and_error(
+                truth_unscaled[:500],
+                decoded_unscaled[:500],
+                32, 75,
+                f"/test_all_chunk_{chunk_idx}"
+            )
+
+            fig, ax = plt.subplots(1)
+            ax.plot(decoded_unscaled[0, :, 32, 0], label='dec')
+            ax.plot(truth_unscaled[0, :, 32, 0], label='true')
+            plt.legend()
+            fig.savefig(os.path.join(output_path, f'lines_chunk_{chunk_idx}.png'))
+
+    # Save all metrics to JSON after loop
+    output_file = "test_metrics_all_data_chunked.json"
     output_path_met = os.path.join(output_path, output_file)
 
-    metrics = {
-    "MSE": mse,
-    "NRMSE": nrmse,
-    "SSIM": test_ssim,
-    "EVR": evr,
-    "plume NRMSE": nrmse_plume,
+    with open(output_path_met, "w") as f:
+        json.dump(metrics_list, f, indent=4)
+
+    # Compute averaged metrics across all chunks
+    average_metrics = {}
+    metric_keys = [k for k in metrics_list[0].keys() if k != "chunk"]
+
+    for key in metric_keys:
+        values = [m[key] for m in metrics_list if key in m]
+        average_metrics[key] = sum(values) / len(values)
+
+    # Save both raw chunk metrics and averages
+    final_metrics = {
+        "chunk_metrics": metrics_list,
+        "average_metrics": average_metrics
     }
 
-    with open(output_path_met, "w") as file:
-        json.dump(metrics, file, indent=4)
+    # Save to JSON
+    output_file = "test_metrics_all_data_chunked.json"
+    output_path_met = os.path.join(output_path, output_file)
 
-    print('shape of truth', np.shape(truth_unscaled))
-    print('shape of prediction', np.shape(decoded_unscaled))
+    with open(output_path_met, "w") as f:
+        json.dump(final_metrics, f, indent=4)
 
-    n = 1
-    skips = 250
-    for i in range(n):
-        index = 0 + skips*i
-
-        #plot_reconstruction(truth_unscaled, decoded_unscaled, 32, index, f"/test_{index}_")
-        plot_reconstruction_and_error(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], 32, 75, f"/test_all")
-
-        fig, ax = plt.subplots(1)
-        ax.plot(decoded_unscaled[index, :, 32, 0], label='dec')
-        ax.plot(truth_unscaled[index, :,32,0], label='true')
-        plt.legend()
-        fig.savefig(output_path+'/lines%i.png' % i)
+    print("Saved averaged and per-chunk metrics.")
 
 if visualisation:
     print('VISUALISATION')

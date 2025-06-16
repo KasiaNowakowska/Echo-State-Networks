@@ -415,8 +415,8 @@ print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
 test_interval = True
-validation_interval = True
-statistics_interval = True
+validation_interval = False
+statistics_interval = False
 
 if validation_interval:
     print('VALIDATION (TEST)')
@@ -430,7 +430,7 @@ if validation_interval:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.3
+    threshold_ph = 0.1
 
     ensemble_test = ens
 
@@ -582,7 +582,7 @@ if validation_interval:
 
                         # reconstruction after scaling
                         print('reconstruction and error plot')
-                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, x, z, xx, names, images_val_path+'/ESN_validation_ens%i_test%i' %(j,i))
+                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, int(0.5*N_lyap), x, z, xx, names, images_val_path+'/ESN_validation_ens%i_test%i' %(j,i))
 
                         plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_val_path+'/active_plumes_validation')
 
@@ -624,13 +624,13 @@ if test_interval:
         N_tstart = N_washout + N_train
     else:
         N_tstart = int(N_washout + N_train)  #where the first test interval starts
-    N_intt   = test_len*N_lyap             #length of each test set interval
+    N_intt   = 1*N_lyap             #length of each test set interval
     N_gap    = int(test_len*N_lyap)
     #N_washout_val = 4*N_lyap
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.3
+    threshold_ph = 0.1
 
     ensemble_test = ens
 
@@ -642,11 +642,11 @@ if test_interval:
     ens_evr         = np.zeros((ensemble_test))
     ens_nrmse_plume = np.zeros((ensemble_test))
 
-    images_test_path = output_path+'/test_images/'
+    images_test_path = output_path+'/test_images_1LT/'
     if not os.path.exists(images_test_path):
         os.makedirs(images_test_path)
         print('made directory')
-    metrics_test_path = output_path+'/test_metrics/'
+    metrics_test_path = output_path+'/test_metrics_1LT/'
     if not os.path.exists(metrics_test_path):
         os.makedirs(metrics_test_path)
         print('made directory')
@@ -803,11 +803,11 @@ if test_interval:
 
                         # reconstruction after scaling
                         print('reconstruction and error plot')
-                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, x, z, xx, names, images_test_path+'/ESN_validation_ens%i_test%i' %(j,i))
+                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, int(0.5*N_lyap), x, z, xx, names, images_test_path+'/ESN_validation_ens%i_test%i' %(j,i))
 
                         plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_test_path+'/active_plumes_test')
                         
-                        plot_global_prediction_ts(PODtruth_global, predictions_global, xx, i, j, stats_path+'/global_prediciton')
+                        plot_global_prediction_ts(PODtruth_global, predictions_global, xx, i, j, images_test_path+'/global_prediciton')
                         #plot_global_prediction_ps(PODtruth_global, predictions_global, i, j, stats_path+'/global_prediciton')
 
         # accumulation for each ensemble member
@@ -818,7 +818,7 @@ if test_interval:
         ens_PH2[j]         = ens_PH2[j] / N_test  
              
     # Full path for saving the file
-    output_file_ALL = 'ESN_test_metrics_all.json' 
+    output_file_ALL = 'ESN_test_metrics1LT_all.json' 
 
     output_path_met_ALL = os.path.join(output_path, output_file_ALL)
 
@@ -860,7 +860,7 @@ if statistics_interval:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.3
+    threshold_ph = 0.1
 
     ensemble_test = ensemble_test
 

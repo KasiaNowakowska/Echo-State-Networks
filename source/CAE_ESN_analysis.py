@@ -630,8 +630,8 @@ print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
 test_interval = False
-validation_interval = True
-statistics_interval = False
+validation_interval = False
+statistics_interval = True
 fourier = False
 vertical_profiles = False
 reservoir_investigation = False
@@ -902,7 +902,7 @@ if test_interval:
         plot = True
         Plotting = True
         if plot:
-            n_plot = 3
+            n_plot = 20
             plt.rcParams["figure.figsize"] = (15,3*n_plot)
             plt.figure()
             plt.tight_layout()
@@ -1161,7 +1161,7 @@ if statistics_interval:
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
                         ### global prediction ###
                         plot_global_prediction_ts(PODtruth_global, predictions_global, xx, i, j, stats_path+'/global_prediciton')
-                        plot_global_prediction_ps(PODtruth_global, predictions_global, i, j, stats_path+'/global_prediciton')
+                        plot_global_prediction_ps(PODtruth_global, predictions_global, i, j, stats_path+'/global_prediciton_ps')
 
             stats_pdf_modes(Y_t, Yh_t, indexes_to_plot, i, j, stats_path+'/stats_pdf_modes', Modes=False)
             stats_pdf_global(PODtruth_global, predictions_global, i, j, stats_path+'/stats_pdf_global')

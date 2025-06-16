@@ -597,7 +597,7 @@ n_in  = 0           #Number of Initial random points
 spec_in     = 0.1    #range for hyperparameters (spectral radius and input scaling)
 spec_end    = 1.0
 in_scal_in  = np.log10(0.1)
-in_scal_end = np.log10(5.)
+in_scal_end = np.log10(5.0)
 
 # In case we want to start from a grid_search, the first n_grid_x*n_grid_y points are from grid search
 n_grid_x = grid_x
@@ -1197,7 +1197,7 @@ if test_interval:
                     print('made directory')
 
                 if i<n_plot:
-                    if j % 5 == 0:
+                    if j % 2 == 0:
                         
                         print('indexes_to_plot', indexes_to_plot)
                         print(np.shape(U_wash))
