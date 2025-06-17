@@ -416,7 +416,7 @@ print('shape of norm:', np.shape(norm))
 
 test_interval = True
 validation_interval = False
-statistics_interval = False
+statistics_interval = True
 
 if validation_interval:
     print('VALIDATION (TEST)')
@@ -624,7 +624,7 @@ if test_interval:
         N_tstart = N_washout + N_train
     else:
         N_tstart = int(N_washout + N_train)  #where the first test interval starts
-    N_intt   = 1*N_lyap             #length of each test set interval
+    N_intt   = 3*N_lyap             #length of each test set interval
     N_gap    = int(test_len*N_lyap)
     #N_washout_val = 4*N_lyap
 
@@ -642,11 +642,11 @@ if test_interval:
     ens_evr         = np.zeros((ensemble_test))
     ens_nrmse_plume = np.zeros((ensemble_test))
 
-    images_test_path = output_path+'/test_images_1LT/'
+    images_test_path = output_path+'/test_images/'
     if not os.path.exists(images_test_path):
         os.makedirs(images_test_path)
         print('made directory')
-    metrics_test_path = output_path+'/test_metrics_1LT/'
+    metrics_test_path = output_path+'/test_metrics/'
     if not os.path.exists(metrics_test_path):
         os.makedirs(metrics_test_path)
         print('made directory')
@@ -818,7 +818,7 @@ if test_interval:
         ens_PH2[j]         = ens_PH2[j] / N_test  
              
     # Full path for saving the file
-    output_file_ALL = 'ESN_test_metrics1LT_all.json' 
+    output_file_ALL = 'ESN_test_metrics_all.json' 
 
     output_path_met_ALL = os.path.join(output_path, output_file_ALL)
 
@@ -948,7 +948,7 @@ if statistics_interval:
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
                         ### global prediction ###
                         plot_global_prediction_ts(PODtruth_global, predictions_global, xx, i, j, stats_path+'/global_prediciton')
-                        plot_global_prediction_ps(PODtruth_global, predictions_global, i, j, stats_path+'/global_prediciton')
+                        plot_global_prediction_ps(PODtruth_global, predictions_global, i, j, stats_path+'/global_prediciton_ts')
 
             stats_pdf_modes(Y_t, Yh_t, indexes_to_plot, i, j, stats_path+'/stats_pdf_modes', Modes=False)
             stats_pdf_global(PODtruth_global, predictions_global, i, j, stats_path+'/stats_pdf_global')

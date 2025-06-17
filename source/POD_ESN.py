@@ -530,8 +530,8 @@ print('bias_in:', bias_in, 'bias_out:', bias_out)
 threshold_ph = threshold_ph
 n_in  = 0           #Number of Initial random points
 
-spec_in     = 0.1    #range for hyperparameters (spectral radius and input scaling)
-spec_end    = 1  
+spec_in     = 0.5    #range for hyperparameters (spectral radius and input scaling)
+spec_end    = 1.2 
 in_scal_in  = np.log10(0.5)
 in_scal_end = np.log10(5)
 
