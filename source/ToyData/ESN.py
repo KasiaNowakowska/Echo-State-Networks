@@ -575,7 +575,7 @@ u_mean = U_data.mean(axis=0)
 
 # standardisation 
 norm_std = U_data.std(axis=0)
-normalisation = 'standard' #on, off, standard
+normalisation = 'on' #on, off, standard
 
 print('norm', norm)
 print('u_mean', u_mean)
@@ -634,12 +634,12 @@ print('N_r:', N_units, 'sparsity:', sparseness)
 print('bias_in:', bias_in, 'bias_out:', bias_out)
 
 #### Grid Search and BO #####
-threshold_ph = 0.3
+threshold_ph = 0.2
 n_in  = 0           #Number of Initial random points
 
-spec_in     = .7    #range for hyperparameters (spectral radius and input scaling)
-spec_end    = 0.99   
-in_scal_in  = np.log10(0.05)
+spec_in     = .1    #range for hyperparameters (spectral radius and input scaling)
+spec_end    = 1   
+in_scal_in  = np.log10(0.1)
 in_scal_end = np.log10(5.0)
 
 # In case we want to start from a grid_search, the first n_grid_x*n_grid_y points are from grid search

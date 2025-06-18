@@ -35,8 +35,8 @@ initial_state = [1.0, 1.0, 1.0]
 
 # Time span
 t_start = 0.0
-t_end = 100
-num_points = 10000
+t_end = 5000
+num_points = 130000
 t_span = np.linspace(t_start, t_end, num_points)
 dt_Lorenz = (t_end-t_start)/num_points
 print('dt_Lorenz', dt_Lorenz)
@@ -51,7 +51,7 @@ y_values = solution.y[1]
 z_values = solution.y[2]
 print(np.shape(x_values))
 
-amplitude_vals = x_values[5000:10000:5]
+amplitude_vals = x_values[5000:130000:5]
 print(np.shape(amplitude_vals))
 dt_amplitude = 5 * dt_Lorenz
 print('dt_amplitude', dt_amplitude)
@@ -64,10 +64,16 @@ ax.set_ylabel('amplitude')
 ax.set_xlabel('time')
 fig.savefig(output_path+'/LorenzAmplitude.png')
 
+fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
+ax.plot(total_time_amplitude[:1000], amplitude_vals[:1000])
+ax.set_ylabel('amplitude')
+ax.set_xlabel('time')
+fig.savefig(output_path+'/LorenzAmplitude_1000.png')
+
 # Parameters
 nx, nz = 64, 64  # Grid resolution in x and z
-nt = 1000         # Number of snapshots
-time = np.linspace(0, 50, nt, endpoint=False)  # Time vector
+nt = 25000         # Number of snapshots
+time = np.linspace(0, 1250, nt, endpoint=False)  # Time vector
 
 print(np.shape(time), time[0], time[-1])
 dt = time[1]-time[0]
@@ -177,7 +183,7 @@ elif data_type == 'moderate':
 
 
 
-with h5py.File(output_path+'plume_wave_dataset_smallergrid.h5', 'w') as hf:
+with h5py.File(output_path+'plume_wave_dataset_smallergrid_longertime.h5', 'w') as hf:
     hf.create_dataset('plume', data=plume_data)
     hf.create_dataset('wave', data=wave_data)
     hf.create_dataset('combined', data=combined_data)
@@ -249,3 +255,10 @@ if Plotting:
 
     # snapshot_idx = 450  # Example snapshot index
     # plot_snapshot(moderate_data, snapshot_idx, 'moderate_snap.png')
+
+fig, ax =plt.subplots(1, figsize=(12,3), constrained_layout=True)
+c=ax.contourf(time[:1000], x, combined_data[:1000, :, 32].T)
+fig.colorbar(c,label='Amplitude', ax=ax)
+ax.set_xlabel('time')
+ax.set_ylabel('x')
+fig.savefig(output_path+'hovmov_1000.png')

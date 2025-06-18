@@ -40,6 +40,7 @@ from sklearn.metrics import mean_squared_error
 from skimage.metrics import structural_similarity as ssim
 from Eval_Functions import *
 from Plotting_Functions import *
+from POD_functions import *
 
 import json
 import time as time
@@ -106,20 +107,26 @@ with open(hyperparam_file, "r") as f:
     n_forward = hyperparams["n_forward"]
     threshold_ph = hyperparams.get("threshold_ph", 0.2)
 
-def load_data(file, name):
+def load_data_set_TD(file, names, snapshots):
     with h5py.File(file, 'r') as hf:
-        print(name)
-        print(hf[name])
-        data = np.array(hf[name])
-
+        print(hf.keys())
         x = hf['x'][:]  # 1D x-axis
         z = hf['z'][:]  # 1D z-axis
         time_vals = hf['time'][:]  # 1D time vector
+        
+        data = np.zeros((len(time_vals), len(x), len(z), len(names)))
+        
+        index=0
+        for name in names:
+            print(name)
+            print(hf[name])
+            Var = np.array(hf[name])
+            data[:,:,:,index] = Var[:snapshots,:,:]
+            index+=1
 
     return data, x, z, time_vals
 
-
-def load_data_set(file, names, snapshots):
+def load_data_set_RB(file, names, snapshots):
     with h5py.File(file, 'r') as hf:
         print(hf.keys())
         time_vals = np.array(hf['total_time_all'][:snapshots])
@@ -136,137 +143,26 @@ def load_data_set(file, names, snapshots):
 
     return data, time_vals
 
-def POD(data, c,  file_str, Plotting=False):
-    if data.ndim == 3: #len(time_vals), len(x), len(z)
-            data_matrix = data.reshape(data.shape[0], data.shape[1]*data.shape[2])
-    elif data.ndim == 4: #len(time_vals), len(x), len(z), len(var)
-            data_matrix = data.reshape(data.shape[0], data.shape[1]*data.shape[2]*data.shape[3])
-    print('shape of data for POD:', np.shape(data_matrix))
-    pca = PCA(n_components=c, svd_solver='randomized', random_state=42)
-    pca.fit(data_matrix)
-    data_reduced = pca.transform(data_matrix)
-    print('shape of reduced_data:', np.shape(data_reduced))
-    data_reconstructed_reshaped = pca.inverse_transform(data_reduced)
-    print('shape of data reconstructed flattened:', np.shape(data_reconstructed_reshaped))
-    data_reconstructed = data_reconstructed_reshaped.reshape(data.shape)
-    print('shape of data reconstructed:', np.shape(data_reconstructed))
-    np.save(output_path+file_str+'_data_reduced.npy', data_reduced)
-
-    components = pca.components_
-    print(np.shape(components))
-    # Get the explained variance ratio
-    explained_variance_ratio = pca.explained_variance_ratio_
-    # Calculate cumulative explained variance
-    cumulative_explained_variance = np.cumsum(explained_variance_ratio)
-    print('cumulative explained variance for', c, 'components is', cumulative_explained_variance[-1])
-
-    if Plotting:
-        # Plot cumulative explained variance
-        fig, ax = plt.subplots(1, figsize=(12,3))
-        ax.plot(cumulative_explained_variance*100, marker='o', linestyle='-', color='b')
-        ax2 = ax.twinx()
-        ax2.semilogy(explained_variance_ratio*100,  marker='o', linestyle='-', color='r')
-        ax.set_xlabel('Number of Modes')
-        ax.set_ylabel('Cumulative Energy (%)', color='blue')
-        #plt.axvline(x=truncated_modes, color='r', linestyle='--', label=f'Truncated Modes: {truncated_modes}')
-        ax2.set_ylabel('Inidvidual Energy (%)', color='red')
-        fig.savefig(output_path+file_str+'_EVRmodes.png')
-        #plt.show()
-        plt.close()
-
-        # Plot the time coefficients and mode structures
-        indexes_to_plot = np.array([1, 2, 10, 32, 64] ) -1
-        indexes_to_plot = indexes_to_plot[indexes_to_plot <= (c-1)]
-        print('plotting for modes', indexes_to_plot)
-        print('number of modes', len(indexes_to_plot))
-
-        #time coefficients
-        fig, ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
-        for index, element in enumerate(indexes_to_plot):
-            #ax.plot(index - data_reduced[:, element], label='S=%i' % (element+1))
-            ax.plot(data_reduced[:, element], label='S=%i' % (element+1))
-        ax.grid()
-        ax.legend()
-        #ax.set_yticks([])
-        ax.set_xlabel('Time Step $\Delta t$')
-        ax.set_ylabel('Time Coefficients')
-        fig.savefig(output_path+file_str+'_coef.png')
-        #plt.show()
-        plt.close()
-
-        # Visualize the modes
-        minm = components.min()
-        maxm = components.max()
-        if data.ndim == 3:
-            fig, ax =plt.subplots(len(indexes_to_plot), figsize=(12,6), tight_layout=True, sharex=True)
-            for i in range(len(indexes_to_plot)):
-                if len(indexes_to_plot) == 1:
-                    mode = components[indexes_to_plot[i]].reshape(data.shape[1], data.shape[2])  # Reshape to original dimensions for visualization
-                    c1 = ax.pcolormesh(x, z, mode[:, :].T, cmap='viridis', vmin=minm, vmax=maxm)  # Visualizing the first variable
-                    ax.set_title('mode % i' % (indexes_to_plot[i]+1))
-                    fig.colorbar(c1, ax=ax)
-                    ax.set_ylabel('z')
-                    ax.set_xlabel('x')
-                else:
-                    mode = components[indexes_to_plot[i]].reshape(data.shape[1], data.shape[2])  # Reshape to original dimensions for visualization              
-                    c1 = ax[i].pcolormesh(x, z, mode[:, :].T, cmap='viridis', vmin=minm, vmax=maxm)  # Visualizing the first variable
-                    #ax[i].axis('off')
-                    ax[i].set_title('mode % i' % (indexes_to_plot[i]+1))
-                    fig.colorbar(c1, ax=ax[i])
-                    ax[i].set_ylabel('z')
-                    ax[-1].set_xlabel('x')
-            fig.savefig(output_path+file_str+'_modes.png')
-            #plt.show()
-            plt.close()
-        elif data.ndim == 4:
-            for v in range(len(variables)):
-                fig, ax =plt.subplots(len(indexes_to_plot), figsize=(12,6), tight_layout=True, sharex=True)
-                for i in range(len(indexes_to_plot)):
-                    if len(indexes_to_plot) == 1:
-                        mode = components[indexes_to_plot[i]].reshape(data.shape[1], data.shape[2], data.shape[3])  # Reshape to original dimensions for visualization
-                        c1 = ax.pcolormesh(x, z, mode[:, :, v].T, cmap='viridis')  # Visualizing the first variable
-                        ax.set_title('mode % i' % (indexes_to_plot[i]+1))
-                        fig.colorbar(c1, ax=ax)
-                        ax.set_ylabel('z')
-                        ax.set_xlabel('x')
-                    else:
-                        mode = components[indexes_to_plot[i]].reshape(data.shape[1], data.shape[2], data.shape[3])  # Reshape to original dimensions for visualization              
-                        c1 = ax[i].pcolormesh(x, z, mode[:, :, v].T, cmap='viridis')  # Visualizing the first variable
-                        #ax[i].axis('off')
-                        ax[i].set_title('mode % i' % (indexes_to_plot[i]+1))
-                        fig.colorbar(c1, ax=ax[i])
-                        ax[i].set_ylabel('z')
-                        ax[-1].set_xlabel('x')
-                fig.savefig(output_path+file_str+names[v]+'_modes.png')
-                #plt.show()
-                plt.close()
-
-    return data_reduced, data_reconstructed_reshaped, data_reconstructed, pca, cumulative_explained_variance[-1]
-
-def inverse_POD(data_reduced, pca_):
-    data_reconstructed_reshaped = pca_.inverse_transform(data_reduced)
-    print('shape of data reconstructed flattened:', np.shape(data_reconstructed_reshaped))
-    data_reconstructed = data_reconstructed_reshaped.reshape(data_reconstructed_reshaped.shape[0], len(x), len(z), len(variables))
-    print('shape of data reconstructed:', np.shape(data_reconstructed))
-    return data_reconstructed_reshaped, data_reconstructed 
-
-def transform_POD(data, pca_):
-    if data.ndim == 3: #len(time_vals), len(x), len(z)
-            data_matrix = data.reshape(data.shape[0], data.shape[1]*data.shape[2])
-    elif data.ndim == 4: #len(time_vals), len(x), len(z), len(var)
-            data_matrix = data.reshape(data.shape[0], data.shape[1]*data.shape[2]*data.shape[3])
-    data_reduced = pca_.transform(data_matrix)
-    print('shape of reduced_data:', np.shape(data_reduced))
-    return data_reduced
-
 #### LOAD DATA AND POD ####
-variables = ['q_all', 'w_all', 'u_all', 'b_all']
-names = ['q', 'w', 'u', 'b']
-x = np.load(input_path+'/x.npy')
-z = np.load(input_path+'/z.npy')
-snapshots_load = 16000
-data_set, time_vals = load_data_set(input_path+'/data_4var_5000_48000.h5', variables, snapshots_load)
-print(np.shape(data_set))
+Data = 'ToyData'
+if Data == 'ToyData':
+    name = names = variables = ['combined']
+    n_components = 3
+    num_variables = 1
+    snapshots = 25000
+    data_set, x, z, time_vals = load_data_set_TD(input_path+'/plume_wave_dataset_smallergrid_longertime.h5', name, snapshots)
+    print('shape of dataset', np.shape(data_set))
+    dt = 0.05
+
+elif Data == 'RB':
+    variables = ['q_all', 'w_all', 'u_all', 'b_all']
+    names = ['q', 'w', 'u', 'b']
+    x = np.load(input_path+'/x.npy')
+    z = np.load(input_path+'/z.npy')
+    snapshots_load = 16000
+    data_set, time_vals = load_data_set_RB(input_path+'/data_4var_5000_48000.h5', variables, snapshots_load)
+    print('shape of dataset', np.shape(data_set))
+    dt = 2
 
 reduce_domain  = reduce_domain
 reduce_domain2 = reduce_domain2
@@ -308,10 +204,13 @@ else:
     print('no scaling')
     data_scaled = data_set
 
+if Data == 'RB':
+    snapshots_POD = 11200
+    data_scaled = data_scaled[:snapshots_POD]
 n_components = modes
-snapshots_POD = 11200
-data_scaled = data_scaled[:snapshots_POD]
-data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_, cev = POD(data_scaled, n_components, f"modes{n_components}")
+data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_, cev = POD(data_scaled, n_components, x, z, names, f"modes{n_components}")
+print('cumulative equiv ratio', cev)
+
 U = data_reduced 
 
 centre_of_energy = False
@@ -443,7 +342,7 @@ print('shape of data for ESN', np.shape(U))
 
 # number of time steps for washout, train, validation, test
 t_lyap    = t_lyap
-dt        = 2
+dt        = dt
 N_lyap    = int(t_lyap//dt)
 print('N_lyap', N_lyap)
 N_washout = int(washout_len*N_lyap) #75
@@ -478,7 +377,10 @@ U_washout = U[:N_washout].copy()
 U_tv  = U[N_washout:N_washout+N_train-1].copy() #inputs
 Y_tv  = U[N_washout+1:N_washout+N_train].copy() #data to match at next timestep
 
-indexes_to_plot = np.array([1, 2, 10, 32, 64] ) -1
+if Data == 'ToyData':
+    indexes_to_plot = np.array([1, 2, 3, 4] ) -1
+else:
+    indexes_to_plot = np.array([1, 2, 10, 32, 64] ) -1
 indexes_to_plot = indexes_to_plot[indexes_to_plot <= (n_components-1)]
 
 # adding noise to training set inputs with sigma_n the noise of the data
@@ -530,9 +432,9 @@ print('bias_in:', bias_in, 'bias_out:', bias_out)
 threshold_ph = threshold_ph
 n_in  = 0           #Number of Initial random points
 
-spec_in     = 0.5    #range for hyperparameters (spectral radius and input scaling)
-spec_end    = 1.2 
-in_scal_in  = np.log10(0.5)
+spec_in     = 0.1    #range for hyperparameters (spectral radius and input scaling)
+spec_end    = 1.0 
+in_scal_in  = np.log10(0.1)
 in_scal_end = np.log10(5)
 
 # In case we want to start from a grid_search, the first n_grid_x*n_grid_y points are from grid search
@@ -540,7 +442,6 @@ n_grid_x = grid_x
 n_grid_y = grid_y
 n_bo     = added_points  #number of points to be acquired through BO after grid search
 n_tot    = n_grid_x*n_grid_y + n_bo #Total Number of Function Evaluatuions
-
 
 # computing the points in the grid
 if n_grid_x > 0:
@@ -946,7 +847,7 @@ if validation_interval:
                     print('made directory')
 
                 if i<n_plot:
-                    if j % 5 == 0:
+                    if j % 1 == 0:
                         
                         print('indexes_to_plot', indexes_to_plot)
                         print(np.shape(U_wash))
@@ -964,7 +865,8 @@ if validation_interval:
                         print('reconstruction and error plot')
                         plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, x, z, xx, names, images_val_path+'/ESN_validation_ens%i_test%i' %(j,i))
 
-                        plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_val_path+'/active_plumes_validation')
+                        if len(variables) == 4:
+                            plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_val_path+'/active_plumes_validation')
 
 
         # accumulation for each ensemble member
@@ -1162,7 +1064,7 @@ if test_interval:
                     print('made directory')
                 
                 if i<n_plot:
-                    if j % 5 == 0:
+                    if j % 1 == 0:
                         
                         print('indexes_to_plot', indexes_to_plot)
                         print(np.shape(U_wash))
@@ -1180,7 +1082,8 @@ if test_interval:
                         print('reconstruction and error plot')
                         plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, x, z, xx, names, images_test_path+'/ESN_validation_ens%i_test%i' %(j,i))
 
-                        plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_test_path+'/active_plumes_test')
+                        if len(variables) == 4:
+                            plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_test_path+'/active_plumes_test')
 
 
         # accumulation for each ensemble member
