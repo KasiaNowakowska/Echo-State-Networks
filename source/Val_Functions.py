@@ -222,6 +222,78 @@ def RVC_Noise_PH(x):
 
     return PH[a]/N_fo
 
+def RVC_Noise_PH_explodingnorm(x):
+    # Recycle Validation
+    
+    global tikh_opt, k, ti, threshold_ph
+    rho      = x[0]
+    sigma_in = round(10**x[1], 2)
+    ti       = time.time()
+    lenn     = tikh.size
+    Mean     = np.zeros(lenn)
+    PH       = np.zeros(lenn)
+
+    # Train using tv: training + val
+    Wout = train_n(U_washout, U_tv, Y_tv, tikh, sigma_in, rho)[0]
+
+    sigma_ph     = np.sqrt(np.mean(np.var(U_tv, axis=1)))
+    threshold_ph = threshold_ph
+
+    # Stability norm threshold
+    norm_threshold = 10.0  # You can tune this value
+
+    # Different folds in the validation set
+    t1 = time.time()
+    for i in range(N_fo):
+        
+        # Select washout and validation
+        p      = N_in + i * N_fw
+        Y_val  = U[N_washout + p : N_washout + p + N_val].copy()
+        U_wash = U[            p : N_washout + p        ].copy()
+        
+        # Washout before closed loop
+        xf = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)[-1]
+                  
+        for j in range(lenn):
+            # Validate
+            Yh_val = closed_loop(N_val - 1, xf, Wout[j], sigma_in, rho)[0]
+            Y_err  = np.sqrt(np.mean((Y_val - Yh_val)**2, axis=1)) / sigma_ph
+
+            # --- NEW: Stability Metrics ---
+            norms = np.linalg.norm(Yh_val, axis=1) + 1e-8
+            max_norm = np.max(norms)
+            growth_rate = np.mean(np.diff(np.log(norms)))
+
+            # --- Decide on PH based on stability ---
+            unstable = False
+            if max_norm > 10.0:          # You can tune this threshold
+                unstable = True
+            if growth_rate > 0.02:       # Tune this too: ~1-2% drift per step
+                unstable = True
+
+            if unstable:
+                PH_val = 0  # Forcefully penalize unstable models
+            else:
+                PH_val = np.argmax(Y_err > threshold_ph) / N_lyap
+                if PH_val == 0 and Y_err[0] < threshold_ph:
+                    PH_val = N_val / N_lyap
+            
+            Mean[j] += np.log10(np.mean((Y_val - Yh_val)**2))
+            PH[j]   += -PH_val
+
+    if k == 0:
+        print('closed-loop time:', time.time() - t1)
+
+    a = np.argmin(PH)
+    tikh_opt[k] = tikh[a]
+    k += 1
+
+    if print_flag:
+        print(k, ': Spectral radius, Input Scaling, Tikhonov, MSE:',
+              rho, sigma_in, tikh_opt[k - 1], Mean[a] / N_fo)
+
+    return PH[a] / N_fo
+
 def inverse_POD(data_reduced, pca_):
     data_reconstructed_reshaped = pca_.inverse_transform(data_reduced)
     print('shape of data reconstructed flattened:', np.shape(data_reconstructed_reshaped))

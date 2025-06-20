@@ -107,7 +107,26 @@ with open(ESN_hyperparam_file, "r") as f:
     n_forward = hyperparams["n_forward"]
     threshold_ph = hyperparams.get("threshold_ph", 0.3)
 
-def load_data_set(file, names, snapshots):
+def load_data_set_TD(file, names, snapshots):
+    with h5py.File(file, 'r') as hf:
+        print(hf.keys())
+        x = hf['x'][:]  # 1D x-axis
+        z = hf['z'][:]  # 1D z-axis
+        time_vals = hf['time'][:]  # 1D time vector
+        
+        data = np.zeros((len(time_vals), len(x), len(z), len(names)))
+        
+        index=0
+        for name in names:
+            print(name)
+            print(hf[name])
+            Var = np.array(hf[name])
+            data[:,:,:,index] = Var[:snapshots,:,:]
+            index+=1
+
+    return data, x, z, time_vals
+
+def load_data_set_RB(file, names, snapshots):
     with h5py.File(file, 'r') as hf:
         print(hf.keys())
         time_vals = np.array(hf['total_time_all'][:snapshots])
@@ -123,7 +142,6 @@ def load_data_set(file, names, snapshots):
             index+=1
 
     return data, time_vals
-
 
 #### AUTOENCODER ####
 def split_data(U, b_size, n_batches):
@@ -270,14 +288,26 @@ def periodic_padding(image, padding=1, asym=False):
     return padded_image
 
 #### LOAD DATA ####
-variables = ['q_all', 'w_all', 'u_all', 'b_all']
-names = ['q', 'w', 'u', 'b']
-x = np.load(input_path+'/x.npy')
-z = np.load(input_path+'/z.npy')
-snapshots = 16000
-data_set, time_vals = load_data_set(input_path+'/data_4var_5000_30000.h5', variables, snapshots)
-print(np.shape(data_set))
-dt = time_vals[1]-time_vals[0]
+#### LOAD DATA AND POD ####
+Data = 'RB'
+if Data == 'ToyData':
+    name = names = variables = ['combined']
+    n_components = 3
+    num_variables = 1
+    snapshots = 25000
+    data_set, x, z, time_vals = load_data_set_TD(input_path+'/plume_wave_dataset_smallergrid_longertime.h5', name, snapshots)
+    print('shape of dataset', np.shape(data_set))
+    dt = 0.05
+
+elif Data == 'RB':
+    variables = ['q_all', 'w_all', 'u_all', 'b_all']
+    names = ['q', 'w', 'u', 'b']
+    x = np.load(input_path+'/x.npy')
+    z = np.load(input_path+'/z.npy')
+    snapshots_load = 16000
+    data_set, time_vals = load_data_set_RB(input_path+'/data_4var_5000_48000.h5', variables, snapshots_load)
+    print('shape of dataset', np.shape(data_set))
+    dt = 2
 
 reduce_data_set = reduce_domain = reduce_domain2 = False
 if reduce_data_set:
@@ -289,8 +319,6 @@ if reduce_data_set:
     print(x[0], x[-1])
 
 U = data_set
-dt = time_vals[1]-time_vals[0]
-print('dt:', dt)
 
 # Load hyperparameters from a YAML file
 with open(CAE_hyperparam_file, 'r') as file:
@@ -499,10 +527,9 @@ else:
     with h5py.File(output_path+'/encoded_data'+str(N_latent)+'.h5', 'w') as df:
         df['U_enc'] = U_enc
 
-
 ###### ESN #######
 upsample   = 1
-data_len   = 10000
+data_len   = 11200
 transient  = 0
 
 dt = dt*upsample
@@ -516,6 +543,8 @@ print(shape)
 
 U = U.reshape(shape[0], shape[1]*shape[2]*shape[3])
 
+print('shape of data for ESN', np.shape(U))
+
 # number of time steps for washout, train, validation, test
 t_lyap    = t_lyap
 dt        = dt
@@ -526,9 +555,6 @@ N_washout_val = int(washout_len_val*N_lyap)
 N_train   = train_len*N_lyap #600
 N_val     = val_len*N_lyap #45
 N_test    = test_len*N_lyap #45
-
-indexes_to_plot = np.array([1, 2, 8, 16, 32, dim] ) -1
-indexes_to_plot = indexes_to_plot[indexes_to_plot <= (dim-1)]
 
 # compute normalization factor (range component-wise)
 U_data = U[:N_washout+N_train].copy()
@@ -550,6 +576,12 @@ U_washout = U[:N_washout].copy()
 # data to be used for training + validation
 U_tv  = U[N_washout:N_washout+N_train-1].copy() #inputs
 Y_tv  = U[N_washout+1:N_washout+N_train].copy() #data to match at next timestep
+
+if Data == 'ToyData':
+    indexes_to_plot = np.array([1, 2, 3, 4] ) -1
+else:
+    indexes_to_plot = np.array([1, 2, 8, 16, 32, 64] ) -1
+indexes_to_plot = indexes_to_plot[indexes_to_plot <= (n_components-1)]
 
 # adding noise to training set inputs with sigma_n the noise of the data
 # improves performance and regularizes the error as a function of the hyperparameters
@@ -594,10 +626,10 @@ tikh = np.array([1e-1,1e-3,1e-6,1e-9])  # Tikhonov factor (optimize among the va
 threshold_ph = threshold_ph
 n_in  = 0           #Number of Initial random points
 
-spec_in     = 0.8    #range for hyperparameters (spectral radius and input scaling)
+spec_in     = 0.1    #range for hyperparameters (spectral radius and input scaling)
 spec_end    = 1.0
-in_scal_in  = np.log10(0.5)
-in_scal_end = np.log10(2.5)
+in_scal_in  = np.log10(0.1)
+in_scal_end = np.log10(5)
 
 # In case we want to start from a grid_search, the first n_grid_x*n_grid_y points are from grid search
 n_grid_x = grid_x
@@ -1010,7 +1042,8 @@ if validation_interval:
                         print('reconstruction and error plot')
                         plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, x, z, xx, names, images_val_path+'/ESN_validation_ens%i_test%i' %(j,i))
 
-                        plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_val_path+'/active_plumes_validation')
+                        if len(variables) == 4:
+                            plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_val_path+'/active_plumes_validation')
 
         # accumulation for each ensemble member
         ens_nrmse[j]       = ens_nrmse[j] / N_test
@@ -1213,9 +1246,10 @@ if test_interval:
 
                         # reconstruction after scaling
                         print('reconstruction and error plot')
-                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, x, z, xx, names, images_test_path+'/ESN_validation_ens%i_test%i' %(j,i))
-
-                        plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_test_path+'/active_plumes_test')
+                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, x, z, xx, names, images_test_path+'/ESN_test_ens%i_test%i' %(j,i))
+                        
+                        if len(variables) == 4:
+                            plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_test_path+'/active_plumes_test')
 
 
         # accumulation for each ensemble member

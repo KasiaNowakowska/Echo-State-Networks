@@ -9,6 +9,7 @@ from Functions_wandb import *
 
 #Objective Functions to minimize with Bayesian Optimization
 
+
 def KFC_Noise(x, tikh):
     #K-fold cross Validation
     
@@ -188,6 +189,7 @@ def RVC_Noise_PH(x, tikh, params):
     threshold_ph = params["threshold_ph"]
     k         = params["k"]
     tikh_opt  = params["tikh_opt"]
+
 
     #tikh, U_washout, U_tv, Y_tv, U, N_in, N_fw, N_washout, N_val, N_units
     #print(tikh)

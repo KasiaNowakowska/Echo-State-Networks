@@ -39,6 +39,7 @@ from sklearn.metrics import mean_squared_error
 from skimage.metrics import structural_similarity as ssim
 from Eval_Functions import *
 from Plotting_Functions import *
+from POD_functions import *
 
 import json
 import time as time
@@ -94,20 +95,26 @@ with open(hyperparam_file, "r") as f:
     alpha0 = hyperparams["alpha0"]
     n_forward = hyperparams["n_forward"]
 
-def load_data(file, name):
+def load_data_set_TD(file, names, snapshots):
     with h5py.File(file, 'r') as hf:
-        print(name)
-        print(hf[name])
-        data = np.array(hf[name])
-
+        print(hf.keys())
         x = hf['x'][:]  # 1D x-axis
         z = hf['z'][:]  # 1D z-axis
         time_vals = hf['time'][:]  # 1D time vector
+        
+        data = np.zeros((len(time_vals), len(x), len(z), len(names)))
+        
+        index=0
+        for name in names:
+            print(name)
+            print(hf[name])
+            Var = np.array(hf[name])
+            data[:,:,:,index] = Var[:snapshots,:,:]
+            index+=1
 
     return data, x, z, time_vals
 
-
-def load_data_set(file, names, snapshots):
+def load_data_set_RB(file, names, snapshots):
     with h5py.File(file, 'r') as hf:
         print(hf.keys())
         time_vals = np.array(hf['total_time_all'][:snapshots])
@@ -124,119 +131,28 @@ def load_data_set(file, names, snapshots):
 
     return data, time_vals
 
-def POD(data, c,  file_str, Plotting=False):
-    if data.ndim == 3: #len(time_vals), len(x), len(z)
-            data_matrix = data.reshape(data.shape[0], data.shape[1]*data.shape[2])
-    elif data.ndim == 4: #len(time_vals), len(x), len(z), len(var)
-            data_matrix = data.reshape(data.shape[0], data.shape[1]*data.shape[2]*data.shape[3])
-    print('shape of data for POD:', np.shape(data_matrix))
-    pca = PCA(n_components=c, svd_solver='randomized', random_state=42)
-    pca.fit(data_matrix)
-    data_reduced = pca.transform(data_matrix)
-    print('shape of reduced_data:', np.shape(data_reduced))
-    data_reconstructed_reshaped = pca.inverse_transform(data_reduced)
-    print('shape of data reconstructed flattened:', np.shape(data_reconstructed_reshaped))
-    data_reconstructed = data_reconstructed_reshaped.reshape(data.shape)
-    print('shape of data reconstructed:', np.shape(data_reconstructed))
-    np.save(output_path+file_str+'_data_reduced.npy', data_reduced)
+#### LOAD DATA AND POD ####
+Data = 'RB'
+if Data == 'ToyData':
+    name = names = variables = ['combined']
+    n_components = 3
+    num_variables = 1
+    snapshots = 25000
+    data_set, x, z, time_vals = load_data_set_TD(input_path+'/plume_wave_dataset_smallergrid_longertime.h5', name, snapshots)
+    print('shape of dataset', np.shape(data_set))
+    dt = 0.05
 
-    components = pca.components_
-    print(np.shape(components))
-    # Get the explained variance ratio
-    explained_variance_ratio = pca.explained_variance_ratio_
-    # Calculate cumulative explained variance
-    cumulative_explained_variance = np.cumsum(explained_variance_ratio)
-    print('cumulative explained variance for', c, 'components is', cumulative_explained_variance[-1])
+elif Data == 'RB':
+    variables = ['q_all', 'w_all', 'u_all', 'b_all']
+    names = ['q', 'w', 'u', 'b']
+    x = np.load(input_path+'/x.npy')
+    z = np.load(input_path+'/z.npy')
+    snapshots_load = 16000
+    data_set, time_vals = load_data_set_RB(input_path+'/data_4var_5000_48000.h5', variables, snapshots_load)
+    print('shape of dataset', np.shape(data_set))
+    dt = 2
 
-    if Plotting:
-        # Plot cumulative explained variance
-        fig, ax = plt.subplots(1, figsize=(12,3))
-        ax.plot(cumulative_explained_variance*100, marker='o', linestyle='-', color='b')
-        ax2 = ax.twinx()
-        ax2.semilogy(explained_variance_ratio*100,  marker='o', linestyle='-', color='r')
-        ax.set_xlabel('Number of Modes')
-        ax.set_ylabel('Cumulative Energy (%)', color='blue')
-        #plt.axvline(x=truncated_modes, color='r', linestyle='--', label=f'Truncated Modes: {truncated_modes}')
-        ax2.set_ylabel('Inidvidual Energy (%)', color='red')
-        fig.savefig(output_path+file_str+'_EVRmodes.png')
-        #plt.show()
-        plt.close()
-
-        # Plot the time coefficients and mode structures
-        indexes_to_plot = np.array([1, 2, 10, 50, 100] ) -1
-        indexes_to_plot = indexes_to_plot[indexes_to_plot <= (c-1)]
-        print('plotting for modes', indexes_to_plot)
-        print('number of modes', len(indexes_to_plot))
-
-        #time coefficients
-        fig, ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
-        for index, element in enumerate(indexes_to_plot):
-            #ax.plot(index - data_reduced[:, element], label='S=%i' % (element+1))
-            ax.plot(data_reduced[:, element], label='S=%i' % (element+1))
-        ax.grid()
-        ax.legend()
-        #ax.set_yticks([])
-        ax.set_xlabel('Time Step $\Delta t$')
-        ax.set_ylabel('Time Coefficients')
-        fig.savefig(output_path+file_str+'_coef.png')
-        #plt.show()
-        plt.close()
-
-        # Visualize the modes
-        minm = components.min()
-        maxm = components.max()
-        if data.ndim == 3:
-            fig, ax =plt.subplots(len(indexes_to_plot), figsize=(12,6), tight_layout=True, sharex=True)
-            for i in range(len(indexes_to_plot)):
-                if len(indexes_to_plot) == 1:
-                    mode = components[indexes_to_plot[i]].reshape(data.shape[1], data.shape[2])  # Reshape to original dimensions for visualization
-                    c1 = ax.pcolormesh(x, z, mode[:, :].T, cmap='viridis', vmin=minm, vmax=maxm)  # Visualizing the first variable
-                    ax.set_title('mode % i' % (indexes_to_plot[i]+1))
-                    fig.colorbar(c1, ax=ax)
-                    ax.set_ylabel('z')
-                    ax.set_xlabel('x')
-                else:
-                    mode = components[indexes_to_plot[i]].reshape(data.shape[1], data.shape[2])  # Reshape to original dimensions for visualization              
-                    c1 = ax[i].pcolormesh(x, z, mode[:, :].T, cmap='viridis', vmin=minm, vmax=maxm)  # Visualizing the first variable
-                    #ax[i].axis('off')
-                    ax[i].set_title('mode % i' % (indexes_to_plot[i]+1))
-                    fig.colorbar(c1, ax=ax[i])
-                    ax[i].set_ylabel('z')
-                    ax[-1].set_xlabel('x')
-            fig.savefig(output_path+file_str+'_modes.png')
-            #plt.show()
-            plt.close()
-        elif data.ndim == 4:
-            for v in range(len(variables)):
-                fig, ax =plt.subplots(len(indexes_to_plot), figsize=(12,6), tight_layout=True, sharex=True)
-                for i in range(len(indexes_to_plot)):
-                    if len(indexes_to_plot) == 1:
-                        mode = components[indexes_to_plot[i]].reshape(data.shape[1], data.shape[2], data.shape[3])  # Reshape to original dimensions for visualization
-                        c1 = ax.pcolormesh(x, z, mode[:, :, v].T, cmap='viridis')  # Visualizing the first variable
-                        ax.set_title('mode % i' % (indexes_to_plot[i]+1))
-                        fig.colorbar(c1, ax=ax)
-                        ax.set_ylabel('z')
-                        ax.set_xlabel('x')
-                    else:
-                        mode = components[indexes_to_plot[i]].reshape(data.shape[1], data.shape[2], data.shape[3])  # Reshape to original dimensions for visualization              
-                        c1 = ax[i].pcolormesh(x, z, mode[:, :, v].T, cmap='viridis')  # Visualizing the first variable
-                        #ax[i].axis('off')
-                        ax[i].set_title('mode % i' % (indexes_to_plot[i]+1))
-                        fig.colorbar(c1, ax=ax[i])
-                        ax[i].set_ylabel('z')
-                        ax[-1].set_xlabel('x')
-                fig.savefig(output_path+file_str+names[v]+'_modes.png')
-                #plt.show()
-                plt.close()
-
-    return data_reduced, data_reconstructed_reshaped, data_reconstructed, pca, cumulative_explained_variance[-1]
-
-def inverse_POD(data_reduced, pca_):
-    data_reconstructed_reshaped = pca_.inverse_transform(data_reduced)
-    print('shape of data reconstructed flattened:', np.shape(data_reconstructed_reshaped))
-    data_reconstructed = data_reconstructed_reshaped.reshape(data_reconstructed_reshaped.shape[0], len(x), len(z), len(variables))
-    print('shape of data reconstructed:', np.shape(data_reconstructed))
-    return data_reconstructed_reshaped, data_reconstructed 
+reduce_domain2 = reduce_domain2
 
 def global_parameters(data):
     if data.ndim == 4:
@@ -252,17 +168,6 @@ def global_parameters(data):
     global_params[:,1] = avg_q
 
     return global_params
-
-#### LOAD DATA AND POD ####
-variables = ['q_all', 'w_all', 'u_all', 'b_all']
-names = ['q', 'w', 'u', 'b']
-x = np.load(input_path+'/x.npy')
-z = np.load(input_path+'/z.npy')
-snapshots_load = 16000
-data_set, time_vals = load_data_set(input_path+'/data_4var_5000_48000.h5', variables, snapshots_load)
-print(np.shape(data_set))
-#data_set = data_set[2500:]
-#time_vals = time_vals[2500:]
 
 reduce_data_set = False
 if reduce_data_set:
@@ -305,21 +210,23 @@ else:
     print('no scaling')
     data_scaled = data_set
 
+if Data == 'RB':
+    snapshots_POD = 11200
+    data_scaled = data_scaled[:snapshots_POD]
 n_components = modes
-snapshots_POD = 11200
-data_scaled = data_scaled[:snapshots_POD]
-data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_, cev = POD(data_scaled, n_components, f"modes{n_components}")
+data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_, cev = POD(data_scaled, n_components, x, z, names, f"modes{n_components}")
+print('cumulative equiv ratio', cev)
 
 U = data_reduced 
 print('shape of data for ESN', np.shape(U))
 
 # number of time steps for washout, train, validation, test
 t_lyap    = t_lyap
-dt        = 2
+dt        = dt
 N_lyap    = int(t_lyap//dt)
 print('N_lyap', N_lyap)
-N_washout = washout_len*N_lyap #75
-N_washout_val = washout_len_val*N_lyap
+N_washout = int(washout_len*N_lyap) #75
+N_washout_val = int(washout_len_val*N_lyap)
 N_train   = train_len*N_lyap #600
 N_val     = val_len*N_lyap #45
 N_test    = test_len*N_lyap #45
@@ -346,7 +253,11 @@ U_washout = U[:N_washout].copy()
 U_tv  = U[N_washout:N_washout+N_train-1].copy() #inputs
 Y_tv  = U[N_washout+1:N_washout+N_train].copy() #data to match at next timestep
 
-indexes_to_plot = np.array([1, 2, 10, 32, 64] ) -1
+if Data == 'ToyData':
+    indexes_to_plot = np.array([1, 2, 3, 4] ) -1
+else:
+    indexes_to_plot = np.array([1, 2, 10, 32, 64] ) -1
+indexes_to_plot = indexes_to_plot[indexes_to_plot <= (n_components-1)]
 
 # adding noise to training set inputs with sigma_n the noise of the data
 # improves performance and regularizes the error as a function of the hyperparameters
@@ -414,9 +325,11 @@ print('norm:', norm)
 print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
-test_interval = True
+test_interval = False
 validation_interval = False
-statistics_interval = True
+statistics_interval = False
+initiation_interval = False
+initiation_interval2 = True
 
 if validation_interval:
     print('VALIDATION (TEST)')
@@ -430,7 +343,7 @@ if validation_interval:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.1
+    threshold_ph = 0.2
 
     ensemble_test = ens
 
@@ -619,18 +532,18 @@ if validation_interval:
 if test_interval:
     print('TESTING')
     N_washout = int(N_washout)
-    N_test   = 20                  #number of intervals in the test set
+    N_test   = 40                  #number of intervals in the test set
     if reduce_domain2:
         N_tstart = N_washout + N_train
     else:
         N_tstart = int(N_washout + N_train)  #where the first test interval starts
     N_intt   = 3*N_lyap             #length of each test set interval
-    N_gap    = int(test_len*N_lyap)
+    N_gap    = int(1*N_lyap)
     #N_washout_val = 4*N_lyap
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.1
+    threshold_ph = 0.2
 
     ensemble_test = ens
 
@@ -677,7 +590,7 @@ if test_interval:
         plot = True
         Plotting = True
         if plot:
-            n_plot = N_test
+            n_plot = 5
             plt.rcParams["figure.figsize"] = (15,3*n_plot)
             plt.figure()
             plt.tight_layout()
@@ -860,7 +773,7 @@ if statistics_interval:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.1
+    threshold_ph = 0.2
 
     ensemble_test = ensemble_test
 
@@ -977,3 +890,257 @@ if statistics_interval:
     with open(output_path_met_ALL, "w") as file:
         json.dump(metrics_ens_ALL, file, indent=4)
     print('finished statistics')
+
+if initiation_interval:
+    #### INITIATION ####
+    init_path = output_path + '/initation/'
+    if not os.path.exists(init_path):
+        os.makedirs(init_path)
+        print('made directory')
+
+    #test_indexes = [210, 420, 555]
+    N_test   = 40                    #number of intervals in the test set
+    N_tstart = int(N_washout + N_train)   #where the first test interval starts
+    N_intt   = 3*N_lyap             #length of each test set interval
+    N_washout = int(N_washout)
+    N_gap = int(1*N_lyap)
+
+    print('N_tstart:', N_tstart)
+    print('N_intt:', N_intt)
+    print('N_washout:', N_washout)
+
+    # #prediction horizon normalization factor and threshold
+    sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
+    threshold_ph = 0.2
+
+    ensemble_test = 1
+
+    ens_pred        = np.zeros((N_intt, dim, ensemble_test))
+    ens_PH          = np.zeros((N_test, ensemble_test))
+    ens_PH2         = np.zeros((ensemble_test))
+    ens_nrmse       = np.zeros((ensemble_test))
+    ens_ssim        = np.zeros((ensemble_test))
+    ens_evr         = np.zeros((ensemble_test))
+    ens_nrmse_plume = np.zeros((ensemble_test))
+
+    images_test_path = init_path+'/test_images/'
+    if not os.path.exists(images_test_path):
+        os.makedirs(images_test_path)
+        print('made directory')
+    metrics_test_path = init_path+'/test_metrics/'
+    if not os.path.exists(metrics_test_path):
+        os.makedirs(metrics_test_path)
+        print('made directory')
+
+    for j in range(ensemble_test):
+
+        print('Realization    :',j+1)
+
+        #load matrices and hyperparameters
+        Wout     = Woutt[j].copy()
+        Win      = Winn[j] #csr_matrix(Winn[j])
+        W        = Ws[j]   #csr_matrix(Ws[j])
+        rho      = opt_hyp[j,0].copy()
+        sigma_in = opt_hyp[j,1].copy()
+        print('Hyperparameters:',rho, sigma_in)
+
+        # to store prediction horizon in the test set
+        PH             = np.zeros(N_test)
+        nrmse_error    = np.zeros((N_test, N_intt))
+
+        # to plot results
+        plot = True
+        Plotting = True
+        if plot:
+            n_plot = N_test
+            plt.rcParams["figure.figsize"] = (15,3*n_plot)
+            plt.figure()
+            plt.tight_layout()
+
+        #run different test intervals
+        for i in range(N_test):
+            print('test', i+1)
+            print(N_tstart + i*N_gap)
+            print('start time of test', time_vals[N_tstart + i*N_gap])
+            # data for washout and target in each interval
+            U_wash    = U[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap].copy()
+            Y_t       = U[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt].copy()
+
+            #washout for each interval
+            Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
+            Uh_wash = np.dot(Xa1, Wout)
+
+            # Prediction Horizon
+            Yh_t,_,Xa2        = closed_loop(N_intt-1, Xa1[-1], Wout, sigma_in, rho)
+            print(np.shape(Yh_t))
+            if i == 0:
+                ens_pred[:, :, j] = Yh_t
+            Y_err       = np.sqrt(np.mean((Y_t-Yh_t)**2,axis=1))/sigma_ph
+            PH[i]       = np.argmax(Y_err>threshold_ph)/N_lyap
+            if PH[i] == 0 and Y_err[0]<threshold_ph: PH[i] = N_intt/N_lyap #(in case PH is larger than interval)
+            ens_PH[i,j] = PH[i]
+            nrmse_error[i, :] = Y_err
+
+            ##### reconstructions ####
+            _, reconstructed_truth       = inverse_POD(Y_t, pca_)
+            _, reconstructed_predictions = inverse_POD(Yh_t, pca_)
+
+            # rescale
+            reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
+            reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
+
+            if plot:
+                #left column has the washout (open-loop) and right column the prediction (closed-loop)
+                # only first n_plot test set intervals are plotted
+                 if i<n_plot:
+                    if j % 5 == 0:
+                        
+                        print('indexes_to_plot', indexes_to_plot)
+                        print(np.shape(U_wash))
+                        xx = np.arange(U_wash[:,0].shape[0])/N_lyap
+                        #plot_modes_washout(U_wash, Uh_wash, xx, i, j, indexes_to_plot, images_test_path+'/washout_test', Modes=False)
+
+                        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
+                        plot_modes_prediction(Y_t, Yh_t, xx, i, j, indexes_to_plot, images_test_path+'/prediction_test', Modes=False)
+                        plot_PH(Y_err, threshold_ph, xx, i, j, images_test_path+'/PH_test')
+                        
+                        #plot_reservoir_states_norm(Xa1, Xa2, time_vals, N_tstart, N_washout_val, i, j, N_gap, N_intt, N_units, images_test_path+'/resnorm_test')
+                        #plot_input_states_norm(U_wash, Y_t, time_vals, N_tstart, N_washout_val, i, j, N_gap,  N_intt, images_test_path+'/inputnorm_test')
+
+                        # reconstruction after scaling
+                        print('reconstruction and error plot')
+                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, int(0.5*N_lyap), x, z, xx, names, images_test_path+'/ESN_validation_ens%i_test%i' %(j,i))
+
+                        #plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_test_path+'/active_plumes_test')
+                        
+                        #plot_global_prediction_ts(PODtruth_global, predictions_global, xx, i, j, images_test_path+'/global_prediciton')
+                        #plot_global_prediction_ps(PODtruth_global, predictions_global, i, j, stats_path+'/global_prediciton')
+
+    print('finished testing')
+
+if initiation_interval2:
+    #### INITIATION ####
+    init_path = output_path + '/initation/test18/'
+    if not os.path.exists(init_path):
+        os.makedirs(init_path)
+        print('made directory')
+
+    test_indexes = [210, 420, 555]
+    N_test   = 10                    #number of intervals in the test set
+    N_tstart = 10800 #int(N_washout + N_train)   #where the first test interval starts
+    N_intt   = 3*N_lyap             #length of each test set interval
+    N_washout = int(N_washout)
+    N_gap = int(0.25*N_lyap)
+
+    print('N_tstart:', N_tstart)
+    print('N_intt:', N_intt)
+    print('N_washout:', N_washout)
+
+    # #prediction horizon normalization factor and threshold
+    sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
+    threshold_ph = 0.2
+
+    ensemble_test = 1
+
+    ens_pred        = np.zeros((N_intt, dim, ensemble_test))
+    ens_PH          = np.zeros((N_test, ensemble_test))
+    ens_PH2         = np.zeros((ensemble_test))
+    ens_nrmse       = np.zeros((ensemble_test))
+    ens_ssim        = np.zeros((ensemble_test))
+    ens_evr         = np.zeros((ensemble_test))
+    ens_nrmse_plume = np.zeros((ensemble_test))
+
+    images_test_path = init_path+'/test_images/'
+    if not os.path.exists(images_test_path):
+        os.makedirs(images_test_path)
+        print('made directory')
+    metrics_test_path = init_path+'/test_metrics/'
+    if not os.path.exists(metrics_test_path):
+        os.makedirs(metrics_test_path)
+        print('made directory')
+
+    for j in range(ensemble_test):
+
+        print('Realization    :',j+1)
+
+        #load matrices and hyperparameters
+        Wout     = Woutt[j].copy()
+        Win      = Winn[j] #csr_matrix(Winn[j])
+        W        = Ws[j]   #csr_matrix(Ws[j])
+        rho      = opt_hyp[j,0].copy()
+        sigma_in = opt_hyp[j,1].copy()
+        print('Hyperparameters:',rho, sigma_in)
+
+        # to store prediction horizon in the test set
+        PH             = np.zeros(N_test)
+        nrmse_error    = np.zeros((N_test, N_intt))
+
+        # to plot results
+        plot = True
+        Plotting = True
+        if plot:
+            n_plot = N_test
+            plt.rcParams["figure.figsize"] = (15,3*n_plot)
+            plt.figure()
+            plt.tight_layout()
+
+        #run different test intervals
+        for i in range(N_test):
+            print('test', i+1)
+            print(N_tstart + i*N_gap)
+            print('start time of test', time_vals[N_tstart + i*N_gap])
+            # data for washout and target in each interval
+            U_wash    = U[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap].copy()
+            Y_t       = U[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt].copy()
+
+            #washout for each interval
+            Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
+            Uh_wash = np.dot(Xa1, Wout)
+
+            # Prediction Horizon
+            Yh_t,_,Xa2        = closed_loop(N_intt-1, Xa1[-1], Wout, sigma_in, rho)
+            print(np.shape(Yh_t))
+            if i == 0:
+                ens_pred[:, :, j] = Yh_t
+            Y_err       = np.sqrt(np.mean((Y_t-Yh_t)**2,axis=1))/sigma_ph
+            PH[i]       = np.argmax(Y_err>threshold_ph)/N_lyap
+            if PH[i] == 0 and Y_err[0]<threshold_ph: PH[i] = N_intt/N_lyap #(in case PH is larger than interval)
+            ens_PH[i,j] = PH[i]
+            nrmse_error[i, :] = Y_err
+
+            ##### reconstructions ####
+            _, reconstructed_truth       = inverse_POD(Y_t, pca_)
+            _, reconstructed_predictions = inverse_POD(Yh_t, pca_)
+
+            # rescale
+            reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
+            reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
+
+            if plot:
+                #left column has the washout (open-loop) and right column the prediction (closed-loop)
+                # only first n_plot test set intervals are plotted
+                 if i<n_plot:
+                    if j % 5 == 0:
+                        
+                        print('indexes_to_plot', indexes_to_plot)
+                        print(np.shape(U_wash))
+                        xx = np.arange(U_wash[:,0].shape[0])/N_lyap
+                        #plot_modes_washout(U_wash, Uh_wash, xx, i, j, indexes_to_plot, images_test_path+'/washout_test', Modes=False)
+
+                        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
+                        plot_modes_prediction(Y_t, Yh_t, xx, i, j, indexes_to_plot, images_test_path+'/prediction_test', Modes=False)
+                        plot_PH(Y_err, threshold_ph, xx, i, j, images_test_path+'/PH_test')
+                        
+                        #plot_reservoir_states_norm(Xa1, Xa2, time_vals, N_tstart, N_washout_val, i, j, N_gap, N_intt, N_units, images_test_path+'/resnorm_test')
+                        #plot_input_states_norm(U_wash, Y_t, time_vals, N_tstart, N_washout_val, i, j, N_gap,  N_intt, images_test_path+'/inputnorm_test')
+
+                        # reconstruction after scaling
+                        print('reconstruction and error plot')
+                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, int(0.5*N_lyap), x, z, xx, names, images_test_path+'/ESN_validation_ens%i_test%i' %(j,i))
+
+                        #plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_test_path+'/active_plumes_test')
+                        
+                        #plot_global_prediction_ts(PODtruth_global, predictions_global, xx, i, j, images_test_path+'/global_prediciton')
+                        #plot_global_prediction_ps(PODtruth_global, predictions_global, i, j, stats_path+'/global_prediciton')
+
+    print('finished testing')
