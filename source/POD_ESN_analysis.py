@@ -325,11 +325,11 @@ print('norm:', norm)
 print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
-test_interval = False
+test_interval = True
 validation_interval = False
 statistics_interval = False
 initiation_interval = False
-initiation_interval2 = True
+initiation_interval2 = False
 
 if validation_interval:
     print('VALIDATION (TEST)')

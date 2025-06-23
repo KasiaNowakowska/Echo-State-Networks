@@ -4,7 +4,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import h5py
 import time
-
+from Eval_Functions import compute_nrmse_per_timestep_variable, find_prediction_horizon
 #Objective Functions to minimize with Bayesian Optimization
 
 def KFC_Noise(x):
@@ -221,6 +221,71 @@ def RVC_Noise_PH(x):
               rho, sigma_in, tikh_opt[k-1],  Mean[a]/N_fo)
 
     return PH[a]/N_fo
+
+def RVC_Noise_PH_recon(x):
+    #Recycle Validation
+    
+    global tikh_opt, k, ti, threshold_ph
+    #tikh, U_washout, U_tv, Y_tv, U, N_in, N_fw, N_washout, N_val, N_units
+    #print(tikh)
+    #setting and initializing
+    rho      = x[0]
+    sigma_in = round(10**x[1],2)
+    ti       = time.time()
+    lenn     = tikh.size
+    Mean     = np.zeros(lenn)
+    PH       = np.zeros(lenn)
+    PH_recons= np.zeros(lenn)
+
+    #Train using tv: training+val
+    Wout = train_n(U_washout, U_tv, Y_tv, tikh, sigma_in, rho)[0]
+
+    sigma_ph     = np.sqrt(np.mean(np.var(U_tv,axis=1)))
+    threshold_ph = threshold_ph
+
+    #Different Folds in the validation set
+    t1   = time.time()
+    for i in range(N_fo):
+        
+        #select washout and validation
+        p      = N_in + i*N_fw
+        Y_val  = U[N_washout + p : N_washout + p + N_val].copy()
+        U_wash = U[            p : N_washout + p        ].copy()
+        
+        #washout before closed loop
+        xf = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)[-1]
+                  
+        for j in range(lenn):
+            #Validate
+            Yh_val      = closed_loop(N_val-1, xf, Wout[j], sigma_in, rho)[0]
+
+            # 1. reshape for decoder
+            Y_val_reshaped = Y_val.reshape(Y_val.shape[0], N_1[1], N_1[2], N_1[3])
+            Yh_val_reshaped = Yh_val.reshape(Yh_val.shape[0], N_1[1], N_1[2], N_1[3])
+            # 2. put through decoder
+            reconstructed_truth = Decoder(Y_val_reshaped,b).numpy()
+            reconstructed_predictions = Decoder(Yh_val_reshaped,b).numpy()
+            # 3. scale back
+            reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
+            reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
+
+            nrmse_recons = compute_nrmse_per_timestep_variable(reconstructed_truth, reconstructed_predictions, normalize_by="std")
+            PH_recons[j] = -find_prediction_horizon(nrmse_recons, 0.2)/N_lyap
+                        
+    if k==0: print('closed-loop time:', time.time() - t1)
+    
+    #select optimal tikh
+    #a           = np.argmin(Mean)
+    a            = np.argmin(PH_recons)
+    tikh_opt[k] = tikh[a]
+    k          +=1
+    
+    #print for every set of hyperparameters
+    if print_flag:
+        print(k, ': Spectral radius, Input Scaling, Tikhonov, MSE:',
+              rho, sigma_in, tikh_opt[k-1],  Mean[a]/N_fo)
+
+    return PH_recons[a]/N_fo
 
 def RVC_Noise_PH_explodingnorm(x):
     # Recycle Validation

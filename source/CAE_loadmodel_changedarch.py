@@ -1,7 +1,7 @@
 """
 python script for convolutional autoencoder.
 
-Usage: CAE.py [--input_path=<input_path> --output_path=<output_path> --model_path=<model_path> --hyperparam_file=<hyperparam_file> --job_id=<job_id> --sweep_id=<sweep_id> --reduce_domain=<reduce_domain>]
+Usage: CAE.py [--input_path=<input_path> --output_path=<output_path> --model_path=<model_path> --hyperparam_file=<hyperparam_file> --job_id=<job_id> --sweep_id=<sweep_id> --reduce_domain=<reduce_domain> --encoded_data=<encoded_data>]
 
 Options:
     --input_path=<input_path>            file path to use for data
@@ -11,6 +11,7 @@ Options:
     --job_id=<job_id>                    job_id
     --sweep_id=<sweep_id>                sweep_id
     --reduce_domain=<reduce_domain>      domain reduced True or False [default: False]
+    --encoded_data=<encoded data>        data already encoded True or False [default: False]
 """
 
 # import packages
@@ -48,6 +49,8 @@ for gpu in gpus:
 import time
 from pathlib import Path
 from sklearn.preprocessing import StandardScaler
+from Eval_Functions import *
+from Plotting_Functions import *
 
 import sys
 sys.stdout.reconfigure(line_buffering=True)
@@ -61,6 +64,14 @@ model_path = args['--model_path']
 hyperparam_file = args['--hyperparam_file']
 job_id = args['--job_id']
 sweep_id = args['--sweep_id']
+
+encoded_data = args['--encoded_data']
+if encoded_data == 'False':
+    encoded_data = False
+    print('data not already encoded so', encoded_data)
+elif encoded_data == 'True':
+    encoded_data = True
+    print('data already encoded so', encoded_data)
 
 reduce_domain = args['--reduce_domain']
 if reduce_domain == 'False':
@@ -85,12 +96,30 @@ if not os.path.exists(output_path):
     os.makedirs(output_path)
     print('made directory')
 
-def load_data_set(file, names, snapshots):
+def load_data_set_TD(file, names, snapshots):
     with h5py.File(file, 'r') as hf:
         print(hf.keys())
+        x = hf['x'][:]  # 1D x-axis
+        z = hf['z'][:]  # 1D z-axis
+        time_vals = hf['time'][:]  # 1D time vector
+        
+        data = np.zeros((len(time_vals), len(x), len(z), len(names)))
+        
+        index=0
+        for name in names:
+            print(name)
+            print(hf[name])
+            Var = np.array(hf[name])
+            data[:,:,:,index] = Var[:snapshots,:,:]
+            index+=1
 
-        time_vals = hf['total_time_all'][:snapshots]  # 1D time vector
+    return data, x, z, time_vals
 
+def load_data_set_RB(file, names, snapshots):
+    with h5py.File(file, 'r') as hf:
+        print(hf.keys())
+        time_vals = np.array(hf['total_time_all'][:snapshots])
+        
         data = np.zeros((len(time_vals), len(x), len(z), len(names)))
         
         index=0
@@ -104,14 +133,25 @@ def load_data_set(file, names, snapshots):
     return data, time_vals
 
 #### LOAD DATA ####
-variables = ['q_all', 'w_all', 'u_all', 'b_all']
-names = ['q', 'w', 'u', 'b']
-num_variables = 4
-x = np.load(input_path+'/x.npy')
-z = np.load(input_path+'/z.npy')
-snapshots = 16000
-data_set, time_vals = load_data_set(input_path+'/data_4var_5000_48000.h5', variables, snapshots)
-print('shape of dataset', np.shape(data_set))
+Data = 'RB'
+if Data == 'ToyData':
+    name = names = variables = ['combined']
+    n_components = 3
+    num_variables = 1
+    snapshots = 25000
+    data_set, x, z, time_vals = load_data_set_TD(input_path+'/plume_wave_dataset_smallergrid_longertime.h5', name, snapshots)
+    print('shape of dataset', np.shape(data_set))
+    dt = 0.05
+
+elif Data == 'RB':
+    variables = ['q_all', 'w_all', 'u_all', 'b_all']
+    names = ['q', 'w', 'u', 'b']
+    x = np.load(input_path+'/x.npy')
+    z = np.load(input_path+'/z.npy')
+    snapshots_load = 16000
+    data_set, time_vals = load_data_set_RB(input_path+'/data_4var_5000_48000.h5', variables, snapshots_load)
+    print('shape of dataset', np.shape(data_set))
+    dt = 2
 
 reduce_domain = reduce_domain
 
@@ -125,8 +165,6 @@ if reduce_domain:
     print(x[0], x[-1])
 
 U = data_set
-dt = time_vals[1]-time_vals[0]
-print('dt:', dt)
 
 import yaml
 
@@ -177,6 +215,19 @@ def model(inputs, enc_mods, dec_mods, is_train=False):
         decoded += dec_mod(encoded, training=is_train)
 
     return encoded, decoded
+
+@tf.function #this creates the tf graph  
+def Decoder(encoded, dec_mods, is_train=False):
+    '''
+    Multiscale autoencoder, taken from Hasegawa 2020. The contribution of the CNNs at different
+    scales are simply summed.
+    '''
+    
+    decoded = 0
+    for dec_mod in dec_mods:
+        decoded += dec_mod(encoded, training=is_train)
+
+    return decoded
 
 @tf.function #this creates the tf graph
 def train_step(inputs, enc_mods, dec_mods, train=True):
@@ -274,321 +325,6 @@ def periodic_padding(image, padding=1, asym=False):
     #print("shape of padded image: ", padded_image.shape)
     return padded_image
 
-def plot_reconstruction(original, reconstruction, z_value, t_value, file_str):
-    if original.ndim == 4:
-        original = original.reshape(original.shape[0], original.shape[1], original.shape[2])
-    if reconstruction.ndim == 4:
-        reconstruction = reconstruction.reshape(reconstruction.shape[0], reconstruction.shape[1], reconstruction.shape[2])
-        
-    # Check if both data arrays have the same dimensions and the dimension is 2
-    if original.ndim == reconstruction.ndim == 3:
-        print("Both data arrays have the same dimensions and are 3D.")
-    else:
-        print("The data arrays either have different dimensions or are not 3D.")
-    
-    fig, ax = plt.subplots(2, figsize=(12,6), tight_layout=True, sharex=True)
-    minm = min(np.min(original[t_value, :, :]), np.min(reconstruction[t_value, :, :]))
-    maxm = max(np.max(original[t_value, :, :]), np.max(reconstruction[t_value, :, :]))
-    c1 = ax[0].pcolormesh(x, z, original[t_value,:,:].T, vmin=minm, vmax=maxm)
-    fig.colorbar(c1, ax=ax[0])
-    ax[0].set_title('true')
-    c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:].T, vmin=minm, vmax=maxm)
-    fig.colorbar(c1, ax=ax[1])
-    ax[1].set_title('reconstruction')
-    for v in range(2):
-        ax[v].set_ylabel('z')
-    ax[-1].set_xlabel('x')
-    fig.savefig(output_path+file_str+'_hovmoller_recon.png')
-
-    fig, ax = plt.subplots(2, figsize=(12,6), tight_layout=True, sharex=True)
-    minm = min(np.min(original[:, :, z_value]), np.min(reconstruction[:, :, z_value]))
-    maxm = max(np.max(original[:, :, z_value]), np.max(reconstruction[:, :, z_value]))
-    print(np.max(original[:, :, z_value]))
-    print(minm, maxm)
-    time_zone = np.linspace(0, original.shape[0],  original.shape[0])
-    c1 = ax[0].pcolormesh(time_zone, x, original[:, :, z_value].T)
-    fig.colorbar(c1, ax=ax[0])
-    ax[0].set_title('true')
-    c2 = ax[1].pcolormesh(time_zone, x, reconstruction[:, :, z_value].T)
-    fig.colorbar(c1, ax=ax[1])
-    ax[1].set_title('reconstruction')
-    for v in range(2):
-        ax[v].set_ylabel('x')
-    ax[-1].set_xlabel('time')
-    fig.savefig(output_path+file_str+'_snapshot_recon.png')
-
-def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, file_str):
-    abs_error = np.abs(original-reconstruction)
-    if original.ndim == 3: #len(time_vals), len(x), len(z)
-
-        fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
-        minm = min(np.min(original[t_value, :, :]), np.min(reconstruction[t_value, :, :]))
-        maxm = max(np.max(original[t_value, :, :]), np.max(reconstruction[t_value, :, :]))
-        c1 = ax[0].pcolormesh(x, z, original[t_value,:,:].T, vmin=minm, vmax=maxm)
-        fig.colorbar(c1, ax=ax[0])
-        ax[0].set_title('true')
-        c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:].T, vmin=minm, vmax=maxm)
-        fig.colorbar(c1, ax=ax[1])
-        ax[1].set_title('reconstruction')
-        c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:].T, cmap='Reds')
-        fig.colorbar(c3, ax=ax[2])
-        ax[2].set_title('error')
-        for v in range(3):
-            ax[v].set_ylabel('z')
-        ax[-1].set_xlabel('x')
-        fig.savefig(output_path+file_str+'_hovmoller_recon_error.png')
-        plt.close()
-
-        fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
-        minm = min(np.min(original[:, :, z_value]), np.min(reconstruction[:, :, z_value]))
-        maxm = max(np.max(original[:, :, z_value]), np.max(reconstruction[:, :, z_value]))
-        print(np.max(original[:, :, z_value]))
-        print(minm, maxm)
-        c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value].T)
-        fig.colorbar(c1, ax=ax[0])
-        ax[0].set_title('true')
-        c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value].T)
-        fig.colorbar(c1, ax=ax[1])
-        ax[1].set_title('reconstruction')
-        c3 = ax[2].pcolormesh(time_vals, x, abs_error[:, :, z_value].T, cmap='Reds')
-        fig.colorbar(c3, ax=ax[2])
-        ax[2].set_title('error')
-        for v in range(2):
-            ax[v].set_ylabel('x')
-        ax[-1].set_xlabel('time')
-        fig.savefig(output_path+file_str+'_snapshot_recon_error.png')
-        plt.close()
-
-    elif original.ndim == 4: #len(time_vals), len(x), len(z), var
-        time_zone = np.linspace(0, original.shape[0],  original.shape[0])
-        for i in range(original.shape[3]):
-            name = names[i]
-            print(name)
-            fig, ax = plt.subplots(3, figsize=(12,6), tight_layout=True, sharex=True)
-            minm = min(np.min(original[t_value, :, :, i]), np.min(reconstruction[t_value, :, :, i]))
-            maxm = max(np.max(original[t_value, :, :, i]), np.max(reconstruction[t_value, :, :, i]))
-            c1 = ax[0].pcolormesh(x, z, original[t_value,:,:,i].T, vmin=minm, vmax=maxm)
-            fig.colorbar(c1, ax=ax[0])
-            ax[0].set_title('true')
-            c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm)
-            fig.colorbar(c1, ax=ax[1])
-            ax[1].set_title('reconstruction')
-            c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:, i].T, cmap='Reds')
-            fig.colorbar(c3, ax=ax[2])
-            ax[2].set_title('error')
-            for v in range(2):
-                ax[v].set_ylabel('z')
-            ax[-1].set_xlabel('x')
-            fig.savefig(output_path+file_str+name+f"_snapshot_recon_error_{i}.png")
-            plt.close()
-
-            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
-            minm = min(np.min(original[:, :, z_value,i]), np.min(reconstruction[:, :, z_value,i]))
-            maxm = max(np.max(original[:, :, z_value,i]), np.max(reconstruction[:, :, z_value,i]))
-            print(np.max(original[:, :, z_value,i]))
-            print(minm, maxm)
-            print("time shape:", np.shape(time_vals))
-            print("x shape:", np.shape(x))
-            print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
-            c1 = ax[0].pcolormesh(time_zone, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm)
-            fig.colorbar(c1, ax=ax[0])
-            ax[0].set_title('true')
-            c2 = ax[1].pcolormesh(time_zone, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
-            fig.colorbar(c1, ax=ax[1])
-            ax[1].set_title('reconstruction')
-            c3 = ax[2].pcolormesh(time_zone, x,  abs_error[:,:,z_value, i].T, cmap='Reds')
-            fig.colorbar(c3, ax=ax[2])
-            ax[2].set_title('error')
-            for v in range(2):
-                ax[v].set_ylabel('x')
-            ax[-1].set_xlabel('time')
-            fig.savefig(output_path+file_str+name+'_hovmoller_recon_error.png')
-            plt.close()
-
-#### Metrics ####
-from sklearn.metrics import mean_squared_error
-def NRMSE(original_data, reconstructed_data):
-    if original_data.ndim == 3:
-        original_data = original_data.reshape(original_data.shape[0], original_data.shape[1]*original_data.shape[2])
-    elif original_data.ndim == 4:
-        original_data = original_data.reshape(original_data.shape[0], original_data.shape[1]*original_data.shape[2]*original_data.shape[3])
-    if reconstructed_data.ndim == 3:
-        reconstructed_data = reconstructed_data.reshape(reconstructed_data.shape[0], reconstructed_data.shape[1]*reconstructed_data.shape[2])
-    elif reconstructed_data.ndim == 4:
-        reconstructed_data = reconstructed_data.reshape(reconstructed_data.shape[0], reconstructed_data.shape[1]*reconstructed_data.shape[2]*reconstructed_data.shape[3])
-
-    # Check if both data arrays have the same dimensions and the dimension is 2
-    if original_data.ndim == reconstructed_data.ndim == 2:
-        print("Both data arrays have the same dimensions and are 2D.")
-    else:
-        print("The data arrays either have different dimensions or are not 2D.")
-    rmse = np.sqrt(mean_squared_error(original_data, reconstructed_data))
-    
-    variance = np.var(original_data)
-    std_dev  = np.sqrt(variance)
-    
-    nrmse = (rmse/std_dev)
-    
-    return nrmse
-
-def EVR_recon(original_data, reconstructed_data):
-    print(original_data.ndim)
-    print(reconstructed_data.ndim)
-    if original_data.ndim == 3:
-        original_data = original_data.reshape(original_data.shape[0], original_data.shape[1]*original_data.shape[2])
-    elif original_data.ndim == 4:
-        original_data = original_data.reshape(original_data.shape[0], original_data.shape[1]*original_data.shape[2]*original_data.shape[3])
-    if reconstructed_data.ndim == 3:
-        reconstructed_data = reconstructed_data.reshape(reconstructed_data.shape[0], reconstructed_data.shape[1]*reconstructed_data.shape[2])
-    elif reconstructed_data.ndim == 4:
-        print('reshape')
-        reconstructed_data = reconstructed_data.reshape(reconstructed_data.shape[0], reconstructed_data.shape[1]*reconstructed_data.shape[2]*reconstructed_data.shape[3])
-
-    # Check if both data arrays have the same dimensions and the dimension is 2
-    if original_data.ndim == reconstructed_data.ndim == 2:
-        print("Both data arrays have the same dimensions and are 2D.")
-    else:
-        print("The data arrays either have different dimensions or are not 2D.")
-
-    numerator = np.sum((original_data - reconstructed_data) **2)
-    denominator = np.sum(original_data ** 2)
-    evr_reconstruction = 1 - (numerator/denominator)
-    return evr_reconstruction
-
-def MSE(original_data, reconstructed_data):
-    if original_data.ndim == 3:
-        original_data = original_data.reshape(original_data.shape[0], original_data.shape[1]*original_data.shape[2])
-    elif original_data.ndim == 4:
-        original_data = original_data.reshape(original_data.shape[0], original_data.shape[1]*original_data.shape[2]*original_data.shape[3])
-    if reconstructed_data.ndim == 3:
-        reconstructed_data = reconstructed_data.reshape(reconstructed_data.shape[0], reconstructed_data.shape[1]*reconstructed_data.shape[2])
-    elif reconstructed_data.ndim == 4:
-        reconstructed_data = reconstructed_data.reshape(reconstructed_data.shape[0], reconstructed_data.shape[1]*reconstructed_data.shape[2]*reconstructed_data.shape[3])
-
-    # Check if both data arrays have the same dimensions and the dimension is 2
-    if original_data.ndim == reconstructed_data.ndim == 2:
-        print("Both data arrays have the same dimensions and are 2D.")
-    else:
-        print("The data arrays either have different dimensions or are not 2D.")
-    mse = mean_squared_error(original_data, reconstructed_data)
-    return mse
-
-from skimage.metrics import structural_similarity as ssim
-def compute_ssim_for_4d(original, decoded):
-    """
-    Compute the average SSIM across all timesteps and channels for 4D arrays.
-    """
-    if original.ndim == 3:
-        original = original.reshape(original.shape[0], original.shape[1], original.shape[2], 1)
-    if decoded.ndim == 3:
-        decoded = decoded.reshape(decoded.shape[0], decoded.shape[1], decoded.shape[2], 1)
-    
-    # Check if both data arrays have the same dimensions and the dimension is 4
-    if original.ndim == decoded.ndim == 4:
-        print("Both data arrays have the same dimensions and are 4D.")
-    else:
-        print("The data arrays either have different dimensions or are not 4D.")
-    
-    #print('shape of data:', np.shape(original))
-    # Initialize SSIM accumulator
-    total_ssim = 0
-    #print('total_ssim', total_ssim)
-    timesteps = original.shape[0]
-    channels = original.shape[-1]
-    #print(timesteps, channels)
-    
-    for t in range(timesteps):
-        for c in range(channels):
-            #print(t, c)
-            # Extract the 2D slice for each timestep and channel
-            orig_slice = original[t, :, :, c]
-            dec_slice = decoded[t, :, :, c]
-            #print(orig_slice, dec_slice)
-            
-            # Compute SSIM for the current slice
-            batch_ssim = ssim(orig_slice, dec_slice, data_range=orig_slice.max() - orig_slice.min(), win_size=3)
-            #print(batch_ssim)
-            total_ssim += batch_ssim
-            #print(total_ssim)
-    
-    # Compute the average SSIM across all timesteps and channels
-    avg_ssim = total_ssim / (timesteps * channels)
-    print('avg_ssim', avg_ssim)
-    return avg_ssim
-
-def active_array_calc(original_data, reconstructed_data, z):
-        # Check if both data arrays have the same dimensions and the dimension is 4
-        if original_data.ndim == reconstructed_data.ndim == 4:
-            print("Both data arrays have the same dimensions and are 4D.")
-        else:
-            print("The data arrays either have different dimensions or are not 4D.")
-        beta = 1.201
-        alpha = 3.0
-        T = original_data[:,:,:,3] - beta*z
-        T_reconstructed = reconstructed_data[:,:,:,3] - beta*z
-        q_s = np.exp(alpha*T)
-        q_s_reconstructed = np.exp(alpha*T)
-        rh = original_data[:,:,:,0]/q_s
-        rh_reconstructed = reconstructed_data[:,:,:,0]/q_s_reconstructed
-        mean_b = np.mean(original_data[:,:,:,3], axis=1, keepdims=True)
-        mean_b_reconstructed= np.mean(reconstructed_data[:,:,:,3], axis=1, keepdims=True)
-        b_anom = original_data[:,:,:,3] - mean_b
-        b_anom_reconstructed = reconstructed_data[:,:,:,3] - mean_b_reconstructed
-        w = original_data[:,:,:,1]
-        w_reconstructed = reconstructed_data[:,:,:,1]
-        
-        mask = (rh[:, :, :] >= 1) & (w[:, :, :] > 0) & (b_anom[:, :, :] > 0)
-        mask_reconstructed = (rh_reconstructed[:, :, :] >= 1) & (w_reconstructed[:, :, :] > 0) & (b_anom_reconstructed[:, :, :] > 0)
-        
-        active_array = np.zeros((original_data.shape[0], len(x), len(z)))
-        active_array[mask] = 1
-        active_array_reconstructed = np.zeros((original_data.shape[0], len(x), len(z)))
-        active_array_reconstructed[mask_reconstructed] = 1
-        
-        # Expand the mask to cover all features (optional, depending on use case)
-        mask_expanded       = np.expand_dims(mask, axis=-1)  # Shape: (256, 64, 1)
-        mask_expanded       = np.repeat(mask_expanded, original_data.shape[-1], axis=-1)  # Shape: (256, 64, 4)
-        mask_expanded_recon = np.expand_dims(mask_reconstructed, axis=-1)  # Shape: (256, 64, 1)
-        mask_expanded_recon = np.repeat(mask_expanded_recon, reconstructed_data.shape[-1], axis=-1)  # Shape: (256, 64, 4)
-    
-        return active_array, active_array_reconstructed, mask_expanded, mask_expanded_recon
-
-def ss_transform(data, scaler):
-    if data.ndim == 4: #len(time_vals), len(x), len(z), len(var)
-        data_reshape = data.reshape(-1, data.shape[-1])
-    if data_reshape.ndim == 2:
-        print("data array is 2D.")
-    else:
-        print("data array is not 2D")
-        
-    data_scaled = scaler.transform(data_reshape)
-    data_scaled = data_scaled.reshape(data.shape)
-    
-    if data_scaled.ndim == 4:
-        print('scaled and reshaped to 4 dimensions')
-    else:
-        print('not scaled properly')
-        
-    return data_scaled
-    
-def ss_inverse_transform(data, scaler):
-    if data.ndim == 4: #len(time_vals), len(x), len(z), len(var)
-        data_reshape = data.reshape(-1, data.shape[-1])
-    if data_reshape.ndim == 2:
-        print("data array is 2D.")
-    else:
-        print("data array is not 2D")
-        
-    data_unscaled = scaler.inverse_transform(data_reshape)
-    data_unscaled = data_unscaled.reshape(data.shape)
-    
-    if data_unscaled.ndim == 4:
-        print('unscaled and reshaped to 4 dimensions')
-    else:
-        print('not unscaled properly')
-        
-    return data_unscaled
-
 #### load in data ###
 if reduce_domain:
     n_batches   = 12 #int((U.shape[0]/b_size) *0.7)  #number of batches #20
@@ -643,6 +379,8 @@ U_val       = split_data(U_vv_scaled, b_size, val_batches).astype('float32')
 
 del U_vv, U_tt, U_tt_scaled
 
+## scale all the data ##
+U_scaled = ss_transform(U, scaler)
 
 # define the model
 # we do not have pooling and upsampling, instead we use stride=2
@@ -781,8 +519,9 @@ for i in range(N_parallel):
 
 validation_data = False
 test_data = False
-all_data = True
+all_data = False
 visualisation = False
+encoded_data_investigation = True
 
 if validation_data:
     print('VALIDATION DATA')
@@ -1090,3 +829,126 @@ if visualisation:
     ax[-1].set_xlabel('latent width')
     fig.savefig(vis_path+f"/snapshot_time{time_vis}.png")
     
+if encoded_data_investigation:
+    def NRMSE_per_sample(original, reconstructed_batch):
+        """
+        original: shape (1, H, W, C)
+        reconstructed_batch: shape (N, H, W, C)
+        
+        Returns:
+            nrmse_vals: numpy array of shape (N,)
+        """
+        n_samples = reconstructed_batch.shape[0]
+        nrmse_vals = np.zeros(n_samples)
+        
+        for i in range(n_samples):
+            # Expand dims to keep original shape (1, H, W, C) and select one perturbed sample with shape (1, H, W, C)
+            recon_sample = np.expand_dims(reconstructed_batch[i], axis=0)
+            
+            nrmse_vals[i] = NRMSE(original, recon_sample)
+            
+        return nrmse_vals
+
+
+    decoder_sens_path = output_path + '/decoder_sens/'
+
+    ### make output_directories ###
+    if not os.path.exists(decoder_sens_path):
+        os.makedirs(decoder_sens_path)
+        print('made decoder directory')
+
+    if encoded_data:
+        with h5py.File('Ra2e8/CAE_ESN/LS64/encoded_data'+str(N_latent)+'.h5', 'r') as df:
+            U_enc = np.array(df['U_enc'])
+    else:
+        U = U_scaled
+        train_leng = 0
+        N_pos = 2000
+        k     = (U.shape[0] - train_leng)//N_pos
+
+        U_enc = np.empty((k*N_pos, N_1[1], N_1[2], N_1[3]))
+        for i in range(k):
+                U_enc[i*N_pos:(i+1)*N_pos]= model(U[i*N_pos:(i+1)*N_pos], a, b)[0]
+
+        with h5py.File(output_path+'/encoded_data'+str(N_latent)+'.h5', 'w') as df:
+            df['U_enc'] = U_enc
+
+    upsample   = 1
+    data_len   = 11200
+    transient  = 0
+
+    dt = dt*upsample
+    n_components = N_latent
+
+    dim      = N_latent #N_latent
+    act      = 'tanh'
+    U        = np.array(U_enc[transient:transient+data_len:upsample])
+    shape    = U.shape
+    print(shape)
+
+    sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
+
+    time_step = 100
+    z0 = U[time_step:time_step+1]
+    z0 = z0.squeeze(0)
+
+    epsilon = 0.05
+    num_samples = 20
+
+    epsilons = epsilon * np.random.randn(num_samples, z0.shape[0], z0.shape[1], z0.shape[2])
+    z_perturbed = z0 + epsilons  # shape: (100, latent_dim)
+
+    z0_flatten = z0.flatten()
+    z_perturbed_flatten = z_perturbed.reshape(num_samples, -1)
+    NRMSE_latent_space = np.sqrt(np.mean((z0_flatten-z_perturbed_flatten)**2, axis=1))/sigma_ph
+        
+    decoded = Decoder(z_perturbed, b).numpy()
+    x_hat_perturbed = ss_inverse_transform(decoded, scaler)
+
+    decoded = Decoder(z0[None, :], b).numpy()
+    x_hat = ss_inverse_transform(decoded, scaler)
+
+    print('shape of perts', np.shape(x_hat_perturbed))
+    print('shape of true', np.shape(x_hat))
+
+    errors = np.sqrt(np.mean((x_hat_perturbed - x_hat)**2, axis=(1, 2, 3)))    
+    
+    NRMSE_recons = NRMSE_per_sample(x_hat, x_hat_perturbed)
+    epsilon_norms = np.linalg.norm(epsilons.reshape(epsilons.shape[0], -1), axis=1)
+
+    print('shape of errors', np.shape(errors))
+    print('shape of epsilon norms', np.shape(epsilon_norms))
+
+    fig, ax = plt.subplots(1, figsize=(8,6), tight_layout=True)
+    ax.scatter(epsilon_norms, errors, alpha=0.7)
+    ax.set_xlabel(r"Latent petrubation norm $\epsilon$")
+    ax.set_ylabel("RMSE")
+    ax.grid()
+    fig.savefig(decoder_sens_path+'/Decoder_sensitivity.png')
+
+    fig, ax = plt.subplots(1, figsize=(8,6), tight_layout=True)
+    ax.scatter(NRMSE_latent_space, NRMSE_recons, alpha=0.7)
+    ax.set_xlabel(r"NRMSE betweeen latent spaces$")
+    ax.set_ylabel("NRMSE in reconstruction")
+    ax.grid()
+    fig.savefig(decoder_sens_path+'/Decoder_sensitivity_NRMSE.png')
+
+    i=1
+    fig, ax =plt.subplots(3, figsize=(12,9), tight_layout=True)
+    original = x_hat
+    reconstruction = x_hat_perturbed
+    t_value= 0
+    residual = x_hat[t_value,:,:,i] - x_hat_perturbed[t_value,:,:,i]
+    vmax_res = np.max(np.abs(residual))  # Get maximum absolute value
+    vmin_res = -vmax_res
+    c1 = ax[0].pcolormesh(x, z, original[t_value,:,:,i].T)
+    fig.colorbar(c1, ax=ax[0])
+    ax[0].set_title('reconstruction')
+    c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T)
+    fig.colorbar(c2, ax=ax[1])
+    ax[1].set_title('perturbed reconstruction')
+    c3 = ax[2].pcolormesh(x, z, residual.T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
+    fig.colorbar(c3, ax=ax[2])
+    ax[2].set_title('error', fontsize=18)
+
+    fig.savefig(decoder_sens_path+'/reconstruction.png')

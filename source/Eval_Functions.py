@@ -312,6 +312,63 @@ def MSE(original_data, reconstructed_data):
     mse = mean_squared_error(original_data, reconstructed_data)
     return mse
 
+def compute_nrmse_per_timestep_variable(original_data, reconstructed_data, normalize_by="std"):
+    """
+    Compute NRMSE for each timestep and variable.
+
+    Args:
+        original_data: np.array, shape (T, X, Z, V)
+        reconstructed_data: np.array, shape (T, X, Z, V)
+        normalize_by: "range" or "std" for normalization
+
+    Returns:
+        nrmse: np.array, shape (T, V)
+    """
+    if original_data.ndim != 4 or reconstructed_data.ndim != 4:
+        print(f"Error: Expected 4D arrays, got shapes {original_data.shape} and {reconstructed_data.shape}.")
+    elif original_data.shape != reconstructed_data.shape:
+        print(f"Warning: Arrays are 4D but shapes do not match: {original_data.shape} vs {reconstructed_data.shape}.")
+    else:
+        print(f"Input check passed: both arrays are 4D and have shape {original_data.shape}.")
+    
+    T, X, Z, V = original_data.shape
+    nrmse = np.zeros((T, V))
+
+    for t in range(T):
+        for v in range(V):
+            true_tv = original_data[t, :, :, v]
+            pred_tv = reconstructed_data[t, :, :, v]
+            error = true_tv - pred_tv
+            rmse = np.sqrt(np.mean(error**2))
+
+            if normalize_by == "range":
+                norm = np.max(true_tv) - np.min(true_tv)
+            elif normalize_by == "std":
+                norm = np.std(true_tv)
+            else:
+                raise ValueError("normalize_by must be 'range' or 'std'")
+
+            nrmse[t, v] = rmse / (norm + 1e-8)  # avoid div by zero
+
+    return nrmse
+
+def find_prediction_horizon(nrmse, threshold):
+    """
+    Find the first timestep where any variable's NRMSE exceeds the threshold.
+
+    Args:
+        nrmse: np.array, shape (T, V)
+        threshold: float
+
+    Returns:
+        horizon: int, first timestep where any variable exceeds threshold
+    """
+    T, V = nrmse.shape
+    for t in range(T):
+        if np.any(nrmse[t, :] > threshold):
+            return t
+    return T  # if no exceedance, return full horizon
+
 def active_array_calc(original_data, reconstructed_data, z):
     beta = 1.201
     alpha = 3.0

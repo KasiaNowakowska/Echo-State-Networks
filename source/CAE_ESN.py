@@ -703,7 +703,7 @@ val      = eval(val)
 alpha = alpha
 N_fw     = n_forward*N_lyap
 N_fo     = (N_train-N_val-N_washout)//N_fw + 1 
-#N_fo     = 33                     # number of validation intervals
+#N_fo     = 50                     # number of validation intervals
 N_in     = N_washout                 # timesteps before the first validation interval (can't be 0 due to implementation)
 #N_fw     = (N_train-N_val-N_washout)//(N_fo-1) # how many steps forward the validation interval is shifted (in this way they are evenly spaced)
 N_splits = 4                         # reduce memory requirement by increasing N_splits
@@ -899,6 +899,7 @@ if validation_interval:
     ens_ssim        = np.zeros((ensemble_test))
     ens_evr         = np.zeros((ensemble_test))
     ens_nrmse_plume = np.zeros((ensemble_test))
+    ens_PH_recons   = np.zeros((ensemble_test))
 
     metrics_val_path = output_path+'/validation_metrics/'
     if not os.path.exists(metrics_val_path):
@@ -986,14 +987,18 @@ if validation_interval:
             else:
                 nrmse_plume = np.inf
 
+            nrmse_recons = compute_nrmse_per_timestep_variable(reconstructed_truth, reconstructed_predictions, normalize_by="std")
+            horizons_recons = find_prediction_horizon(nrmse_recons, 0.2)/N_lyap
+
             print('NRMSE', nrmse)
             print('MSE', mse)
             print('EVR_recon', evr)
             print('SSIM', SSIM)
             print('NRMSE plume', nrmse_plume)
+            print('horizons recons', horizons_recons)
 
             # Full path for saving the file
-            output_file = 'ESN_test_metrics_ens%i_test%i.json' % (j,i)
+            output_file = 'ESN_validation_metrics_ens%i_test%i.json' % (j,i)
 
             output_path_met = os.path.join(metrics_val_path, output_file)
 
@@ -1006,6 +1011,7 @@ if validation_interval:
             "SSIM": float(SSIM),
             "NRMSE plume": float(nrmse_plume),
             "PH": float(PH[i]),
+            "PH recons": float(horizons_recons),
             }
 
             with open(output_path_met, "w") as file:
@@ -1016,6 +1022,7 @@ if validation_interval:
             ens_nrmse_plume[j] += nrmse_plume
             ens_evr[j]         += evr
             ens_PH2[j]         += PH[i]
+            ens_PH_recons[j]   += horizons_recons
 
             if plot:
                 images_val_path = output_path+'/validation_images/'
@@ -1051,6 +1058,7 @@ if validation_interval:
         ens_ssim[j]        = ens_ssim[j] / N_test
         ens_evr[j]         = ens_evr[j] / N_test
         ens_PH2[j]         = ens_PH2[j] / N_test  
+        ens_PH_recons[j]   = ens_PH_recons[j] / N_test
              
     # Full path for saving the file
     output_file_ALL = 'ESN_validation_metrics_all.json' 
@@ -1069,6 +1077,7 @@ if validation_interval:
     "mean NRMSE plume": np.mean(ens_nrmse_plume),
     "mean EVR": np.mean(ens_evr),
     "mean ssim": np.mean(ens_ssim),
+    "mean PH recons": np.mean(ens_PH_recons),
     }
 
     with open(output_path_met_ALL, "w") as file:
