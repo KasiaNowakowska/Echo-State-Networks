@@ -88,7 +88,7 @@ def POD(data, c, x, z, variables, file_str, Plotting=False):
             #plt.show()
             plt.close()
         elif data.ndim == 4:
-            for v in range(len(variables)):
+            for v in range(data.shape[-1]):
                 fig, ax =plt.subplots(len(indexes_to_plot), figsize=(12,6), tight_layout=True, sharex=True)
                 for i in range(len(indexes_to_plot)):
                     if len(indexes_to_plot) == 1:

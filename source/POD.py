@@ -25,6 +25,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 import json
 from Eval_Functions import *
+from Plotting_Functions import *
+from POD_functions import *
 
 import sys
 sys.stdout.reconfigure(line_buffering=True)
@@ -34,7 +36,7 @@ args = docopt(__doc__)
 
 input_path = args['--input_path']
 output_path = args['--output_path']
-snapshots = int(args['--snapshots'])
+snapshots_POD = int(args['--snapshots'])
 projection = args['--projection']
 modes_no = int(args['--modes_no'])
 print(projection)
@@ -43,26 +45,32 @@ if projection == 'False':
 elif projection == 'True':
     projection = True
 
-output_path = output_path+f"/snapshots{snapshots}/"
+output_path = output_path+f"/snapshots{snapshots_POD}/"
 print(output_path)
 if not os.path.exists(output_path):
     os.makedirs(output_path)
     print('made directory')
 
-def load_data(file, name):
+def load_data_set_TD(file, names, snapshots):
     with h5py.File(file, 'r') as hf:
         print(hf.keys())
-        print(name)
-        print(hf[name])
-        data = np.array(hf[name])
-
         x = hf['x'][:]  # 1D x-axis
         z = hf['z'][:]  # 1D z-axis
-        time = hf['total_time'][:]  # 1D time vector
+        time_vals = hf['time'][:]  # 1D time vector
+        
+        data = np.zeros((len(time_vals), len(x), len(z), len(names)))
+        
+        index=0
+        for name in names:
+            print(name)
+            print(hf[name])
+            Var = np.array(hf[name])
+            data[:,:,:,index] = Var[:snapshots,:,:]
+            index+=1
 
-    return data, x, z, time
+    return data, x, z, time_vals
 
-def load_data_set(file, names, snapshots):
+def load_data_set_RB(file, names, snapshots):
     with h5py.File(file, 'r') as hf:
         print(hf.keys())
         time_vals = np.array(hf['total_time_all'][:snapshots])
@@ -96,175 +104,26 @@ def load_data_set_Ra2e7(file, names, snapshots):
 
     return data, time_vals
 
-def POD(data, c,  file_str, Plotting=True):
-    if data.ndim == 3: #len(time_vals), len(x), len(z)
-            data_matrix = data.reshape(data.shape[0], data.shape[1]*data.shape[2])
-    elif data.ndim == 4: #len(time_vals), len(x), len(z), len(var)
-            data_matrix = data.reshape(data.shape[0], data.shape[1]*data.shape[2]*data.shape[3])
-    print('shape of data for POD:', np.shape(data_matrix))
-    pca = PCA(n_components=c, svd_solver='randomized', random_state=42)
-    pca.fit(data_matrix)
-    data_reduced = pca.transform(data_matrix)
-    print('shape of reduced_data:', np.shape(data_reduced))
-    data_reconstructed_reshaped = pca.inverse_transform(data_reduced)
-    print('shape of data reconstructed flattened:', np.shape(data_reconstructed_reshaped))
-    data_reconstructed = data_reconstructed_reshaped.reshape(data.shape)
-    print('shape of data reconstructed:', np.shape(data_reconstructed))
-    np.save(output_path+file_str+'_data_reduced.npy', data_reduced)
+#### LOAD DATA AND POD ####
+Data = 'RB'
+if Data == 'ToyData':
+    name = names = variables = ['combined']
+    n_components = 3
+    num_variables = 1
+    snapshots = 25000
+    data_set, x, z, time_vals = load_data_set_TD(input_path+'/plume_wave_dataset_smallergrid_longertime.h5', name, snapshots)
+    print('shape of dataset', np.shape(data_set))
+    dt = 0.05
 
-    components = pca.components_
-    print(np.shape(components))
-    # Get the explained variance ratio
-    explained_variance_ratio = pca.explained_variance_ratio_
-    # Calculate cumulative explained variance
-    cumulative_explained_variance = np.cumsum(explained_variance_ratio)
-    print('cumulative explained variance for', c, 'components is', cumulative_explained_variance[-1])
-    np.save(output_path+file_str+'_components.npy', components)
-    np.save(output_path+file_str+'_cumEV.npy', cumulative_explained_variance)
-
-    if Plotting:
-        # Plot cumulative explained variance
-        fig, ax = plt.subplots(1, figsize=(12,3))
-        ax.plot(cumulative_explained_variance*100, marker='o', linestyle='-', color='b')
-        ax2 = ax.twinx()
-        ax2.semilogy(explained_variance_ratio*100,  marker='o', linestyle='-', color='r')
-        ax.set_xlabel('Number of Modes')
-        ax.set_ylabel('Cumulative Energy (%)', color='blue')
-        #plt.axvline(x=truncated_modes, color='r', linestyle='--', label=f'Truncated Modes: {truncated_modes}')
-        ax2.set_ylabel('Inidvidual Energy (%)', color='red')
-        fig.savefig(output_path+file_str+'_EVRmodes.png')
-        #plt.show()
-        plt.close()
-
-        # Plot the time coefficients and mode structures
-        indexes_to_plot = np.array([1, 2, 10, 50, 100] ) -1
-        indexes_to_plot = indexes_to_plot[indexes_to_plot <= (c-1)]
-        print('plotting for modes', indexes_to_plot)
-        print('number of modes', len(indexes_to_plot))
-
-        #time coefficients
-        fig, ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
-        for index, element in enumerate(indexes_to_plot):
-            #ax.plot(index - data_reduced[:, element], label='S=%i' % (element+1))
-            ax.plot(data_reduced[:, element], label='S=%i' % (element+1))
-        ax.grid()
-        ax.legend()
-        #ax.set_yticks([])
-        ax.set_xlabel('Time Step $\Delta t$')
-        ax.set_ylabel('Time Coefficients')
-        fig.savefig(output_path+file_str+'_coef.png')
-        #plt.show()
-        plt.close()
-
-        # Visualize the modes
-        minm = components.min()
-        maxm = components.max()
-        if data.ndim == 3:
-            fig, ax =plt.subplots(len(indexes_to_plot), figsize=(12,6), tight_layout=True, sharex=True)
-            for i in range(len(indexes_to_plot)):
-                if len(indexes_to_plot) == 1:
-                    mode = components[indexes_to_plot[i]].reshape(data.shape[1], data.shape[2])  # Reshape to original dimensions for visualization
-                    c1 = ax.pcolormesh(x, z, mode[:, :].T, cmap='viridis', vmin=minm, vmax=maxm)  # Visualizing the first variable
-                    ax.set_title('mode % i' % (indexes_to_plot[i]+1))
-                    fig.colorbar(c1, ax=ax)
-                    ax.set_ylabel('z')
-                    ax.set_xlabel('x')
-                else:
-                    mode = components[indexes_to_plot[i]].reshape(data.shape[1], data.shape[2])  # Reshape to original dimensions for visualization              
-                    c1 = ax[i].pcolormesh(x, z, mode[:, :].T, cmap='viridis', vmin=minm, vmax=maxm)  # Visualizing the first variable
-                    #ax[i].axis('off')
-                    ax[i].set_title('mode % i' % (indexes_to_plot[i]+1))
-                    fig.colorbar(c1, ax=ax[i])
-                    ax[i].set_ylabel('z')
-                    ax[-1].set_xlabel('x')
-            fig.savefig(output_path+file_str+'_modes.png')
-            #plt.show()
-            plt.close()
-        elif data.ndim == 4:
-            for v in range(data.shape[-1]):
-                fig, ax =plt.subplots(len(indexes_to_plot), figsize=(12,6), tight_layout=True, sharex=True)
-                for i in range(len(indexes_to_plot)):
-                    if len(indexes_to_plot) == 1:
-                        mode = components[indexes_to_plot[i]].reshape(data.shape[1], data.shape[2], data.shape[3])  # Reshape to original dimensions for visualization
-                        c1 = ax.pcolormesh(x, z, mode[:, :, v].T, cmap='viridis')  # Visualizing the first variable
-                        ax.set_title('mode % i' % (indexes_to_plot[i]+1))
-                        fig.colorbar(c1, ax=ax)
-                        ax.set_ylabel('z')
-                        ax.set_xlabel('x')
-                    else:
-                        mode = components[indexes_to_plot[i]].reshape(data.shape[1], data.shape[2], data.shape[3])  # Reshape to original dimensions for visualization              
-                        c1 = ax[i].pcolormesh(x, z, mode[:, :, v].T, cmap='viridis')  # Visualizing the first variable
-                        #ax[i].axis('off')
-                        ax[i].set_title('mode % i' % (indexes_to_plot[i]+1))
-                        fig.colorbar(c1, ax=ax[i])
-                        ax[i].set_ylabel('z')
-                        ax[-1].set_xlabel('x')
-                fig.savefig(output_path+file_str+names[v]+'_modes.png')
-                #plt.show()
-                plt.close()
-
-    return data_reduced, data_reconstructed_reshaped, data_reconstructed, pca, cumulative_explained_variance[-1]
-
-def inverse_POD(data_reduced, pca_):
-    data_reconstructed_reshaped = pca_.inverse_transform(data_reduced)
-    print('shape of data reconstructed flattened:', np.shape(data_reconstructed_reshaped))
-    data_reconstructed = data_reconstructed_reshaped.reshape(data_reconstructed_reshaped.shape[0], len(x), len(z), len(variables))
-    print('shape of data reconstructed:', np.shape(data_reconstructed))
-    return data_reconstructed_reshaped, data_reconstructed 
-
-def transform_POD(data, pca_):
-    if data.ndim == 3: #len(time_vals), len(x), len(z)
-            data_matrix = data.reshape(data.shape[0], data.shape[1]*data.shape[2])
-    elif data.ndim == 4: #len(time_vals), len(x), len(z), len(var)
-            data_matrix = data.reshape(data.shape[0], data.shape[1]*data.shape[2]*data.shape[3])
-    data_reduced = pca_.transform(data_matrix)
-    print('shape of reduced_data:', np.shape(data_reduced))
-    return data_reduced
-
-'''
-#### plume ###
-data_names = ['plume', 'wave', 'combined']
-n_modes = [1, 2, 3]
-for index, name in enumerate(data_names):
-    data_set, x, z, time = load_data(input_path+'/plume_wave_dataset.h5', name)
-    data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_ = POD(data_set, n_modes[index], name)
-    plot_reconstruction(data_set, data_reconstructed, 32, 20, name)
-    nrmse = NRMSE(data_set, data_reconstructed)
-    mse   = MSE(data_set, data_reconstructed)
-    evr   = EVR_recon(data_set, data_reconstructed)
-    SSIM  = compute_ssim_for_4d(data_set, data_reconstructed)
-
-    print('NRMSE', nrmse)
-    print('MSE', mse)
-    print('EVR_recon', evr)
-    print('SSIM', SSIM)
-
-    # Full path for saving the file
-    output_file = name + '_metrics.json' 
-
-    output_path_met = os.path.join(output_path, output_file)
-
-    metrics = {
-    "no. modes": n_modes[index],
-    "EVR": evr,
-    "MSE": mse,
-    "NRMSE": nrmse,
-    "SSIM": SSIM,
-    }
-
-    with open(output_path_met, "w") as file:
-        json.dump(metrics, file, indent=4)
-'''
-
-variables = ['q_all', 'w_all', 'u_all', 'b_all']
-names = ['q', 'w', 'u', 'b']
-x = np.load(input_path+'/x.npy')
-z = np.load(input_path+'/z.npy')
-snapshots = 11200 #snapshots
-data_set, time_vals = load_data_set(input_path+'/data_4var_5000_48000.h5', variables, snapshots)
-#variables = ['q_vertical', 'w_vertical', 'u_vertical', 'b_vertical']
-#data_set, time_vals = load_data_set_Ra2e7(input_path+'/data_all.h5', variables, snapshots)
-print('shape of dataset', np.shape(data_set))
+elif Data == 'RB':
+    variables = ['q_all', 'w_all', 'u_all', 'b_all']
+    names = ['q', 'w', 'u', 'b']
+    x = np.load(input_path+'/x.npy')
+    z = np.load(input_path+'/z.npy')
+    snapshots_load = 16000
+    data_set, time_vals = load_data_set_RB(input_path+'/data_4var_5000_48000.h5', variables, snapshots_load)
+    print('shape of dataset', np.shape(data_set))
+    dt = 2
 
 #### change chape of dataset/add projecyion ####
 reduce_data_set = False
@@ -290,45 +149,46 @@ if reduce_data_set2:
 
 projection = projection
 if projection:
-    print('starting projection since projection', projection)
-    data_proj = data_set[16000:20000, :, :, :] #16000:20000
-    data_set = data_set[:11200, :, :, :] #:11200
-    time_vals_proj = time_vals[16000:20000]
-    time_vals = time_vals[:11200]
-    print('reduced dataset', np.shape(data_set))
-    print('reduced time', np.shape(time))
-    print('proejction dataset', np.shape(data_proj))
-    print('time of projection', time_vals_proj[0], time_vals_proj[1])
-    print(x[0], x[-1])
-
-    # data_proj = data_set[500:, :, :, :] #16000:20000
-    # data_set = data_set[:500, :, :, :] #:11200
-    # time_vals_proj = time_vals[500:]
-    # time_vals = time_vals[:500]
+    # print('starting projection since projection', projection)
+    # data_proj = data_set[16000:20000, :, :, :] #16000:20000
+    # data_set = data_set[:11200, :, :, :] #:11200
+    # time_vals_proj = time_vals[16000:20000]
+    # time_vals = time_vals[:11200]
     # print('reduced dataset', np.shape(data_set))
     # print('reduced time', np.shape(time))
     # print('proejction dataset', np.shape(data_proj))
+    # print('time of projection', time_vals_proj[0], time_vals_proj[1])
     # print(x[0], x[-1])
 
-#### plot dataset ####
-fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
-c1 = ax.pcolormesh(time_vals, x, data_set[:,:,32,0].T)
-fig.colorbar(c1, ax=ax)
-fig.savefig(input_path+'/combined_hovmoller_small_domain.png')
+    data_proj = data_set[5000:, :, :, :] #16000:20000
+    data_set = data_set[:5000, :, :, :] #:11200
+    time_vals_proj = time_vals[5000:]
+    time_vals = time_vals[:5000]
+    print('reduced dataset', np.shape(data_set))
+    print('reduced time', np.shape(time))
+    print('proejction dataset', np.shape(data_proj))
+    print(x[0], x[-1])
 
-fig, ax = plt.subplots(len(variables), figsize=(12, 3*len(variables)), tight_layout=True, sharex=True)
-for i in range(len(variables)):
-    if len(variables) == 1:
-        ax.pcolormesh(time_vals, x, data_set[:,:,32,i].T)
-        ax.set_ylabel('x')
-        ax.set_xlabel('time')
-        ax.set_title(names[i])
-    else:
-        ax[i].pcolormesh(time_vals, x, data_set[:,:,32,i].T)
-        ax[i].set_ylabel('x')
-        ax[i].set_title(names[i])
-        ax[-1].set_xlabel('time')
-fig.savefig(output_path+'/hovmoller.png')
+#### plot dataset ####
+if Data == 'ToyData':
+    fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
+    c1 = ax.pcolormesh(time_vals, x, data_set[:,:,32,0].T)
+    fig.colorbar(c1, ax=ax)
+    fig.savefig(input_path+'/combined_hovmoller_small_domain.png')
+if Data == 'RB':
+    fig, ax = plt.subplots(len(variables), figsize=(12, 3*len(variables)), tight_layout=True, sharex=True)
+    for i in range(len(variables)):
+        if len(variables) == 1:
+            ax.pcolormesh(time_vals, x, data_set[:,:,32,i].T)
+            ax.set_ylabel('x')
+            ax.set_xlabel('time')
+            ax.set_title(names[i])
+        else:
+            ax[i].pcolormesh(time_vals, x, data_set[:,:,32,i].T)
+            ax[i].set_ylabel('x')
+            ax[i].set_title(names[i])
+            ax[-1].set_xlabel('time')
+    fig.savefig(output_path+'/hovmoller.png')
 
 data_reshape = data_set.reshape(-1, data_set.shape[-1])
 print('shape of data reshaped', np.shape(data_reshape))
@@ -349,28 +209,43 @@ else:
     print('no scaling')
     data_scaled = data_set
 
+
+snapshots_POD  = snapshots_POD
+data_set       = data_set[:snapshots_POD]
+data_scaled    = data_scaled[:snapshots_POD]
+time_vals      = time_vals[:snapshots_POD]
+
+print('shape of data_set', np.shape(data_set))
+
 n_modes_list = [modes_no]#[16,32,64,100,128,256] #[10, 16, 32, 64, 100]
-#n_modes_list = np.arange(16, 192+16, 16)
 c_names = [f'Ra2e8_c{n}' for n in n_modes_list]
 #n_modes_list = [4, 8, 16, 25, 32, 64]
 #c_names = ['Ra2e8_c4', 'Ra2e8_c8', 'Ra2e8_c16', 'Ra2e8_c32', 'Ra2e8_c64', 'Ra2e8_c100','Ra2e8_c128'] #['Ra2e8_c10', 'Ra2e8_c16', 'Ra2e8_c32', 'Ra2e8_c64', 'Ra2e8_c100']
 index=0
 
-nrmse_list, evr_list, ssim_list, cumEV_list, nrmse_plume_list = [], [], [], [], []
-pnrmse_list, pevr_list, pssim_list, pnrmse_plume_list = [], [], [], []
+nrmse_list, evr_list, ssim_list, cumEV_list, nrmse_plume_list, nrmse_sep_list = [], [], [], [], [], []
+pnrmse_list, pevr_list, pssim_list, pnrmse_plume_list, pnrmse_sep_list = [], [], [], [], []
 
 POD_type = 'together'
 if POD_type == 'together':
     for n_modes in n_modes_list:
-        data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_, cev = POD(data_scaled, n_modes, c_names[index])
+
+        output_path = output_path+f"/modes{n_modes}/"
+        print(output_path)
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+            print('made directory')
+
+        data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_, cev = POD(data_scaled, n_modes, x, z, variables, output_path+c_names[index], Plotting=True)
         if scaling == 'SS':
             data_reconstructed = ss_inverse_transform(data_reconstructed, scaler)
         #plot_reconstruction(data_set, data_reconstructed, 32, 20, 'Ra2e7')
-        plot_reconstruction_and_error(data_set, data_reconstructed, 32, 75, x, z, time_vals, names, c_names[index])
-        nrmse = NRMSE(data_set, data_reconstructed)
-        mse   = MSE(data_set, data_reconstructed)
-        evr   = EVR_recon(data_set, data_reconstructed)
-        SSIM  = compute_ssim_for_4d(data_set, data_reconstructed)
+        plot_reconstruction_and_error(data_set, data_reconstructed, 32, 75, x, z, time_vals, names, output_path+c_names[index])
+        nrmse     = NRMSE(data_set, data_reconstructed)
+        mse       = MSE(data_set, data_reconstructed)
+        evr       = EVR_recon(data_set, data_reconstructed)
+        SSIM      = compute_ssim_for_4d(data_set, data_reconstructed)
+        nrmse_sep = NRMSE_per_channel(data_set, data_reconstructed)
 
         if len(variables) == 4:
             active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(data_set, data_reconstructed, z)
@@ -394,22 +269,32 @@ if POD_type == 'together':
             nrmse_plume = np.inf
 
         ### plt part of domain ###
-        plot_reconstruction_and_error(data_set[:500], data_reconstructed[:500], 32, 75, x, z, time_vals[:500], names, c_names[index]+'_500')
+        plot_reconstruction_and_error(data_set[:500], data_reconstructed[:500], 32, 75, x, z, time_vals[:500], names, output_path+c_names[index]+'_500')
 
 
         if projection:
+
+
+            proj_path = output_path+f"/proj{n_modes}/"
+            print(proj_path)
+            if not os.path.exists(proj_path):
+                os.makedirs(proj_path)
+                print('made directory')
+
+
             print('starting projection')
             data_scaled_proj           = ss_transform(data_proj, scaler)
             data_reduced_proj          = transform_POD(data_scaled_proj, pca_)
-            _, data_reconstructed_proj = inverse_POD(data_reduced_proj, pca_)
+            _, data_reconstructed_proj = inverse_POD(data_reduced_proj, x, z, variables, pca_)
             if scaling == 'SS':
                 data_reconstructed_proj     = ss_inverse_transform(data_reconstructed_proj, scaler)
 
-            plot_reconstruction_and_error(data_proj, data_reconstructed_proj, 32, 20, time_vals_proj, 'proj_'+c_names[index])
-            nrmse_proj = NRMSE(data_proj, data_reconstructed_proj)
-            mse_proj   = MSE(data_proj, data_reconstructed_proj)
-            evr_proj   = EVR_recon(data_proj, data_reconstructed_proj)
-            SSIM_proj  = compute_ssim_for_4d(data_proj, data_reconstructed_proj)
+            plot_reconstruction_and_error(data_proj, data_reconstructed_proj, 32, 20, x, z, time_vals_proj, names, proj_path+'proj_'+c_names[index])
+            nrmse_proj     = NRMSE(data_proj, data_reconstructed_proj)
+            mse_proj       = MSE(data_proj, data_reconstructed_proj)
+            evr_proj       = EVR_recon(data_proj, data_reconstructed_proj)
+            SSIM_proj      = compute_ssim_for_4d(data_proj, data_reconstructed_proj)
+            nrmse_sep_proj = NRMSE_per_channel(data_proj, data_reconstructed_proj)
 
             if len(variables) == 4:
                 active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(data_proj, data_reconstructed_proj, z)
@@ -427,7 +312,7 @@ if POD_type == 'together':
                 for v in range(2):
                     ax[v].set_xlabel('time')
                     ax[v].set_ylabel('x')
-                fig.savefig(output_path+f"/proj_active_plumes_{c_names[index]}.png")
+                fig.savefig(proj_path+f"/proj_active_plumes_{c_names[index]}.png")
                 plt.close()
             else:
                 nrmse_plume_proj = np.inf
@@ -439,6 +324,7 @@ if POD_type == 'together':
         print('EVR_recon', evr)
         print('SSIM', SSIM)
         print('NRMSE plume', nrmse_plume)
+        print('NRMSE per channel', nrmse_sep)
 
         # Full path for saving the file
         output_file = c_names[index] + '_metrics.json' 
@@ -453,6 +339,7 @@ if POD_type == 'together':
         "SSIM": SSIM,
         "cumEV from POD": cev,
         "NRMSE plume": nrmse_plume,
+        "NRMSE per channel": nrmse_sep,
         }
 
         with open(output_path_met, "w") as file:
@@ -463,12 +350,13 @@ if POD_type == 'together':
         evr_list.append(evr)
         cumEV_list.append(cev)
         nrmse_plume_list.append(nrmse_plume)
+        nrmse_sep_list.append(nrmse_sep)
 
         if projection:
             # Full path for saving the file
             output_file = c_names[index] + '_proj_metrics.json' 
 
-            output_path_met = os.path.join(output_path, output_file)
+            output_path_met = os.path.join(proj_path, output_file)
 
             metrics = {
             "no. modes": n_modes,
@@ -479,6 +367,7 @@ if POD_type == 'together':
             "NRMSE": nrmse_proj,
             "SSIM": SSIM_proj,
             "NRMSE plume": nrmse_plume_proj,
+            "NRMSE per channel": nrmse_sep_proj,
             }
 
             with open(output_path_met, "w") as file:
@@ -488,11 +377,19 @@ if POD_type == 'together':
             pssim_list.append(SSIM_proj)
             pevr_list.append(evr_proj)
             pnrmse_plume_list.append(nrmse_plume_proj)
+            pnrmse_sep_list.append(nrmse_sep_proj)
 
         index +=1
 
 if POD_type == 'seperate':
     for n_modes in n_modes_list:
+    
+        output_path = output_path+f"/modes{n_modes}/"
+        print(output_path)
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+            print('made directory')
+
         recon_per_variable = []
         data_true_per_variable = []
 
@@ -500,7 +397,7 @@ if POD_type == 'seperate':
             data_scaled_sep = data_scaled[:, :, :, V:V+1]
             print('data scaled seperate shape', np.shape(data_scaled_sep))
 
-            data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_, cev = POD(data_scaled_sep, n_modes, c_names[index])
+            data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_, cev = POD(data_scaled_sep, n_modes, x, z, variables, output_path+c_names[index], Plotting=True)
             print('shape of data_reconstructed from POD', np.shape(data_reconstructed))
             #plot_reconstruction(data_set, data_reconstructed, 32, 20, 'Ra2e7')
             recon_per_variable.append(data_reconstructed)
@@ -512,11 +409,12 @@ if POD_type == 'seperate':
             print('applying inverse scaling')
             data_reconstructed = ss_inverse_transform(data_reconstructed, scaler)
         
-        plot_reconstruction_and_error(data_set, data_reconstructed, 32, 20, time_vals, c_names[index])
+        plot_reconstruction_and_error(data_set, data_reconstructed, 32, 20, x, z, time_vals, names, output_path+c_names[index])
         nrmse = NRMSE(data_set, data_reconstructed)
         mse   = MSE(data_set, data_reconstructed)
         evr   = EVR_recon(data_set, data_reconstructed)
         SSIM  = compute_ssim_for_4d(data_set, data_reconstructed)
+        nrmse_sep = NRMSE_per_channel(data_set, data_reconstructed)
 
         if len(variables) == 4:
             active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(data_set, data_reconstructed, z)
@@ -541,16 +439,24 @@ if POD_type == 'seperate':
 
         if projection:
             print('starting projection')
+
+            proj_path = output_path+f"/proj{n_modes}/"
+            print(proj_path)
+            if not os.path.exists(proj_path):
+                os.makedirs(proj_path)
+                print('made directory')
+
             data_reduced_proj          = transform_POD(data_proj, pca_)
             _, data_reconstructed_proj = inverse_POD(data_reduced_proj, pca_)
             if scaling == 'SS':
                 data_reconstructed_proj     = ss_inverse_transform(data_reconstructed_proj, scaler)
 
-            plot_reconstruction_and_error(data_proj[:1000], data_reconstructed_proj[:1000], 32, 20, time_vals_proj, 'proj_partial_'+c_names[index])
+            plot_reconstruction_and_error(data_proj[:1000], data_reconstructed_proj[:1000], 32, 20, x, z, time_vals_proj, names, proj_path+'proj_partial_'+c_names[index])
             nrmse_proj = NRMSE(data_proj, data_reconstructed_proj)
             mse_proj   = MSE(data_proj, data_reconstructed_proj)
             evr_proj   = EVR_recon(data_proj, data_reconstructed_proj)
             SSIM_proj  = compute_ssim_for_4d(data_proj, data_reconstructed_proj)
+            nrmse_sep_proj = NRMSE_per_channel(data_set, data_reconstructed)
 
             if len(variables) == 4:
                 active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(data_proj, data_reconstructed_proj, z)
@@ -569,7 +475,7 @@ if POD_type == 'seperate':
                     ax[v].set_xlabel('time')
                     ax[v].set_ylabel('x')
 
-                fig.savefig(output_path+f"/proj_active_plumes_{c_names[index]}.png")
+                fig.savefig(proj_path+f"/proj_active_plumes_{c_names[index]}.png")
                 plt.close()
             else:
                 nrmse_plume_proj = np.inf
@@ -595,6 +501,7 @@ if POD_type == 'seperate':
         "SSIM": SSIM,
         "cumEV from POD": cev,
         "NRMSE plume": nrmse_plume,
+        "NRMSE per channel": nrmse_sep,
         }
 
         with open(output_path_met, "w") as file:
@@ -613,6 +520,7 @@ np.save(output_path+'/nrmse_list.npy', nrmse_list)
 np.save(output_path+'/cumEV_list.npy', cumEV_list)
 np.save(output_path+'/nrmse_plume_list.npy', nrmse_plume_list)
 
+'''
 fig, ax =plt.subplots(1, figsize=(8,6), tight_layout=True)
 ax.plot(n_modes_list, ssim_list)
 ax.set_xlabel('modes')
@@ -691,3 +599,4 @@ if projection:
     fig.savefig(output_path+'/pnrmse_plume_list.png')
     plt.close()
 
+'''

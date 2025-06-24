@@ -113,7 +113,26 @@ with open(ESN_hyperparam_file, "r") as f:
     alpha0 = hyperparams["alpha0"]
     n_forward = hyperparams["n_forward"]
 
-def load_data_set(file, names, snapshots):
+def load_data_set_TD(file, names, snapshots):
+    with h5py.File(file, 'r') as hf:
+        print(hf.keys())
+        x = hf['x'][:]  # 1D x-axis
+        z = hf['z'][:]  # 1D z-axis
+        time_vals = hf['time'][:]  # 1D time vector
+        
+        data = np.zeros((len(time_vals), len(x), len(z), len(names)))
+        
+        index=0
+        for name in names:
+            print(name)
+            print(hf[name])
+            Var = np.array(hf[name])
+            data[:,:,:,index] = Var[:snapshots,:,:]
+            index+=1
+
+    return data, x, z, time_vals
+
+def load_data_set_RB(file, names, snapshots):
     with h5py.File(file, 'r') as hf:
         print(hf.keys())
         time_vals = np.array(hf['total_time_all'][:snapshots])
@@ -130,6 +149,7 @@ def load_data_set(file, names, snapshots):
 
     return data, time_vals
 
+#### AUTOENCODER ####
 def split_data(U, b_size, n_batches):
 
     '''
@@ -289,16 +309,27 @@ def global_parameters(data):
     return global_params
 
 #### LOAD DATA ####
-variables = ['q_all', 'w_all', 'u_all', 'b_all']
-names = ['q', 'w', 'u', 'b']
-x = np.load(input_path+'/x.npy')
-z = np.load(input_path+'/z.npy')
-snapshots = 16000
-data_set, time_vals = load_data_set(input_path+'/data_4var_5000_30000.h5', variables, snapshots)
-print(np.shape(data_set))
-dt = time_vals[1]-time_vals[0]
+Data = 'RB'
+if Data == 'ToyData':
+    name = names = variables = ['combined']
+    n_components = 3
+    num_variables = 1
+    snapshots = 25000
+    data_set, x, z, time_vals = load_data_set_TD(input_path+'/plume_wave_dataset_smallergrid_longertime.h5', name, snapshots)
+    print('shape of dataset', np.shape(data_set))
+    dt = 0.05
 
-reduce_data_set = reduce_domain2 = reduce_domain = False
+elif Data == 'RB':
+    variables = ['q_all', 'w_all', 'u_all', 'b_all']
+    names = ['q', 'w', 'u', 'b']
+    x = np.load(input_path+'/x.npy')
+    z = np.load(input_path+'/z.npy')
+    snapshots_load = 16000
+    data_set, time_vals = load_data_set_RB(input_path+'/data_4var_5000_48000.h5', variables, snapshots_load)
+    print('shape of dataset', np.shape(data_set))
+    dt = 2
+
+reduce_data_set = reduce_domain = reduce_domain2 = False
 if reduce_data_set:
     data_set = data_set[:, 32:96, :, :]
     x = x[32:96]
@@ -312,9 +343,6 @@ truth_global = global_parameters(data_set)
 global_labels=['KE', 'q']
 
 U = data_set
-dt = time_vals[1]-time_vals[0]
-print('dt:', dt)
-
 # Load hyperparameters from a YAML file
 with open(CAE_hyperparam_file, 'r') as file:
     hyperparameters = yaml.safe_load(file)
@@ -518,7 +546,7 @@ else:
 
 ###### ESN #######
 upsample   = 1
-data_len   = 10000
+data_len   = 11200
 transient  = 0
 
 dt = dt*upsample
@@ -543,9 +571,6 @@ N_train   = train_len*N_lyap #600
 N_val     = val_len*N_lyap #45
 N_test    = test_len*N_lyap #45
 
-indexes_to_plot = np.array([1, 2, 8, 16, 32, dim] ) -1
-indexes_to_plot = indexes_to_plot[indexes_to_plot <= (dim-1)]
-
 # compute normalization factor (range component-wise)
 U_data = U[:N_washout+N_train].copy()
 m = U_data.min(axis=0)
@@ -566,6 +591,12 @@ U_washout = U[:N_washout].copy()
 # data to be used for training + validation
 U_tv  = U[N_washout:N_washout+N_train-1].copy() #inputs
 Y_tv  = U[N_washout+1:N_washout+N_train].copy() #data to match at next timestep
+
+if Data == 'ToyData':
+    indexes_to_plot = np.array([1, 2, 3, 4] ) -1
+else:
+    indexes_to_plot = np.array([1, 2, 8, 16, 32, 64] ) -1
+indexes_to_plot = indexes_to_plot[indexes_to_plot <= (n_components-1)]
 
 # adding noise to training set inputs with sigma_n the noise of the data
 # improves performance and regularizes the error as a function of the hyperparameters
@@ -629,9 +660,9 @@ print('norm:', norm)
 print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
-test_interval = False
+test_interval = True
 validation_interval = False
-statistics_interval = True
+statistics_interval = False
 fourier = False
 vertical_profiles = False
 reservoir_investigation = False
@@ -648,7 +679,7 @@ if validation_interval:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.1
+    threshold_ph = 0.2
 
     ensemble_test = ens
 
@@ -847,7 +878,7 @@ if validation_interval:
 if test_interval:
     ##### quick test #####
     print('TESTING')
-    N_test   = 20                    #number of intervals in the test set
+    N_test   = 40                    #number of intervals in the test set
     if reduce_domain:
         N_tstart = N_train + N_washout_val
     elif reduce_domain2:
@@ -855,13 +886,13 @@ if test_interval:
     else:
         N_tstart = int(N_train + N_washout) #850    #where the first test interval starts
     N_intt   = int(test_len*N_lyap)             #length of each test set interval
-    N_gap    = int(3*N_lyap)
+    N_gap    = int(N_lyap)
 
     print('N_intt=', N_intt)
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.1
+    threshold_ph = 0.2
 
     ensemble_test = ens
 
@@ -872,6 +903,7 @@ if test_interval:
     ens_ssim        = np.zeros((ensemble_test))
     ens_evr         = np.zeros((ensemble_test))
     ens_nrmse_plume = np.zeros((ensemble_test))
+    ens_PH_recons   = np.zeros((ensemble_test))
 
     images_test_path = output_path+'/test_images/'
     if not os.path.exists(images_test_path):
@@ -902,7 +934,7 @@ if test_interval:
         plot = True
         Plotting = True
         if plot:
-            n_plot = 20
+            n_plot = 5
             plt.rcParams["figure.figsize"] = (15,3*n_plot)
             plt.figure()
             plt.tight_layout()
@@ -965,11 +997,15 @@ if test_interval:
             else:
                 nrmse_plume = np.inf
 
+            nrmse_recons = compute_nrmse_per_timestep_variable(reconstructed_truth, reconstructed_predictions, normalize_by="std")
+            horizons_recons = find_prediction_horizon(nrmse_recons, 0.2)/N_lyap
+
             print('NRMSE', nrmse)
             print('MSE', mse)
             print('EVR_recon', evr)
             print('SSIM', SSIM)
             print('NRMSE plume', nrmse_plume)
+            print('horizons recons', horizons_recons)
 
             # Full path for saving the file
             output_file = 'ESN_test_metrics_ens%i_test%i.json' % (j,i)
@@ -985,6 +1021,7 @@ if test_interval:
             "SSIM": float(SSIM),
             "NRMSE plume": float(nrmse_plume),
             "PH": float(PH[i]),
+            "PH recons": float(horizons_recons),
             }
 
             with open(output_path_met, "w") as file:
@@ -995,6 +1032,7 @@ if test_interval:
             ens_nrmse_plume[j] += nrmse_plume
             ens_evr[j]         += evr
             ens_PH2[j]         += PH[i]
+            ens_PH_recons[j]   += horizons_recons
 
             if plot:
                 #left column has the washout (open-loop) and right column the prediction (closed-loop)
@@ -1027,6 +1065,7 @@ if test_interval:
         ens_ssim[j]        = ens_ssim[j] / N_test
         ens_evr[j]         = ens_evr[j] / N_test
         ens_PH2[j]         = ens_PH2[j] / N_test  
+        ens_PH_recons[j]   = ens_PH_recons[j] / N_test
              
     # Full path for saving the file
     output_file_ALL = 'ESN_test_metrics_all.json' 
@@ -1045,6 +1084,7 @@ if test_interval:
     "mean NRMSE plume": np.mean(ens_nrmse_plume),
     "mean EVR": np.mean(ens_evr),
     "mean ssim": np.mean(ens_ssim),
+    "mean PH recons": np.mean(ens_PH_recons),
     }
 
     with open(output_path_met_ALL, "w") as file:
@@ -1070,7 +1110,7 @@ if statistics_interval:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.1
+    threshold_ph = 0.2
 
     ensemble_test = ens
 

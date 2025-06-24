@@ -312,6 +312,43 @@ def MSE(original_data, reconstructed_data):
     mse = mean_squared_error(original_data, reconstructed_data)
     return mse
 
+def NRMSE_per_channel(true, pred, reduction='mean'):
+    """
+    Compute NRMSE per channel and optionally average them.
+    
+    Parameters:
+        true (ndarray): Ground truth data of shape (time, width, height, channels)
+        pred (ndarray): Predicted data of same shape
+        reduction (str): 'mean', 'sum', or 'none' — how to aggregate channel NRMSEs
+    
+    Returns:
+        float or list: Aggregated NRMSE or list of NRMSEs per channel
+    """
+    assert true.shape == pred.shape, "Input shapes must match"
+    assert true.ndim == 4, "Expected input shape (time, width, height, channels)"
+    
+    n_channels = true.shape[-1]
+    nrmse_per_channel = []
+
+    for c in range(n_channels):
+        true_c = true[..., c].ravel()
+        pred_c = pred[..., c].ravel()
+        
+        rmse = np.sqrt(mean_squared_error(true_c, pred_c))
+        std = np.std(true_c)
+        nrmse = rmse / std if std != 0 else np.nan  # Avoid divide by zero
+        nrmse_per_channel.append(nrmse)
+    
+    if reduction == 'mean':
+        return np.nanmean(nrmse_per_channel)
+    elif reduction == 'sum':
+        return np.nansum(nrmse_per_channel)
+    elif reduction == 'none':
+        return nrmse_per_channel
+    else:
+        raise ValueError("reduction must be 'mean', 'sum', or 'none'")
+
+
 def compute_nrmse_per_timestep_variable(original_data, reconstructed_data, normalize_by="std"):
     """
     Compute NRMSE for each timestep and variable.

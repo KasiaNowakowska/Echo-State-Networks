@@ -702,8 +702,8 @@ if not os.path.exists(output_path):
 val      = eval(val)
 alpha = alpha
 N_fw     = n_forward*N_lyap
-N_fo     = (N_train-N_val-N_washout)//N_fw + 1 
-#N_fo     = 50                     # number of validation intervals
+#N_fo     = (N_train-N_val-N_washout)//N_fw + 1 
+N_fo     = 50                     # number of validation intervals
 N_in     = N_washout                 # timesteps before the first validation interval (can't be 0 due to implementation)
 #N_fw     = (N_train-N_val-N_washout)//(N_fo-1) # how many steps forward the validation interval is shifted (in this way they are evenly spaced)
 N_splits = 4                         # reduce memory requirement by increasing N_splits
