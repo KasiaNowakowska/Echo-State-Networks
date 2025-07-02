@@ -519,9 +519,9 @@ for i in range(N_parallel):
 
 validation_data = False
 test_data = False
-all_data = False
+all_data = True
 visualisation = False
-encoded_data_investigation = True
+encoded_data_investigation = False
 
 if validation_data:
     print('VALIDATION DATA')
@@ -703,17 +703,21 @@ if all_data:
         truth_unscaled = ss_inverse_transform(truth, scaler)
 
         # Compute metrics
+        print('shape of decoded unscaled', np.shape(decoded_unscaled))
+        print('shape of truth_unscaled', np.shape(truth_unscaled))
         test_ssim = compute_ssim_for_4d(truth_unscaled, decoded_unscaled)
         mse = MSE(truth_unscaled, decoded_unscaled)
         nrmse = NRMSE(truth_unscaled, decoded_unscaled)
         evr = EVR_recon(truth_unscaled, decoded_unscaled)
+        nrmse_sep = NRMSE_per_channel(truth_unscaled, decoded_unscaled)
 
         chunk_metrics = {
             "chunk": chunk_idx,
             "MSE": mse,
             "NRMSE": nrmse,
             "SSIM": test_ssim,
-            "EVR": evr
+            "EVR": evr,
+            "NRMSE sep": nrmse_sep,
         }
 
         # Optional plume NRMSE if variables == 4
@@ -730,8 +734,8 @@ if all_data:
             plot_reconstruction_and_error(
                 truth_unscaled[:500],
                 decoded_unscaled[:500],
-                32, 75,
-                f"/test_all_chunk_{chunk_idx}"
+                32, 75, x, z, time_vals[:500], variables,
+                output_path+f"/test_all_chunk_{chunk_idx}"
             )
 
             fig, ax = plt.subplots(1)
