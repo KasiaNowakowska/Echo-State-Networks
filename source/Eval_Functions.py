@@ -348,7 +348,54 @@ def NRMSE_per_channel(true, pred, reduction='mean'):
     else:
         raise ValueError("reduction must be 'mean', 'sum', or 'none'")
 
+def NRMSE_per_channel_masked(true, pred, mask, global_stds, reduction='mean'):
+    """
+    Compute NRMSE per channel using only masked points, normalized by global stds.
+    
+    Parameters:
+        true (ndarray): Ground truth data, shape (time, width, height, channels)
+        pred (ndarray): Predicted data, same shape as true
+        mask (ndarray): Boolean mask, shape (time, width, height)
+        global_stds (list or array): Global std for each channel
+        reduction (str): 'mean', 'sum', or 'none' to aggregate channel NRMSEs
 
+    Returns:
+        float or list: Aggregated NRMSE or list of NRMSEs per channel
+    """
+    assert true.shape == pred.shape, "Input shapes must match"
+    assert true.ndim == 4, "Expected input shape (time, width, height, channels)"
+    assert mask.shape == true.shape[:3], "Mask shape must match (time, width, height)"
+    assert len(global_stds) == true.shape[-1], "One std per channel required"
+
+    n_channels = true.shape[-1]
+    nrmse_per_channel = []
+
+    for c in range(n_channels):
+        true_c = true[..., c]
+        pred_c = pred[..., c]
+        
+        # Select only masked points
+        true_masked = true_c[mask]
+        pred_masked = pred_c[mask]
+        
+        if true_masked.size == 0:
+            nrmse_per_channel.append(np.nan)
+            continue
+
+        rmse = np.sqrt(np.mean((true_masked - pred_masked) ** 2))
+        std = global_stds[c]
+        nrmse = rmse / (std + 1e-6)  # small epsilon to avoid div by zero
+        nrmse_per_channel.append(nrmse)
+
+    if reduction == 'mean':
+        return np.nanmean(nrmse_per_channel)
+    elif reduction == 'sum':
+        return np.nansum(nrmse_per_channel)
+    elif reduction == 'none':
+        return nrmse_per_channel
+    else:
+        raise ValueError("reduction must be 'mean', 'sum', or 'none'")
+    
 def compute_nrmse_per_timestep_variable(original_data, reconstructed_data, normalize_by="std"):
     """
     Compute NRMSE for each timestep and variable.

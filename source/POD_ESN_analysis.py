@@ -326,14 +326,17 @@ print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
 test_interval = True
-validation_interval = False
+validation_interval = True
 statistics_interval = False
 initiation_interval = False
 initiation_interval2 = False
 
+train_data = data_scaled[:int(N_washout+N_train)]
+global_stds = [np.std(train_data[..., c]) for c in range(train_data.shape[-1])]
+
 if validation_interval:
     print('VALIDATION (TEST)')
-    N_test   = 63                    #number of intervals in the test set
+    N_test   = 12                    #number of intervals in the test set
     if reduce_domain2:
         N_tstart = N_washout
     else:
@@ -354,6 +357,8 @@ if validation_interval:
     ens_ssim        = np.zeros((ensemble_test))
     ens_evr         = np.zeros((ensemble_test))
     ens_nrmse_plume = np.zeros((ensemble_test))
+    ens_nrmse_ch    = np.zeros((ensemble_test))
+    ens_nrmse_ch_pl = np.zeros((ensemble_test))
 
     images_val_path = output_path+'/validation_images/'
     if not os.path.exists(images_val_path):
@@ -421,10 +426,11 @@ if validation_interval:
             reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
 
             # metrics
-            nrmse = NRMSE(reconstructed_truth, reconstructed_predictions)
-            mse   = MSE(reconstructed_truth, reconstructed_predictions)
-            evr   = EVR_recon(reconstructed_truth, reconstructed_predictions)
-            SSIM  = compute_ssim_for_4d(reconstructed_truth, reconstructed_predictions)
+            nrmse    = NRMSE(reconstructed_truth, reconstructed_predictions)
+            mse      = MSE(reconstructed_truth, reconstructed_predictions)
+            evr      = EVR_recon(reconstructed_truth, reconstructed_predictions)
+            SSIM     = compute_ssim_for_4d(reconstructed_truth, reconstructed_predictions)
+            nrmse_ch = NRMSE_per_channel(reconstructed_truth, reconstructed_predictions)
 
             if len(variables) == 4:
                 active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(reconstructed_truth, reconstructed_predictions, z)
@@ -438,17 +444,25 @@ if validation_interval:
 
                     # Compute NRMSE only if mask is not empty
                     nrmse_plume = NRMSE(masked_truth, masked_pred)
+
+                    mask_original     = mask[..., 0]
+                    nrmse_sep_plume   = NRMSE_per_channel_masked(reconstructed_truth, reconstructed_predictions, mask_original, global_stds) 
+
                 else:
                     print("Mask is empty, no plumes detected.")
                     nrmse_plume = 0  # Simply add 0 to maintain shape
+                    nrmse_sep_plume = 0
             else:
                 nrmse_plume = np.inf
+                nrmse_sep_plume = np.inf
 
             print('NRMSE', nrmse)
             print('MSE', mse)
             print('EVR_recon', evr)
             print('SSIM', SSIM)
             print('NRMSE plume', nrmse_plume)
+            print('NRMSE per channel', nrmse_ch)
+            print('NRMSE per channel in plume', nrmse_sep_plume)
 
             # Full path for saving the file
             output_file = 'ESN_validation_metrics_ens%i_test%i.json' % (j,i)
@@ -464,6 +478,8 @@ if validation_interval:
             "SSIM": SSIM,
             "NRMSE plume": nrmse_plume,
             "PH": PH[i],
+            "NRMSE per channel": nrmse_ch,
+            "NRMSE per channel in plume": nrmse_sep_plume,
             }
 
             with open(output_path_met, "w") as file:
@@ -474,6 +490,9 @@ if validation_interval:
             ens_nrmse_plume[j] += nrmse_plume
             ens_evr[j]         += evr
             ens_PH2[j]         += PH[i]
+            ens_nrmse_ch[j]    += nrmse_ch
+            nrmse_sep_plume     = np.nan_to_num(nrmse_sep_plume, nan=0.0)  # replace NaNs with zero
+            ens_nrmse_ch_pl[j] += nrmse_sep_plume
 
             if plot:
                 #left column has the washout (open-loop) and right column the prediction (closed-loop)
@@ -505,6 +524,8 @@ if validation_interval:
         ens_ssim[j]        = ens_ssim[j] / N_test
         ens_evr[j]         = ens_evr[j] / N_test
         ens_PH2[j]         = ens_PH2[j] / N_test  
+        ens_nrmse_ch[j]    = ens_nrmse_ch[j] / N_test
+        ens_nrmse_ch_pl[j] = ens_nrmse_ch_pl[j] / N_test
              
     # Full path for saving the file
     output_file_ALL = 'ESN_validation_metrics_all.json' 
@@ -523,6 +544,8 @@ if validation_interval:
     "mean NRMSE plume": np.mean(ens_nrmse_plume),
     "mean EVR": np.mean(ens_evr),
     "mean ssim": np.mean(ens_ssim),
+    "mean NRMSE per channel": np.mean(ens_nrmse_ch),
+    "mean NRMSE per channel in plume": np.nanmean(ens_nrmse_ch_pl),
     }
 
     with open(output_path_met_ALL, "w") as file:
@@ -554,6 +577,8 @@ if test_interval:
     ens_ssim        = np.zeros((ensemble_test))
     ens_evr         = np.zeros((ensemble_test))
     ens_nrmse_plume = np.zeros((ensemble_test))
+    ens_nrmse_ch    = np.zeros((ensemble_test))
+    ens_nrmse_ch_pl = np.zeros((ensemble_test))
 
     images_test_path = output_path+'/test_images/'
     if not os.path.exists(images_test_path):
@@ -631,6 +656,7 @@ if test_interval:
             mse   = MSE(reconstructed_truth, reconstructed_predictions)
             evr   = EVR_recon(reconstructed_truth, reconstructed_predictions)
             SSIM  = compute_ssim_for_4d(reconstructed_truth, reconstructed_predictions)
+            nrmse_ch = NRMSE_per_channel(reconstructed_truth, reconstructed_predictions)
 
             if len(variables) == 4:
                 active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(reconstructed_truth, reconstructed_predictions, z)
@@ -644,17 +670,25 @@ if test_interval:
 
                     # Compute NRMSE only if mask is not empty
                     nrmse_plume = NRMSE(masked_truth, masked_pred)
+
+                    mask_original     = mask[..., 0]
+                    nrmse_sep_plume   = NRMSE_per_channel_masked(reconstructed_truth, reconstructed_predictions, mask_original, global_stds) 
+
                 else:
                     print("Mask is empty, no plumes detected.")
                     nrmse_plume = 0  # Simply add 0 to maintain shape
+                    nrmse_sep_plume = 0
             else:
                 nrmse_plume = np.inf
+                nrmse_sep_plume = np.inf
 
             print('NRMSE', nrmse)
             print('MSE', mse)
             print('EVR_recon', evr)
             print('SSIM', SSIM)
             print('NRMSE plume', nrmse_plume)
+            print('NRMSE per channel', nrmse_ch)
+            print('NRMSE per channel in plume', nrmse_sep_plume)
 
             ## global parameters ##
             PODtruth_global    = global_parameters(reconstructed_truth)
@@ -682,6 +716,8 @@ if test_interval:
             "PH": PH[i],
             "NRMSE global": nrmse_global,
             "MSE global": mse_global,
+            "NRMSE per channel": nrmse_ch,
+            "NRMSE per channel in plume": nrmse_sep_plume,
             }
 
             with open(output_path_met, "w") as file:
@@ -692,6 +728,9 @@ if test_interval:
             ens_nrmse_plume[j] += nrmse_plume
             ens_evr[j]         += evr
             ens_PH2[j]         += PH[i]
+            ens_nrmse_ch[j]    += nrmse_ch
+            nrmse_sep_plume = np.nan_to_num(nrmse_sep_plume, nan=0.0)  # replace NaNs with zero
+            ens_nrmse_ch_pl[j] += nrmse_sep_plume
 
             ens_nrmse_global[j]+= nrmse_global
             ens_mse_global[j]  += mse_global
@@ -728,7 +767,9 @@ if test_interval:
         ens_nrmse_plume[j] = ens_nrmse_plume[j] / N_test
         ens_ssim[j]        = ens_ssim[j] / N_test
         ens_evr[j]         = ens_evr[j] / N_test
-        ens_PH2[j]         = ens_PH2[j] / N_test  
+        ens_PH2[j]         = ens_PH2[j] / N_test 
+        ens_nrmse_ch[j]    = ens_nrmse_ch[j] / N_test
+        ens_nrmse_ch_pl[j] = ens_nrmse_ch_pl[j] / N_test 
              
     # Full path for saving the file
     output_file_ALL = 'ESN_test_metrics_all.json' 
@@ -737,6 +778,7 @@ if test_interval:
 
     flatten_PH = ens_PH.flatten()
     print('flat PH', flatten_PH)
+    print('channel plume nrmse', ens_nrmse_ch_pl)
 
     metrics_ens_ALL = {
     "mean PH": np.mean(ens_PH2),
@@ -747,6 +789,8 @@ if test_interval:
     "mean NRMSE plume": np.mean(ens_nrmse_plume),
     "mean EVR": np.mean(ens_evr),
     "mean ssim": np.mean(ens_ssim),
+    "mean NRMSE per channel": np.mean(ens_nrmse_ch),
+    "mean NRMSE per channel in plume": np.nanmean(ens_nrmse_ch_pl),
     }
 
     with open(output_path_met_ALL, "w") as file:

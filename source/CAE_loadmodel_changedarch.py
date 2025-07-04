@@ -164,6 +164,27 @@ if reduce_domain:
     print('reduced x domain', len(x))
     print(x[0], x[-1])
 
+#### plot dataset ####
+if Data == 'ToyData':
+    fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
+    c1 = ax.pcolormesh(time_vals, x, data_set[:,:,32,0].T)
+    fig.colorbar(c1, ax=ax)
+    fig.savefig(input_path+'/combined_hovmoller_small_domain.png')
+if Data == 'RB':
+    fig, ax = plt.subplots(len(variables), figsize=(12, 3*len(variables)), tight_layout=True, sharex=True)
+    for i in range(len(variables)):
+        if len(variables) == 1:
+            ax.pcolormesh(time_vals, x, data_set[:,:,32,i].T)
+            ax.set_ylabel('x')
+            ax.set_xlabel('time')
+            ax.set_title(names[i])
+        else:
+            ax[i].pcolormesh(time_vals[:500], x, data_set[:500,:,32,i].T)
+            ax[i].set_ylabel('x')
+            ax[i].set_title(names[i])
+            ax[-1].set_xlabel('time')
+    fig.savefig(output_path+'/hovmoller.png')
+
 U = data_set
 
 import yaml
@@ -723,8 +744,17 @@ if all_data:
         # Optional plume NRMSE if variables == 4
         if len(variables) == 4:
             _, _, mask, _ = active_array_calc(truth_unscaled, decoded_unscaled, z)
+            print('shape of masked area', np.shape(truth_unscaled[mask]))
             nrmse_plume = NRMSE(truth_unscaled[mask], decoded_unscaled[mask])
+
+            truth_masked      = truth_unscaled[mask].reshape(-1,4)
+            decoded_masked    = decoded_unscaled[mask].reshape(-1,4)
+            truth_masked_4d   = truth_masked[:, np.newaxis, np.newaxis, :]
+            decoded_masked_4d = decoded_masked[:, np.newaxis, np.newaxis, :]
+            nrmse_sep_plume = NRMSE_per_channel(truth_masked_4d, decoded_masked_4d) 
+            
             chunk_metrics["plume NRMSE"] = nrmse_plume
+            chunk_metrics["plume sep NRMSE"] = nrmse_sep_plume
 
         # Save metrics per chunk
         metrics_list.append(chunk_metrics)
@@ -737,6 +767,9 @@ if all_data:
                 32, 75, x, z, time_vals[:500], variables,
                 output_path+f"/test_all_chunk_{chunk_idx}"
             )
+
+            np.save(output_path+'/CAE_decoded.npy', decoded_unscaled)
+            np.save(output_path+'/true_data.npy', truth_unscaled)
 
             fig, ax = plt.subplots(1)
             ax.plot(decoded_unscaled[0, :, 32, 0], label='dec')

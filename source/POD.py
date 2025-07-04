@@ -184,7 +184,7 @@ if Data == 'RB':
             ax.set_xlabel('time')
             ax.set_title(names[i])
         else:
-            ax[i].pcolormesh(time_vals, x, data_set[:,:,32,i].T)
+            ax[i].pcolormesh(time_vals[:500], x, data_set[:500,:,32,i].T)
             ax[i].set_ylabel('x')
             ax[i].set_title(names[i])
             ax[-1].set_xlabel('time')
@@ -194,7 +194,7 @@ data_reshape = data_set.reshape(-1, data_set.shape[-1])
 print('shape of data reshaped', np.shape(data_reshape))
 
 # fit the scaler
-scaling = 'SS'
+scaling = 'None'
 if scaling == 'SS':
     print('applying standard scaler')
     scaler = StandardScaler()
@@ -223,10 +223,10 @@ c_names = [f'Ra2e8_c{n}' for n in n_modes_list]
 #c_names = ['Ra2e8_c4', 'Ra2e8_c8', 'Ra2e8_c16', 'Ra2e8_c32', 'Ra2e8_c64', 'Ra2e8_c100','Ra2e8_c128'] #['Ra2e8_c10', 'Ra2e8_c16', 'Ra2e8_c32', 'Ra2e8_c64', 'Ra2e8_c100']
 index=0
 
-nrmse_list, evr_list, ssim_list, cumEV_list, nrmse_plume_list, nrmse_sep_list = [], [], [], [], [], []
-pnrmse_list, pevr_list, pssim_list, pnrmse_plume_list, pnrmse_sep_list = [], [], [], [], []
+nrmse_list, evr_list, ssim_list, cumEV_list, nrmse_plume_list, nrmse_sep_list, nrmse_sep_plume_list = [], [], [], [], [], [], []
+pnrmse_list, pevr_list, pssim_list, pnrmse_plume_list, pnrmse_sep_list, pnrmse_sep_plume_list = [], [], [], [], [], []
 
-POD_type = 'together'
+POD_type = 'seperate'
 if POD_type == 'together':
     for n_modes in n_modes_list:
 
@@ -252,6 +252,11 @@ if POD_type == 'together':
             print(np.shape(active_array))
             print(np.shape(mask))
             nrmse_plume             = NRMSE(data_set[:,:,:,:][mask], data_reconstructed[:,:,:,:][mask])
+            truth_masked      = data_set[mask].reshape(-1,4)
+            decoded_masked    = data_reconstructed[mask].reshape(-1,4)
+            truth_masked_4d   = truth_masked[:, np.newaxis, np.newaxis, :]
+            decoded_masked_4d = decoded_masked[:, np.newaxis, np.newaxis, :]
+            nrmse_sep_plume   = NRMSE_per_channel(truth_masked_4d, decoded_masked_4d) 
 
             fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
             c1 = ax[0].contourf(time_vals, x, active_array[:,:, 32].T, cmap='Reds')
@@ -270,11 +275,44 @@ if POD_type == 'together':
 
         ### plt part of domain ###
         plot_reconstruction_and_error(data_set[:500], data_reconstructed[:500], 32, 75, x, z, time_vals[:500], names, output_path+c_names[index]+'_500')
+        np.save(output_path+'/POD_reconstructed.npy', data_reconstructed[:500])
 
+        print('NRMSE', nrmse)
+        print('MSE', mse)
+        print('EVR_recon', evr)
+        print('SSIM', SSIM)
+        print('NRMSE plume', nrmse_plume)
+        print('NRMSE per channel', nrmse_sep)
+
+        # Full path for saving the file
+        output_file = c_names[index] + '_metrics.json' 
+
+        output_path_met = os.path.join(output_path, output_file)
+
+        metrics = {
+        "no. modes": n_modes,
+        "EVR": evr,
+        "MSE": mse,
+        "NRMSE": nrmse,
+        "SSIM": SSIM,
+        "cumEV from POD": cev,
+        "NRMSE plume": nrmse_plume,
+        "NRMSE per channel": nrmse_sep,
+        "NRMSE plume per channel": nrmse_sep_plume,
+        }
+
+        with open(output_path_met, "w") as file:
+            json.dump(metrics, file, indent=4)
+
+        nrmse_list.append(nrmse)
+        ssim_list.append(SSIM)
+        evr_list.append(evr)
+        cumEV_list.append(cev)
+        nrmse_plume_list.append(nrmse_plume)
+        nrmse_sep_list.append(nrmse_sep)
+        nrmse_sep_plume_list.append(nrmse_sep_plume)
 
         if projection:
-
-
             proj_path = output_path+f"/proj{n_modes}/"
             print(proj_path)
             if not os.path.exists(proj_path):
@@ -301,6 +339,12 @@ if POD_type == 'together':
                 print(np.shape(active_array))
                 print(np.shape(mask))
                 nrmse_plume_proj             = NRMSE(data_proj[:,:,:,:][mask], data_reconstructed_proj[:,:,:,:][mask])
+                truth_masked      = data_proj[mask].reshape(-1,4)
+                decoded_masked    = data_reconstructed_proj[mask].reshape(-1,4)
+                truth_masked_4d   = truth_masked[:, np.newaxis, np.newaxis, :]
+                decoded_masked_4d = decoded_masked[:, np.newaxis, np.newaxis, :]
+                nrmse_sep_plume_proj   = NRMSE_per_channel(truth_masked_4d, decoded_masked_4d) 
+
 
                 fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
                 c1 = ax[0].contourf(time_vals_proj, x, active_array[:,:, 32].T, cmap='Reds')
@@ -317,42 +361,6 @@ if POD_type == 'together':
             else:
                 nrmse_plume_proj = np.inf
 
-
-
-        print('NRMSE', nrmse)
-        print('MSE', mse)
-        print('EVR_recon', evr)
-        print('SSIM', SSIM)
-        print('NRMSE plume', nrmse_plume)
-        print('NRMSE per channel', nrmse_sep)
-
-        # Full path for saving the file
-        output_file = c_names[index] + '_metrics.json' 
-
-        output_path_met = os.path.join(output_path, output_file)
-
-        metrics = {
-        "no. modes": n_modes,
-        "EVR": evr,
-        "MSE": mse,
-        "NRMSE": nrmse,
-        "SSIM": SSIM,
-        "cumEV from POD": cev,
-        "NRMSE plume": nrmse_plume,
-        "NRMSE per channel": nrmse_sep,
-        }
-
-        with open(output_path_met, "w") as file:
-            json.dump(metrics, file, indent=4)
-
-        nrmse_list.append(nrmse)
-        ssim_list.append(SSIM)
-        evr_list.append(evr)
-        cumEV_list.append(cev)
-        nrmse_plume_list.append(nrmse_plume)
-        nrmse_sep_list.append(nrmse_sep)
-
-        if projection:
             # Full path for saving the file
             output_file = c_names[index] + '_proj_metrics.json' 
 
@@ -368,6 +376,7 @@ if POD_type == 'together':
             "SSIM": SSIM_proj,
             "NRMSE plume": nrmse_plume_proj,
             "NRMSE per channel": nrmse_sep_proj,
+            "NRMSE plume per channel": nrmse_sep_plume_proj,
             }
 
             with open(output_path_met, "w") as file:
@@ -378,6 +387,7 @@ if POD_type == 'together':
             pevr_list.append(evr_proj)
             pnrmse_plume_list.append(nrmse_plume_proj)
             pnrmse_sep_list.append(nrmse_sep_proj)
+            pnrmse_sep_plume_list.append(nrmse_sep_plume_proj)
 
         index +=1
 
@@ -421,6 +431,11 @@ if POD_type == 'seperate':
             print(np.shape(active_array))
             print(np.shape(mask))
             nrmse_plume             = NRMSE(data_set[:,:,:,:][mask], data_reconstructed[:,:,:,:][mask])
+            truth_masked      = data_set[mask].reshape(-1,4)
+            decoded_masked    = data_reconstructed[mask].reshape(-1,4)
+            truth_masked_4d   = truth_masked[:, np.newaxis, np.newaxis, :]
+            decoded_masked_4d = decoded_masked[:, np.newaxis, np.newaxis, :]
+            nrmse_sep_plume   = NRMSE_per_channel(truth_masked_4d, decoded_masked_4d) 
 
             fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
             c1 = ax[0].contourf(time_vals, x, active_array[:,:, 32].T, cmap='Reds')
@@ -463,6 +478,11 @@ if POD_type == 'seperate':
                 print(np.shape(active_array))
                 print(np.shape(mask))
                 nrmse_plume_proj             = NRMSE(data_proj[:,:,:,:][mask], data_reconstructed_proj[:,:,:,:][mask])
+                truth_masked      = data_proj[mask].reshape(-1,4)
+                decoded_masked    = data_reconstructed_proj[mask].reshape(-1,4)
+                truth_masked_4d   = truth_masked[:, np.newaxis, np.newaxis, :]
+                decoded_masked_4d = decoded_masked[:, np.newaxis, np.newaxis, :]
+                nrmse_sep_plume_proj = NRMSE_per_channel(truth_masked_4d, decoded_masked_4d) 
 
                 fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
                 c1 = ax[0].contourf(time_vals_proj, x, active_array[:,:, 32].T, cmap='Reds')
@@ -502,6 +522,7 @@ if POD_type == 'seperate':
         "cumEV from POD": cev,
         "NRMSE plume": nrmse_plume,
         "NRMSE per channel": nrmse_sep,
+        "NRMSE plume per channel": nrmse_sep_plume,
         }
 
         with open(output_path_met, "w") as file:
