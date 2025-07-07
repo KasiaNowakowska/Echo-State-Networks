@@ -398,6 +398,8 @@ test_times = time_vals[b_size*n_batches*skip+b_size*val_batches*skip:
 U_train     = split_data(U_tt_scaled, b_size, n_batches).astype('float32') #to be used for randomly shuffled batches
 U_val       = split_data(U_vv_scaled, b_size, val_batches).astype('float32')
 
+global_stds = [np.std(U_tt[..., c]) for c in range(U_tt.shape[-1])]
+
 del U_vv, U_tt, U_tt_scaled
 
 ## scale all the data ##
@@ -585,6 +587,10 @@ if validation_data:
         print(np.shape(mask))
         nrmse_plume             = NRMSE(truth_unscaled[:,:,:,:][mask], decoded_unscaled[:,:,:,:][mask])
 
+        mask_original     = mask[..., 0]
+        nrmse_sep_plume   = NRMSE_per_channel_masked(truth_unscaled, decoded_unscaled, mask_original, global_stds) 
+
+
     import json
     # Full path for saving the file
     output_file = "validation_metrics.json"
@@ -747,12 +753,9 @@ if all_data:
             print('shape of masked area', np.shape(truth_unscaled[mask]))
             nrmse_plume = NRMSE(truth_unscaled[mask], decoded_unscaled[mask])
 
-            truth_masked      = truth_unscaled[mask].reshape(-1,4)
-            decoded_masked    = decoded_unscaled[mask].reshape(-1,4)
-            truth_masked_4d   = truth_masked[:, np.newaxis, np.newaxis, :]
-            decoded_masked_4d = decoded_masked[:, np.newaxis, np.newaxis, :]
-            nrmse_sep_plume = NRMSE_per_channel(truth_masked_4d, decoded_masked_4d) 
-            
+            mask_original     = mask[..., 0]
+            nrmse_sep_plume   = NRMSE_per_channel_masked(truth_unscaled, decoded_unscaled, mask_original, global_stds) 
+
             chunk_metrics["plume NRMSE"] = nrmse_plume
             chunk_metrics["plume sep NRMSE"] = nrmse_sep_plume
 
