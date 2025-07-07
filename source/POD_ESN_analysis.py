@@ -325,18 +325,18 @@ print('norm:', norm)
 print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
-test_interval = True
+test_interval = False
 validation_interval = True
 statistics_interval = False
 initiation_interval = False
 initiation_interval2 = False
 
-train_data = data_scaled[:int(N_washout+N_train)]
+train_data = data_set[:int(N_washout+N_train)]
 global_stds = [np.std(train_data[..., c]) for c in range(train_data.shape[-1])]
 
 if validation_interval:
     print('VALIDATION (TEST)')
-    N_test   = 12                    #number of intervals in the test set
+    N_test   = 50                    #number of intervals in the test set
     if reduce_domain2:
         N_tstart = N_washout
     else:

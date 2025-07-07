@@ -194,7 +194,7 @@ data_reshape = data_set.reshape(-1, data_set.shape[-1])
 print('shape of data reshaped', np.shape(data_reshape))
 
 # fit the scaler
-scaling = 'None'
+scaling = 'SS'
 if scaling == 'SS':
     print('applying standard scaler')
     scaler = StandardScaler()
@@ -226,7 +226,9 @@ index=0
 nrmse_list, evr_list, ssim_list, cumEV_list, nrmse_plume_list, nrmse_sep_list, nrmse_sep_plume_list = [], [], [], [], [], [], []
 pnrmse_list, pevr_list, pssim_list, pnrmse_plume_list, pnrmse_sep_list, pnrmse_sep_plume_list = [], [], [], [], [], []
 
-POD_type = 'seperate'
+global_stds = [np.std(data_set[..., c]) for c in range(data_set.shape[-1])]
+
+POD_type = 'together'
 if POD_type == 'together':
     for n_modes in n_modes_list:
 
@@ -252,11 +254,9 @@ if POD_type == 'together':
             print(np.shape(active_array))
             print(np.shape(mask))
             nrmse_plume             = NRMSE(data_set[:,:,:,:][mask], data_reconstructed[:,:,:,:][mask])
-            truth_masked      = data_set[mask].reshape(-1,4)
-            decoded_masked    = data_reconstructed[mask].reshape(-1,4)
-            truth_masked_4d   = truth_masked[:, np.newaxis, np.newaxis, :]
-            decoded_masked_4d = decoded_masked[:, np.newaxis, np.newaxis, :]
-            nrmse_sep_plume   = NRMSE_per_channel(truth_masked_4d, decoded_masked_4d) 
+
+            mask_original     = mask[..., 0]
+            nrmse_sep_plume   = NRMSE_per_channel_masked(data_set, data_reconstructed, mask_original, global_stds) 
 
             fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
             c1 = ax[0].contourf(time_vals, x, active_array[:,:, 32].T, cmap='Reds')
@@ -339,11 +339,9 @@ if POD_type == 'together':
                 print(np.shape(active_array))
                 print(np.shape(mask))
                 nrmse_plume_proj             = NRMSE(data_proj[:,:,:,:][mask], data_reconstructed_proj[:,:,:,:][mask])
-                truth_masked      = data_proj[mask].reshape(-1,4)
-                decoded_masked    = data_reconstructed_proj[mask].reshape(-1,4)
-                truth_masked_4d   = truth_masked[:, np.newaxis, np.newaxis, :]
-                decoded_masked_4d = decoded_masked[:, np.newaxis, np.newaxis, :]
-                nrmse_sep_plume_proj   = NRMSE_per_channel(truth_masked_4d, decoded_masked_4d) 
+                
+                mask_original          = mask[..., 0]
+                nrmse_sep_plume_proj   = NRMSE_per_channel_masked(data_proj, data_reconstructed_proj, mask_original, global_stds) 
 
 
                 fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
@@ -431,11 +429,9 @@ if POD_type == 'seperate':
             print(np.shape(active_array))
             print(np.shape(mask))
             nrmse_plume             = NRMSE(data_set[:,:,:,:][mask], data_reconstructed[:,:,:,:][mask])
-            truth_masked      = data_set[mask].reshape(-1,4)
-            decoded_masked    = data_reconstructed[mask].reshape(-1,4)
-            truth_masked_4d   = truth_masked[:, np.newaxis, np.newaxis, :]
-            decoded_masked_4d = decoded_masked[:, np.newaxis, np.newaxis, :]
-            nrmse_sep_plume   = NRMSE_per_channel(truth_masked_4d, decoded_masked_4d) 
+            
+            mask_original     = mask[..., 0]
+            nrmse_sep_plume   = NRMSE_per_channel_masked(data_set, data_reconstructed, mask_original, global_stds) 
 
             fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
             c1 = ax[0].contourf(time_vals, x, active_array[:,:, 32].T, cmap='Reds')
@@ -478,11 +474,9 @@ if POD_type == 'seperate':
                 print(np.shape(active_array))
                 print(np.shape(mask))
                 nrmse_plume_proj             = NRMSE(data_proj[:,:,:,:][mask], data_reconstructed_proj[:,:,:,:][mask])
-                truth_masked      = data_proj[mask].reshape(-1,4)
-                decoded_masked    = data_reconstructed_proj[mask].reshape(-1,4)
-                truth_masked_4d   = truth_masked[:, np.newaxis, np.newaxis, :]
-                decoded_masked_4d = decoded_masked[:, np.newaxis, np.newaxis, :]
-                nrmse_sep_plume_proj = NRMSE_per_channel(truth_masked_4d, decoded_masked_4d) 
+
+                mask_original     = mask[..., 0]
+                nrmse_sep_plume   = NRMSE_per_channel_masked(data_proj, data_reconstructed_proj, mask_original, global_stds) 
 
                 fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
                 c1 = ax[0].contourf(time_vals_proj, x, active_array[:,:, 32].T, cmap='Reds')

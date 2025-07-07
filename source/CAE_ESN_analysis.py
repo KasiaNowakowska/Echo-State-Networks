@@ -672,7 +672,7 @@ global_stds = [np.std(train_data[..., c]) for c in range(train_data.shape[-1])]
 
 if validation_interval:
     print('VALIDATION (TEST)')
-    N_test   = 50 #N_fo=63                   #number of intervals in the test set
+    N_test   = 12 #N_fo=63                   #number of intervals in the test set
     if reduce_domain2:
         N_tstart = N_washout
     else:
@@ -817,8 +817,8 @@ if validation_interval:
             "SSIM": float(SSIM),
             "NRMSE plume": float(nrmse_plume),
             "PH": float(PH[i]),
-            "NRMSE per channel": nrmse_ch,
-            "NRMSE per channel in plume": nrmse_sep_plume,
+            "NRMSE per channel": float(nrmse_ch),
+            "NRMSE per channel in plume": float(nrmse_sep_plume),
             }
 
             with open(output_path_met, "w") as file:

@@ -556,6 +556,9 @@ N_train   = train_len*N_lyap #600
 N_val     = val_len*N_lyap #45
 N_test    = test_len*N_lyap #45
 
+train_data = data_set[:int(N_washout+N_train)]
+global_stds = [np.std(train_data[..., c]) for c in range(train_data.shape[-1])]
+
 # compute normalization factor (range component-wise)
 U_data = U[:N_washout+N_train].copy()
 m = U_data.min(axis=0)
@@ -626,10 +629,10 @@ tikh = np.array([1e-1,1e-3,1e-6,1e-9])  # Tikhonov factor (optimize among the va
 threshold_ph = threshold_ph
 n_in  = 0           #Number of Initial random points
 
-spec_in     = 0.1    #range for hyperparameters (spectral radius and input scaling)
+spec_in     = 0.7    #range for hyperparameters (spectral radius and input scaling)
 spec_end    = 1.0
-in_scal_in  = np.log10(0.1)
-in_scal_end = np.log10(5)
+in_scal_in  = np.log10(0.5)
+in_scal_end = np.log10(2.5)
 
 # In case we want to start from a grid_search, the first n_grid_x*n_grid_y points are from grid search
 n_grid_x = grid_x
@@ -900,6 +903,8 @@ if validation_interval:
     ens_evr         = np.zeros((ensemble_test))
     ens_nrmse_plume = np.zeros((ensemble_test))
     ens_PH_recons   = np.zeros((ensemble_test))
+    ens_nrmse_ch    = np.zeros((ensemble_test))
+    ens_nrmse_ch_pl = np.zeros((ensemble_test))
 
     metrics_val_path = output_path+'/validation_metrics/'
     if not os.path.exists(metrics_val_path):
@@ -968,6 +973,7 @@ if validation_interval:
             mse   = MSE(reconstructed_truth, reconstructed_predictions)
             evr   = EVR_recon(reconstructed_truth, reconstructed_predictions)
             SSIM  = compute_ssim_for_4d(reconstructed_truth, reconstructed_predictions)
+            nrmse_ch = NRMSE_per_channel(reconstructed_truth, reconstructed_predictions)
 
             if len(variables) == 4:
                 active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(reconstructed_truth, reconstructed_predictions, z)
@@ -981,11 +987,16 @@ if validation_interval:
 
                     # Compute NRMSE only if mask is not empty
                     nrmse_plume = NRMSE(masked_truth, masked_pred)
+
+                    mask_original     = mask[..., 0]
+                    nrmse_sep_plume   = NRMSE_per_channel_masked(reconstructed_truth, reconstructed_predictions, mask_original, global_stds) 
                 else:
                     print("Mask is empty, no plumes detected.")
                     nrmse_plume = 0  # Simply add 0 to maintain shape
+                    nrmse_sep_plume = 0
             else:
                 nrmse_plume = np.inf
+                nrmse_sep_plume = np.inf
 
             nrmse_recons = compute_nrmse_per_timestep_variable(reconstructed_truth, reconstructed_predictions, normalize_by="std")
             horizons_recons = find_prediction_horizon(nrmse_recons, 0.2)/N_lyap
@@ -1012,6 +1023,8 @@ if validation_interval:
             "NRMSE plume": float(nrmse_plume),
             "PH": float(PH[i]),
             "PH recons": float(horizons_recons),
+            "NRMSE per channel": nrmse_ch,
+            "NRMSE per channel in plume": nrmse_sep_plume,
             }
 
             with open(output_path_met, "w") as file:
@@ -1023,6 +1036,9 @@ if validation_interval:
             ens_evr[j]         += evr
             ens_PH2[j]         += PH[i]
             ens_PH_recons[j]   += horizons_recons
+            ens_nrmse_ch[j]    += nrmse_ch
+            nrmse_sep_plume     = np.nan_to_num(nrmse_sep_plume, nan=0.0)  # replace NaNs with zero
+            ens_nrmse_ch_pl[j] += nrmse_sep_plume
 
             if plot:
                 images_val_path = output_path+'/validation_images/'
@@ -1059,6 +1075,8 @@ if validation_interval:
         ens_evr[j]         = ens_evr[j] / N_test
         ens_PH2[j]         = ens_PH2[j] / N_test  
         ens_PH_recons[j]   = ens_PH_recons[j] / N_test
+        ens_nrmse_ch[j]    = ens_nrmse_ch[j] / N_test
+        ens_nrmse_ch_pl[j] = ens_nrmse_ch_pl[j] / N_test
              
     # Full path for saving the file
     output_file_ALL = 'ESN_validation_metrics_all.json' 
@@ -1078,6 +1096,8 @@ if validation_interval:
     "mean EVR": np.mean(ens_evr),
     "mean ssim": np.mean(ens_ssim),
     "mean PH recons": np.mean(ens_PH_recons),
+    "mean NRMSE per channel": np.mean(ens_nrmse_ch),
+    "mean NRMSE per channel in plume": np.nanmean(ens_nrmse_ch_pl),
     }
 
     with open(output_path_met_ALL, "w") as file:
