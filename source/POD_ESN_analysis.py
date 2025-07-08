@@ -179,9 +179,9 @@ if reduce_data_set:
     print(x[0], x[-1])
 
 if reduce_domain2:
-    data_set = data_set[:4650,128:160,:,:] # 10LTs washout, 200LTs train, 1000LTs test
+    data_set = data_set[:,128:160,:,:] # 10LTs washout, 200LTs train, 1000LTs test
     x = x[128:160]
-    time_vals = time_vals[:4650]
+    time_vals = time_vals[:]
     print('reduced domain shape', np.shape(data_set))
     print('reduced x domain', np.shape(x))
     print('reduced x domain', len(x))
@@ -325,7 +325,7 @@ print('norm:', norm)
 print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
-test_interval = False
+test_interval = True
 validation_interval = True
 statistics_interval = False
 initiation_interval = False
@@ -338,7 +338,7 @@ if validation_interval:
     print('VALIDATION (TEST)')
     N_test   = 50                    #number of intervals in the test set
     if reduce_domain2:
-        N_tstart = N_washout
+        N_tstart = int(N_washout)
     else:
         N_tstart = int(N_washout)                 #where the first test interval starts
     N_intt   = test_len*N_lyap            #length of each test set interval
@@ -557,7 +557,7 @@ if test_interval:
     N_washout = int(N_washout)
     N_test   = 40                  #number of intervals in the test set
     if reduce_domain2:
-        N_tstart = N_washout + N_train
+        N_tstart = int(N_washout + N_train)
     else:
         N_tstart = int(N_washout + N_train)  #where the first test interval starts
     N_intt   = 3*N_lyap             #length of each test set interval

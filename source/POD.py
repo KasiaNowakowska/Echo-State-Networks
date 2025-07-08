@@ -136,11 +136,11 @@ if reduce_data_set:
     print('reduced x domain', len(x))
     print(x[0], x[-1])
 
-reduce_data_set2 = False
+reduce_data_set2 = True
 if reduce_data_set2:
-    data_set = data_set[:4650,128:160,:,:] # 10LTs washout, 200LTs train, 1000LTs test
+    data_set = data_set[:,128:160,:,:] # 10LTs washout, 200LTs train, 1000LTs test
     x = x[128:160]
-    time_vals = time_vals[:4650]
+    time_vals = time_vals[:]
     print('reduced domain shape', np.shape(data_set))
     print('reduced x domain', np.shape(x))
     print('reduced x domain', len(x))

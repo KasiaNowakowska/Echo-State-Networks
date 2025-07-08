@@ -4,6 +4,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import h5py
 import time
+from scipy.ndimage import label, center_of_mass
 
 ### plotting ###
 def plot_reconstruction(original, reconstruction, z_value, t_value, time_vals, file_str):
@@ -547,3 +548,45 @@ def onset_ensemble(true_onset, pred_onset):
     elif true_onset == False and pred_onset == False:
         flag = 'TN'
     return flag
+
+def extract_plume_features(new_array, z_range=(5, 10)):
+    time_steps, nx, nz = new_array.shape
+
+    # Storage for features
+    features = np.zeros((time_steps, 4))  # num, mean_size, mean_x, x_spread
+
+    # Use 8-connectivity for labeling
+    structure = np.ones((3, 3))
+
+    for t in range(time_steps):
+        # Slice relevant z-range
+        z_start, z_end = z_range
+        subgrid = new_array[t, :, z_start:z_end]  # shape (64, 5)
+
+        # Make binary
+        binary_mask = (subgrid > 0).astype(int)
+
+        # Connected component labeling
+        labeled, num_plumes = label(binary_mask, structure=structure)
+
+        # If no plumes, fill with zeros
+        if num_plumes == 0:
+            features[t] = [0, 0, 0, 0]
+            continue
+
+        # Plume sizes
+        sizes = [(labeled == i).sum() for i in range(1, num_plumes + 1)]
+
+        # Centroids: returns (x, z) per plume
+        centroids = center_of_mass(binary_mask, labeled, range(1, num_plumes + 1))
+        x_centroids = [c[0] for c in centroids]
+
+        # Compute final features
+        mean_size = np.mean(sizes)
+        mean_x = np.mean(x_centroids)
+        x_spread = np.std(x_centroids)
+
+        # Store
+        features[t] = [num_plumes, mean_size, mean_x, x_spread]
+
+    return features  # shape (time, 4)

@@ -629,9 +629,9 @@ tikh = np.array([1e-1,1e-3,1e-6,1e-9])  # Tikhonov factor (optimize among the va
 threshold_ph = threshold_ph
 n_in  = 0           #Number of Initial random points
 
-spec_in     = 0.7    #range for hyperparameters (spectral radius and input scaling)
+spec_in     = 0.8    #range for hyperparameters (spectral radius and input scaling)
 spec_end    = 1.0
-in_scal_in  = np.log10(0.5)
+in_scal_in  = np.log10(0.75)
 in_scal_end = np.log10(2.5)
 
 # In case we want to start from a grid_search, the first n_grid_x*n_grid_y points are from grid search
@@ -1023,8 +1023,8 @@ if validation_interval:
             "NRMSE plume": float(nrmse_plume),
             "PH": float(PH[i]),
             "PH recons": float(horizons_recons),
-            "NRMSE per channel": nrmse_ch,
-            "NRMSE per channel in plume": nrmse_sep_plume,
+            "NRMSE per channel": float(nrmse_ch),
+            "NRMSE per channel in plume": float(nrmse_sep_plume),
             }
 
             with open(output_path_met, "w") as file:

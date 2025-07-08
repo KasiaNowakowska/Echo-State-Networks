@@ -167,4 +167,12 @@ def stats_pdf_global(truth, prediction, i, j, file_name):
     ax[1].set_xlabel('q')
     fig.savefig(file_name+f"_ens{j}_test{i}.png")
 
-
+def plotting_number_of_plumes(truth, prediction, xx, i, j, file_name):
+    fig, ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
+    ax.plot(xx, truth[:,0], label='Truth')
+    ax.plot(xx, prediction[:,0], label='Prediction')
+    ax.set_xlabel('Time[Lyapunov Times]')
+    ax.set_ylabel('Number of Plumes')
+    ax.grid()
+    ax.legend()
+    fig.savefig(file_name+f"_ens{j}_ens{i}.png")
