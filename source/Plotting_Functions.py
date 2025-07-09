@@ -169,10 +169,70 @@ def stats_pdf_global(truth, prediction, i, j, file_name):
 
 def plotting_number_of_plumes(truth, prediction, xx, i, j, file_name):
     fig, ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
-    ax.plot(xx, truth[:,0], label='Truth')
-    ax.plot(xx, prediction[:,0], label='Prediction')
+    ax.plot(xx, truth, label='Truth')
+    ax.plot(xx, prediction, label='Prediction')
     ax.set_xlabel('Time[Lyapunov Times]')
     ax.set_ylabel('Number of Plumes')
     ax.grid()
     ax.legend()
     fig.savefig(file_name+f"_ens{j}_ens{i}.png")
+
+def hovmoller_plus_plumes(truth_data, prediction_data, truth_features, prediction_features, xx, x, variable, i, j, file_name):
+    truth_data      = truth_data[..., variable]
+    prediction_data = prediction_data[..., variable]
+
+    z_value =32
+    
+    fig, ax = plt.subplots(3, figsize=(12, 9), tight_layout=True)
+    
+    minm = min(np.min(truth_data[:, :, z_value]), np.min(prediction_data[:, :, z_value]))
+    maxm = max(np.max(truth_data[:, :, z_value]), np.max(prediction_data[:, :, z_value]))  
+
+    c1 = ax[0].pcolormesh(xx, x, truth_data[:, :, z_value].T, vmin=minm, vmax=maxm)
+    fig.colorbar(c1, ax=ax[0])
+    ax[0].set_title('true')
+    c2 = ax[1].pcolormesh(xx, x, prediction_data[:, :, z_value].T, vmin=minm, vmax=maxm)
+    fig.colorbar(c2, ax=ax[1])
+    ax[1].set_title('reconstruction')
+
+    # Ensure proper scaling: features (0–64) → x indices (0–len(x)-1)
+    def scale_feature_to_x_index(feature_array):
+        idx = ((feature_array / 64.0) * (len(x) - 1)).astype(int)
+        return np.clip(idx, 0, len(x) - 1)
+
+    idx_avg_true = scale_feature_to_x_index(truth_features[:, 2])
+    idx_avg_pred = scale_feature_to_x_index(prediction_features[:, 2])
+    idx_spread_true = scale_feature_to_x_index(truth_features[:, 3])
+    idx_spread_pred = scale_feature_to_x_index(prediction_features[:, 3])
+
+
+    x_avg_true   = x[idx_avg_true]
+    x_avg_pred   = x[idx_avg_pred]
+    x_spread_true = x[idx_spread_true]
+    x_spread_pred = x[idx_spread_pred]
+
+    ax[0].plot(xx, x_avg_true, color='red', linewidth=1.5, label='avg_x') 
+    ax[1].plot(xx, x_avg_pred, color='red', linewidth=1.5, label='avg_x') 
+
+    ax[0].fill_between(xx, x_avg_true - x_spread_true, x_avg_true + x_spread_true,
+                 color='red', alpha=0.3, label='x_spread')
+    ax[1].fill_between(xx, x_avg_pred - x_spread_pred, x_avg_pred + x_spread_pred,
+                 color='red', alpha=0.3, label='x_spread')
+
+    pred_counts_rounded = np.round(prediction_features[:, 0]).astype(int)
+    true_counts = truth_features[:, 0].astype(int)
+
+    ax[2].plot(xx, true_counts, label='truth')
+    ax[2].plot(xx, pred_counts_rounded, label='ESN')
+    ax[2].legend()
+    cb = fig.colorbar(c1, ax=ax[2])
+    cb.ax.set_visible(False)
+    ax[2].grid()
+
+    for v in range(2):
+        ax[v].set_ylabel('x', fontsize=14)
+    ax[2].set_ylabel('Number of Plumes')
+    ax[-1].set_xlabel('Time [Lyapunov Times]')
+
+    fig.savefig(file_name+f"_ens{j}_test{i}.png")
+    plt.close(fig)

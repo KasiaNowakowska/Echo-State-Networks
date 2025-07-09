@@ -131,6 +131,28 @@ def load_data_set_RB(file, names, snapshots):
 
     return data, time_vals
 
+def load_data_set_RB_act(file, names, snapshots):
+    with h5py.File(file, 'r') as hf:
+        print(hf.keys())
+        time_vals = np.array(hf['total_time_all'][:snapshots])
+        
+        data           = np.zeros((len(time_vals), len(x), len(z), len(names)-1))
+        plume_features = np.zeros((len(time_vals), 4))
+
+        index=0
+        for name in names:
+            print(name)
+            print(hf[name])
+            Var = np.array(hf[name])
+            print(np.shape(Var))
+            if index == 4:
+                plume_features = Var[:snapshots]
+            else:
+                data[:,:,:,index] = Var[:snapshots,:,:]
+            index+=1
+
+    return data, time_vals, plume_features
+
 #### LOAD DATA AND POD ####
 Data = 'RB'
 if Data == 'ToyData':
@@ -151,6 +173,20 @@ elif Data == 'RB':
     data_set, time_vals = load_data_set_RB(input_path+'/data_4var_5000_48000.h5', variables, snapshots_load)
     print('shape of dataset', np.shape(data_set))
     dt = 2
+
+elif Data == 'RB_plume':
+    variables = ['q_all', 'w_all', 'u_all', 'b_all']
+    variables_plus_act = ['q_all', 'w_all', 'u_all', 'b_all', 'plume_features']
+    names = ['q_all', 'w_all', 'u_all', 'b_all']
+    names_plus_act = ['q', 'w', 'u', 'b', 'active']
+    x = np.load(input_path+'/x.npy')
+    z = np.load(input_path+'/z.npy')
+    snapshots_load = 16000
+    data_set, time_vals, plume_features = load_data_set_RB_act(input_path+'/data_4var_5000_48000_plumes.h5', variables_plus_act, snapshots_load)
+    print('shape of dataset', np.shape(data_set))
+    dt = 2
+    print('shape of plume_features', np.shape(plume_features))
+
 
 reduce_domain2 = reduce_domain2
 
@@ -213,11 +249,18 @@ else:
 if Data == 'RB':
     snapshots_POD = 11200
     data_scaled = data_scaled[:snapshots_POD]
+elif Data == 'RB_plume':
+    snapshots_POD = 11200
+    data_scaled = data_scaled[:snapshots_POD]
+    plume_features = plume_features[:snapshots_POD]
 n_components = modes
 data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_, cev = POD(data_scaled, n_components, x, z, names, f"modes{n_components}")
 print('cumulative equiv ratio', cev)
 
-U = data_reduced 
+if Data == 'RB_plume':
+    U = np.concatenate([data_reduced, plume_features], axis=1)  # shape (time, 68)
+else:
+    U = data_reduced 
 print('shape of data for ESN', np.shape(U))
 
 # number of time steps for washout, train, validation, test
@@ -230,7 +273,8 @@ N_washout_val = int(washout_len_val*N_lyap)
 N_train   = train_len*N_lyap #600
 N_val     = val_len*N_lyap #45
 N_test    = test_len*N_lyap #45
-dim       = n_components
+dim       = U.shape[1]
+print('dimension for ESN', dim)
 
 # compute normalization factor (range component-wise)
 U_data = U[:N_washout+N_train].copy()
@@ -359,6 +403,7 @@ if validation_interval:
     ens_nrmse_plume = np.zeros((ensemble_test))
     ens_nrmse_ch    = np.zeros((ensemble_test))
     ens_nrmse_ch_pl = np.zeros((ensemble_test))
+    ens_pl_acc      = np.zeros((ensemble_test))
 
     images_val_path = output_path+'/validation_images/'
     if not os.path.exists(images_val_path):
@@ -389,7 +434,7 @@ if validation_interval:
         plot = True
         Plotting = True
         if plot:
-            n_plot = N_test
+            n_plot = 20
             plt.rcParams["figure.figsize"] = (15,3*n_plot)
             plt.figure()
             plt.tight_layout()
@@ -418,8 +463,14 @@ if validation_interval:
             nrmse_error[i, :] = Y_err
 
             ##### reconstructions ####
-            _, reconstructed_truth       = inverse_POD(Y_t, pca_)
-            _, reconstructed_predictions = inverse_POD(Yh_t, pca_)
+            if Data == 'RB_plume':
+                _, reconstructed_truth       = inverse_POD(Y_t[:,:n_components], pca_)
+                _, reconstructed_predictions = inverse_POD(Yh_t[:,:n_components], pca_)
+                plume_features_truth         = Y_t[:,n_components:]
+                plume_features_predictions   = Yh_t[:,n_components:]
+            else:
+                _, reconstructed_truth       = inverse_POD(Y_t, pca_)
+                _, reconstructed_predictions = inverse_POD(Yh_t, pca_)
 
             # rescale
             reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
@@ -456,6 +507,18 @@ if validation_interval:
                 nrmse_plume = np.inf
                 nrmse_sep_plume = np.inf
 
+            if Data == 'RB_plume':
+                pred_counts_rounded = np.round(plume_features_predictions[:, 0]).astype(int)
+                true_counts = plume_features_truth[:, 0].astype(int)
+
+                if len(true_counts) > 0:
+                    exact_match = (pred_counts_rounded == true_counts).sum()
+                    plume_count_accuracy = exact_match / len(true_counts)
+                else:
+                    plume_count_accuracy = 0.0  # or -1 if you want to flag it
+            else:
+                plume_count_accuracy = 0.0
+
             print('NRMSE', nrmse)
             print('MSE', mse)
             print('EVR_recon', evr)
@@ -480,6 +543,7 @@ if validation_interval:
             "PH": PH[i],
             "NRMSE per channel": nrmse_ch,
             "NRMSE per channel in plume": nrmse_sep_plume,
+            "plume_count_accuracy": plume_count_accuracy,
             }
 
             with open(output_path_met, "w") as file:
@@ -493,6 +557,7 @@ if validation_interval:
             ens_nrmse_ch[j]    += nrmse_ch
             nrmse_sep_plume     = np.nan_to_num(nrmse_sep_plume, nan=0.0)  # replace NaNs with zero
             ens_nrmse_ch_pl[j] += nrmse_sep_plume
+            ens_pl_acc[j]      += plume_count_accuracy
 
             if plot:
                 #left column has the washout (open-loop) and right column the prediction (closed-loop)
@@ -518,6 +583,10 @@ if validation_interval:
 
                         plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_val_path+'/active_plumes_validation')
 
+                        if Data == 'RB_plume':
+                            plotting_number_of_plumes(true_counts, pred_counts_rounded, xx, i, j, images_val_path+f"/number_of_plumes")
+                            hovmoller_plus_plumes(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j, images_val_path+f"/hovmol_plumes")
+
         # accumulation for each ensemble member
         ens_nrmse[j]       = ens_nrmse[j] / N_test
         ens_nrmse_plume[j] = ens_nrmse_plume[j] / N_test
@@ -526,6 +595,7 @@ if validation_interval:
         ens_PH2[j]         = ens_PH2[j] / N_test  
         ens_nrmse_ch[j]    = ens_nrmse_ch[j] / N_test
         ens_nrmse_ch_pl[j] = ens_nrmse_ch_pl[j] / N_test
+        ens_pl_acc[j]      = ens_pl_acc[j] / N_test
              
     # Full path for saving the file
     output_file_ALL = 'ESN_validation_metrics_all.json' 
@@ -546,6 +616,7 @@ if validation_interval:
     "mean ssim": np.mean(ens_ssim),
     "mean NRMSE per channel": np.mean(ens_nrmse_ch),
     "mean NRMSE per channel in plume": np.nanmean(ens_nrmse_ch_pl),
+    "ens_pl_acc": np.mean(ens_pl_acc),
     }
 
     with open(output_path_met_ALL, "w") as file:
@@ -579,6 +650,7 @@ if test_interval:
     ens_nrmse_plume = np.zeros((ensemble_test))
     ens_nrmse_ch    = np.zeros((ensemble_test))
     ens_nrmse_ch_pl = np.zeros((ensemble_test))
+    ens_pl_acc      = np.zeros((ensemble_test))
 
     images_test_path = output_path+'/test_images/'
     if not os.path.exists(images_test_path):
@@ -615,7 +687,7 @@ if test_interval:
         plot = True
         Plotting = True
         if plot:
-            n_plot = 5
+            n_plot = 20
             plt.rcParams["figure.figsize"] = (15,3*n_plot)
             plt.figure()
             plt.tight_layout()
@@ -644,8 +716,14 @@ if test_interval:
             nrmse_error[i, :] = Y_err
 
             ##### reconstructions ####
-            _, reconstructed_truth       = inverse_POD(Y_t, pca_)
-            _, reconstructed_predictions = inverse_POD(Yh_t, pca_)
+            if Data == 'RB_plume':
+                _, reconstructed_truth       = inverse_POD(Y_t[:,:n_components], pca_)
+                _, reconstructed_predictions = inverse_POD(Yh_t[:,:n_components], pca_)
+                plume_features_truth         = Y_t[:,n_components:]
+                plume_features_predictions   = Yh_t[:,n_components:]
+            else:
+                _, reconstructed_truth       = inverse_POD(Y_t, pca_)
+                _, reconstructed_predictions = inverse_POD(Yh_t, pca_)
 
             # rescale
             reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
@@ -682,6 +760,18 @@ if test_interval:
                 nrmse_plume = np.inf
                 nrmse_sep_plume = np.inf
 
+            if Data == 'RB_plume':
+                pred_counts_rounded = np.round(plume_features_predictions[:, 0]).astype(int)
+                true_counts = plume_features_truth[:, 0].astype(int)
+
+                if len(true_counts) > 0:
+                    exact_match = (pred_counts_rounded == true_counts).sum()
+                    plume_count_accuracy = exact_match / len(true_counts)
+                else:
+                    plume_count_accuracy = 0.0  # or -1 if you want to flag it
+            else:
+                plume_count_accuracy = 0.0
+
             print('NRMSE', nrmse)
             print('MSE', mse)
             print('EVR_recon', evr)
@@ -689,6 +779,7 @@ if test_interval:
             print('NRMSE plume', nrmse_plume)
             print('NRMSE per channel', nrmse_ch)
             print('NRMSE per channel in plume', nrmse_sep_plume)
+            print('no plume accuracy', plume_count_accuracy)
 
             ## global parameters ##
             PODtruth_global    = global_parameters(reconstructed_truth)
@@ -718,6 +809,7 @@ if test_interval:
             "MSE global": mse_global,
             "NRMSE per channel": nrmse_ch,
             "NRMSE per channel in plume": nrmse_sep_plume,
+            "plume_count_accuracy": plume_count_accuracy,
             }
 
             with open(output_path_met, "w") as file:
@@ -731,6 +823,7 @@ if test_interval:
             ens_nrmse_ch[j]    += nrmse_ch
             nrmse_sep_plume = np.nan_to_num(nrmse_sep_plume, nan=0.0)  # replace NaNs with zero
             ens_nrmse_ch_pl[j] += nrmse_sep_plume
+            ens_pl_acc[j]      += plume_count_accuracy
 
             ens_nrmse_global[j]+= nrmse_global
             ens_mse_global[j]  += mse_global
@@ -762,6 +855,11 @@ if test_interval:
                         plot_global_prediction_ts(PODtruth_global, predictions_global, xx, i, j, images_test_path+'/global_prediciton')
                         #plot_global_prediction_ps(PODtruth_global, predictions_global, i, j, stats_path+'/global_prediciton')
 
+                        if Data == 'RB_plume':
+                            plotting_number_of_plumes(true_counts, pred_counts_rounded, xx, i, j, images_test_path+f"/number_of_plumes")
+                            hovmoller_plus_plumes(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j, images_test_path+f"/hovmol_plumes")
+
+
         # accumulation for each ensemble member
         ens_nrmse[j]       = ens_nrmse[j] / N_test
         ens_nrmse_plume[j] = ens_nrmse_plume[j] / N_test
@@ -770,6 +868,7 @@ if test_interval:
         ens_PH2[j]         = ens_PH2[j] / N_test 
         ens_nrmse_ch[j]    = ens_nrmse_ch[j] / N_test
         ens_nrmse_ch_pl[j] = ens_nrmse_ch_pl[j] / N_test 
+        ens_pl_acc[j]      = ens_pl_acc[j] / N_test
              
     # Full path for saving the file
     output_file_ALL = 'ESN_test_metrics_all.json' 
@@ -791,6 +890,7 @@ if test_interval:
     "mean ssim": np.mean(ens_ssim),
     "mean NRMSE per channel": np.mean(ens_nrmse_ch),
     "mean NRMSE per channel in plume": np.nanmean(ens_nrmse_ch_pl),
+    "ens_pl_acc": np.mean(ens_pl_acc),
     }
 
     with open(output_path_met_ALL, "w") as file:

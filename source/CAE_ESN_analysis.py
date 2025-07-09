@@ -149,6 +149,28 @@ def load_data_set_RB(file, names, snapshots):
 
     return data, time_vals
 
+def load_data_set_RB_act(file, names, snapshots):
+    with h5py.File(file, 'r') as hf:
+        print(hf.keys())
+        time_vals = np.array(hf['total_time_all'][:snapshots])
+        
+        data           = np.zeros((len(time_vals), len(x), len(z), len(names)-1))
+        plume_features = np.zeros((len(time_vals), 4))
+
+        index=0
+        for name in names:
+            print(name)
+            print(hf[name])
+            Var = np.array(hf[name])
+            print(np.shape(Var))
+            if index == 4:
+                plume_features = Var[:snapshots]
+            else:
+                data[:,:,:,index] = Var[:snapshots,:,:]
+            index+=1
+
+    return data, time_vals, plume_features
+
 #### AUTOENCODER ####
 def split_data(U, b_size, n_batches):
 
@@ -309,7 +331,7 @@ def global_parameters(data):
     return global_params
 
 #### LOAD DATA ####
-Data = 'RB'
+Data = 'RB_plume'
 if Data == 'ToyData':
     name = names = variables = ['combined']
     n_components = 3
@@ -328,6 +350,19 @@ elif Data == 'RB':
     data_set, time_vals = load_data_set_RB(input_path+'/data_4var_5000_48000.h5', variables, snapshots_load)
     print('shape of dataset', np.shape(data_set))
     dt = 2
+
+elif Data == 'RB_plume':
+    variables = ['q_all', 'w_all', 'u_all', 'b_all']
+    variables_plus_act = ['q_all', 'w_all', 'u_all', 'b_all', 'plume_features']
+    names = ['q_all', 'w_all', 'u_all', 'b_all']
+    names_plus_act = ['q', 'w', 'u', 'b', 'active']
+    x = np.load(input_path+'/x.npy')
+    z = np.load(input_path+'/z.npy')
+    snapshots_load = 16000
+    data_set, time_vals, plume_features = load_data_set_RB_act(input_path+'/data_4var_5000_48000_plumes.h5', variables_plus_act, snapshots_load)
+    print('shape of dataset', np.shape(data_set))
+    dt = 2
+    print('shape of plume_features', np.shape(plume_features))
 
 reduce_data_set = reduce_domain = reduce_domain2 = False
 if reduce_data_set:
@@ -552,13 +587,21 @@ transient  = 0
 dt = dt*upsample
 n_components = N_latent
 
-dim      = N_latent #N_latent
 act      = 'tanh'
 U        = np.array(U_enc[transient:transient+data_len:upsample])
 shape    = U.shape
 print(shape)
 
 U = U.reshape(shape[0], shape[1]*shape[2]*shape[3])
+
+if Data == 'RB_plume':
+    plume_features = plume_features[:data_len]
+    U = np.concatenate([U, plume_features], axis=1)  # shape (time, 68)
+else:
+    U = U 
+
+print('shape of data for ESN', np.shape(U))
+dim      = U.shape[1]
 
 # number of time steps for washout, train, validation, test
 t_lyap    = t_lyap
@@ -695,6 +738,7 @@ if validation_interval:
     ens_nrmse_plume = np.zeros((ensemble_test))
     ens_nrmse_ch    = np.zeros((ensemble_test))
     ens_nrmse_ch_pl = np.zeros((ensemble_test))
+    ens_pl_acc      = np.zeros((ensemble_test))
 
     images_val_path = output_path+'/validation_images/'
     if not os.path.exists(images_val_path):
@@ -755,15 +799,30 @@ if validation_interval:
             nrmse_error[i, :] = Y_err
 
             ##### reconstructions ####
-            # 1. reshape for decoder
-            Y_t_reshaped = Y_t.reshape(Y_t.shape[0], N_1[1], N_1[2], N_1[3])
-            Yh_t_reshaped = Yh_t.reshape(Yh_t.shape[0], N_1[1], N_1[2], N_1[3])
-            # 2. put through decoder
-            reconstructed_truth = Decoder(Y_t_reshaped,b).numpy()
-            reconstructed_predictions = Decoder(Yh_t_reshaped,b).numpy()
-            # 3. scale back
-            reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
-            reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
+            if Data == 'RB_plume':
+                plume_features_truth         = Y_t[:,N_latent:]
+                plume_features_predictions   = Yh_t[:,N_latent:]
+
+                # 1. reshape for decoder
+                Y_t_reshaped = Y_t[:,:N_latent].reshape(Y_t.shape[0], N_1[1], N_1[2], N_1[3])
+                Yh_t_reshaped = Yh_t[:,:N_latent].reshape(Yh_t.shape[0], N_1[1], N_1[2], N_1[3])
+                # 2. put through decoder
+                reconstructed_truth = Decoder(Y_t_reshaped,b).numpy()
+                reconstructed_predictions = Decoder(Yh_t_reshaped,b).numpy()
+                # 3. scale back
+                reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
+                reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
+
+            else:
+                # 1. reshape for decoder
+                Y_t_reshaped = Y_t.reshape(Y_t.shape[0], N_1[1], N_1[2], N_1[3])
+                Yh_t_reshaped = Yh_t.reshape(Yh_t.shape[0], N_1[1], N_1[2], N_1[3])
+                # 2. put through decoder
+                reconstructed_truth = Decoder(Y_t_reshaped,b).numpy()
+                reconstructed_predictions = Decoder(Yh_t_reshaped,b).numpy()
+                # 3. scale back
+                reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
+                reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
 
             # metrics
             nrmse = NRMSE(reconstructed_truth, reconstructed_predictions)
@@ -795,6 +854,18 @@ if validation_interval:
                 nrmse_plume = np.inf
                 nrmse_sep_plume = np.inf
 
+            if Data == 'RB_plume':
+                pred_counts_rounded = np.round(plume_features_predictions[:, 0]).astype(int)
+                true_counts = plume_features_truth[:, 0].astype(int)
+
+                if len(true_counts) > 0:
+                    exact_match = (pred_counts_rounded == true_counts).sum()
+                    plume_count_accuracy = exact_match / len(true_counts)
+                else:
+                    plume_count_accuracy = 0.0  # or -1 if you want to flag it
+            else:
+                plume_count_accuracy = 0.0
+
             print('NRMSE', nrmse)
             print('MSE', mse)
             print('EVR_recon', evr)
@@ -819,6 +890,7 @@ if validation_interval:
             "PH": float(PH[i]),
             "NRMSE per channel": float(nrmse_ch),
             "NRMSE per channel in plume": float(nrmse_sep_plume),
+            "plume_count_accuracy": float(plume_count_accuracy),
             }
 
             with open(output_path_met, "w") as file:
@@ -832,8 +904,8 @@ if validation_interval:
             ens_nrmse_ch[j]    += nrmse_ch
             nrmse_sep_plume     = np.nan_to_num(nrmse_sep_plume, nan=0.0)  # replace NaNs with zero
             ens_nrmse_ch_pl[j] += nrmse_sep_plume
+            ens_pl_acc[j]      += plume_count_accuracy
 
-            
             if plot:
                 images_val_path = output_path+'/validation_images/'
                 if not os.path.exists(images_val_path):
@@ -860,6 +932,10 @@ if validation_interval:
                         plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, x, z, xx, names, images_val_path+'/ESN_validation_ens%i_test%i' %(j,i))
 
                         plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_val_path+'/active_plumes_validation')
+                        
+                        if Data == 'RB_plume':
+                            plotting_number_of_plumes(true_counts, pred_counts_rounded, xx, i, j, images_val_path+f"/number_of_plumes")
+                            hovmoller_plus_plumes(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j, images_val_path+f"/hovmol_plumes")
 
 
         # accumulation for each ensemble member
@@ -870,6 +946,7 @@ if validation_interval:
         ens_PH2[j]         = ens_PH2[j] / N_test  
         ens_nrmse_ch[j]    = ens_nrmse_ch[j] / N_test
         ens_nrmse_ch_pl[j] = ens_nrmse_ch_pl[j] / N_test
+        ens_pl_acc[j]      = ens_pl_acc[j] / N_test
              
     # Full path for saving the file
     output_file_ALL = 'ESN_validation_metrics_all.json' 
@@ -890,6 +967,7 @@ if validation_interval:
     "mean ssim": np.mean(ens_ssim),
     "mean NRMSE per channel": np.mean(ens_nrmse_ch),
     "mean NRMSE per channel in plume": np.nanmean(ens_nrmse_ch_pl),
+    "ens_pl_acc": np.mean(ens_pl_acc),
     }
 
     with open(output_path_met_ALL, "w") as file:
@@ -928,6 +1006,7 @@ if test_interval:
     ens_PH_recons   = np.zeros((ensemble_test))
     ens_nrmse_ch    = np.zeros((ensemble_test))
     ens_nrmse_ch_pl = np.zeros((ensemble_test))
+    ens_pl_acc      = np.zeros((ensemble_test))
 
     images_test_path = output_path+'/test_images/'
     if not os.path.exists(images_test_path):
@@ -987,15 +1066,30 @@ if test_interval:
             nrmse_error[i, :] = Y_err
 
             ##### reconstructions ####
-            # 1. reshape for decoder
-            Y_t_reshaped = Y_t.reshape(Y_t.shape[0], N_1[1], N_1[2], N_1[3])
-            Yh_t_reshaped = Yh_t.reshape(Yh_t.shape[0], N_1[1], N_1[2], N_1[3])
-            # 2. put through decoder
-            reconstructed_truth = Decoder(Y_t_reshaped,b).numpy()
-            reconstructed_predictions = Decoder(Yh_t_reshaped,b).numpy()
-            # 3. scale back
-            reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
-            reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
+            if Data == 'RB_plume':
+                plume_features_truth         = Y_t[:,N_latent:]
+                plume_features_predictions   = Yh_t[:,N_latent:]
+
+                # 1. reshape for decoder
+                Y_t_reshaped = Y_t[:,:N_latent].reshape(Y_t.shape[0], N_1[1], N_1[2], N_1[3])
+                Yh_t_reshaped = Yh_t[:,:N_latent].reshape(Yh_t.shape[0], N_1[1], N_1[2], N_1[3])
+                # 2. put through decoder
+                reconstructed_truth = Decoder(Y_t_reshaped,b).numpy()
+                reconstructed_predictions = Decoder(Yh_t_reshaped,b).numpy()
+                # 3. scale back
+                reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
+                reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
+
+            else:
+                # 1. reshape for decoder
+                Y_t_reshaped = Y_t.reshape(Y_t.shape[0], N_1[1], N_1[2], N_1[3])
+                Yh_t_reshaped = Yh_t.reshape(Yh_t.shape[0], N_1[1], N_1[2], N_1[3])
+                # 2. put through decoder
+                reconstructed_truth = Decoder(Y_t_reshaped,b).numpy()
+                reconstructed_predictions = Decoder(Yh_t_reshaped,b).numpy()
+                # 3. scale back
+                reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
+                reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
 
             # metrics
             nrmse = NRMSE(reconstructed_truth, reconstructed_predictions)
@@ -1028,6 +1122,18 @@ if test_interval:
                 nrmse_plume = np.inf
                 nrmse_sep_plume = np.inf
 
+            if Data == 'RB_plume':
+                pred_counts_rounded = np.round(plume_features_predictions[:, 0]).astype(int)
+                true_counts = plume_features_truth[:, 0].astype(int)
+
+                if len(true_counts) > 0:
+                    exact_match = (pred_counts_rounded == true_counts).sum()
+                    plume_count_accuracy = exact_match / len(true_counts)
+                else:
+                    plume_count_accuracy = 0.0  # or -1 if you want to flag it
+            else:
+                plume_count_accuracy = 0.0
+
             nrmse_recons = compute_nrmse_per_timestep_variable(reconstructed_truth, reconstructed_predictions, normalize_by="std")
             horizons_recons = find_prediction_horizon(nrmse_recons, 0.2)/N_lyap
 
@@ -1058,6 +1164,7 @@ if test_interval:
             "PH recons": float(horizons_recons),
             "NRMSE per channel": float(nrmse_ch),
             "NRMSE per channel in plume": float(nrmse_sep_plume),
+            "plume_count_accuracy": float(plume_count_accuracy),
             }
 
             with open(output_path_met, "w") as file:
@@ -1072,6 +1179,7 @@ if test_interval:
             ens_nrmse_ch[j]    += nrmse_ch
             nrmse_sep_plume = np.nan_to_num(nrmse_sep_plume, nan=0.0)  # replace NaNs with zero
             ens_nrmse_ch_pl[j] += nrmse_sep_plume
+            ens_pl_acc[j]      += plume_count_accuracy
 
             if plot:
                 #left column has the washout (open-loop) and right column the prediction (closed-loop)
@@ -1097,6 +1205,10 @@ if test_interval:
 
                         plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_test_path+'/active_plumes_test')
 
+                        if Data == 'RB_plume':
+                            plotting_number_of_plumes(true_counts, pred_counts_rounded, xx, i, j, images_test_path+f"/number_of_plumes")
+                            hovmoller_plus_plumes(reconstructed_truth, reconstructed_predictions, images_test_path, plume_features_predictions, xx, x, 1, i, j, images_val_path+f"/hovmol_plumes")
+
 
         # accumulation for each ensemble member
         ens_nrmse[j]       = ens_nrmse[j] / N_test
@@ -1107,6 +1219,7 @@ if test_interval:
         ens_PH_recons[j]   = ens_PH_recons[j] / N_test
         ens_nrmse_ch[j]    = ens_nrmse_ch[j] / N_test
         ens_nrmse_ch_pl[j] = ens_nrmse_ch_pl[j] / N_test 
+        ens_pl_acc[j]      = ens_pl_acc[j] / N_test
              
     # Full path for saving the file
     output_file_ALL = 'ESN_test_metrics_all.json' 
@@ -1128,6 +1241,7 @@ if test_interval:
     "mean PH recons": np.mean(ens_PH_recons),
     "mean NRMSE per channel": np.mean(ens_nrmse_ch),
     "mean NRMSE per channel in plume": np.nanmean(ens_nrmse_ch_pl),
+    "ens_pl_acc": np.mean(ens_pl_acc),
     }
 
     with open(output_path_met_ALL, "w") as file:

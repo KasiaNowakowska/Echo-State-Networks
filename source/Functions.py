@@ -130,6 +130,72 @@ def train_n(U_washout, U_train, Y_train, tikh, sigma_in, rho):
 
     return Wout, LHS, RHS
 
+def train_n_decoded(U_washout, U_train, Y_train, tikh, sigma_in, rho, decoder):
+    """ Trains ESN.
+        Args:
+            U_washout: washout input time series
+            U_train: training input time series
+            tikh: Tikhonov factor
+        Returns:
+            time series of augmented reservoir states
+            optimal output matrix
+    """
+
+    ## initial washout phase
+    xf = open_loop(U_washout, np.zeros(N_units), sigma_in, rho)[-1,:N_units]
+
+    ## splitting training in N_splits to save memory
+    LHS = 0
+    RHS = 0
+    N_len = (U_train.shape[0]-1)//N_splits
+
+    Xa_all = []
+
+    for ii in range(N_splits):
+        ## open-loop train phase
+        t1      = time.time()
+        Xa1     = open_loop(U_train[ii*N_len:(ii+1)*N_len], xf, sigma_in, rho)[1:]
+        xf      = Xa1[-1,:N_units].copy()
+        Xa_all.append(Xa1)
+
+        if ii == 0 and k==0: print('open_loop time:', (time.time()-t1)*N_splits)
+        cond_number = np.linalg.cond(Xa1)
+        #print("Condition number of reservoir state matrix:", cond_number)
+
+        ##computing the matrices for the linear system
+        t1  = time.time()
+        LHS += np.dot(Xa1.T, Xa1)
+        RHS += np.dot(Xa1.T, Y_train[ii*N_len:(ii+1)*N_len])
+        if ii == 0 and k==0: print('matrix multiplication time:', (time.time()-t1)*N_splits)
+
+    # to cover the last part of the data that didn't make it into the even splits
+    if N_splits > 1:
+        Xa1 = open_loop(U_train[(ii+1)*N_len:], xf, sigma_in, rho)[1:]
+        LHS += np.dot(Xa1.T, Xa1)
+        RHS += np.dot(Xa1.T, Y_train[(ii+1)*N_len:])
+
+    Xa_all = np.vstack(Xa_all)
+    Y_train_all = Y_train[:Xa_all.shape[0]]
+
+    Wout = np.empty((len(tikh),N_units+1,dim))
+    decoded_img_loss = []
+
+    # solve linear system for different Tikhonov
+    for j in range(len(tikh)):
+        if j == 0: #add tikhonov to the diagonal (fast way that requires less memory)
+            LHS.ravel()[::LHS.shape[1]+1] += tikh[j]
+        else:
+            LHS.ravel()[::LHS.shape[1]+1] += tikh[j] - tikh[j-1]
+
+        #solve linear system
+        t1  = time.time()
+        Wout[j] = np.linalg.solve(LHS, RHS)
+
+        if j==0 and k==0: print('linear system time:', (time.time() - t1)*len(tikh))
+
+    return Wout, LHS, RHS
+
+
 def train_save_n(U_washout, U_train, Y_train, tikh, sigma_in, rho, noise):
     """ Trains ESN.
         Args:

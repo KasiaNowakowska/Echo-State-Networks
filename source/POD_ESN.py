@@ -167,7 +167,7 @@ def load_data_set_RB_act(file, names, snapshots):
 
 
 #### LOAD DATA AND POD ####
-Data = 'RB_plume'
+Data = 'RB'
 if Data == 'ToyData':
     name = names = variables = ['combined']
     n_components = 3
@@ -188,12 +188,14 @@ elif Data == 'RB':
     dt = 2
 
 elif Data == 'RB_plume':
-    variables = ['q_all', 'w_all', 'u_all', 'b_all', 'plume_features']
-    names = ['q', 'w', 'u', 'b', 'active']
+    variables = ['q_all', 'w_all', 'u_all', 'b_all']
+    variables_plus_act = ['q_all', 'w_all', 'u_all', 'b_all', 'plume_features']
+    names = ['q_all', 'w_all', 'u_all', 'b_all']
+    names_plus_act = ['q', 'w', 'u', 'b', 'active']
     x = np.load(input_path+'/x.npy')
     z = np.load(input_path+'/z.npy')
     snapshots_load = 16000
-    data_set, time_vals, plume_features = load_data_set_RB_act(input_path+'/data_4var_5000_48000_plumes.h5', variables, snapshots_load)
+    data_set, time_vals, plume_features = load_data_set_RB_act(input_path+'/data_4var_5000_48000_plumes.h5', variables_plus_act, snapshots_load)
     print('shape of dataset', np.shape(data_set))
     dt = 2
     print('shape of plume_features', np.shape(plume_features))
@@ -886,7 +888,6 @@ if validation_interval:
                     plume_count_accuracy = 0.0  # or -1 if you want to flag it
             else:
                 plume_count_accuracy = 0.0
-
 
             print('NRMSE', nrmse)
             print('MSE', mse)
