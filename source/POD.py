@@ -105,7 +105,7 @@ def load_data_set_Ra2e7(file, names, snapshots):
     return data, time_vals
 
 #### LOAD DATA AND POD ####
-Data = 'RB'
+Data = 'ToyData'
 if Data == 'ToyData':
     name = names = variables = ['combined']
     n_components = 3
@@ -136,7 +136,7 @@ if reduce_data_set:
     print('reduced x domain', len(x))
     print(x[0], x[-1])
 
-reduce_data_set2 = True
+reduce_data_set2 = False
 if reduce_data_set2:
     data_set = data_set[:,128:160,:,:] # 10LTs washout, 200LTs train, 1000LTs test
     x = x[128:160]
@@ -194,7 +194,7 @@ data_reshape = data_set.reshape(-1, data_set.shape[-1])
 print('shape of data reshaped', np.shape(data_reshape))
 
 # fit the scaler
-scaling = 'SS'
+scaling = 'None'
 if scaling == 'SS':
     print('applying standard scaler')
     scaler = StandardScaler()
@@ -272,6 +272,7 @@ if POD_type == 'together':
             plt.close()
         else:
             nrmse_plume = np.inf
+            nrmse_sep_plume = np.inf
 
         ### plt part of domain ###
         plot_reconstruction_and_error(data_set[:500], data_reconstructed[:500], 32, 75, x, z, time_vals[:500], names, output_path+c_names[index]+'_500')
@@ -358,6 +359,7 @@ if POD_type == 'together':
                 plt.close()
             else:
                 nrmse_plume_proj = np.inf
+                rmse_sep_plume_proj = np.inf
 
             # Full path for saving the file
             output_file = c_names[index] + '_proj_metrics.json' 

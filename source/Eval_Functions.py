@@ -59,6 +59,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             ax[v].set_ylabel('z')
         ax[-1].set_xlabel('x')
         fig.savefig(file_str+'_hovmoller_recon_error.png')
+        plt.close()
 
         fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
         minm = min(np.min(original[:, :, z_value]), np.min(reconstruction[:, :, z_value]))
@@ -78,6 +79,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             ax[v].set_ylabel('x')
         ax[-1].set_xlabel('time')
         fig.savefig(file_str+'_snapshot_recon_error.png')
+        plt.close()
 
         fig, ax = plt.subplots(3, figsize=(12,6), tight_layout=True, sharex=True)
         minm = min(np.min(original[t_value, :, :]), np.min(reconstruction[t_value, :, :]))
@@ -98,6 +100,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             ax[v].tick_params(axis='both', labelsize=12)
         ax[-1].set_xlabel('x', fontsize=16)
         fig.savefig(file_str+'_snapshot_recon_residual.png')
+        plt.close()
 
         fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
         minm = min(np.min(original[:, :, z_value]), np.min(reconstruction[:, :, z_value]))
@@ -122,6 +125,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             ax[v].tick_params(axis='both', labelsize=12)
         ax[-1].set_xlabel('time', fontsize=16)
         fig.savefig(file_str+'_hovmoller_recon_residual.png')
+        plt.close()
     
     elif original.ndim == 4: #len(time_vals), len(x), len(z), var
         for i in range(original.shape[3]):
@@ -187,6 +191,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
                 ax[v].tick_params(axis='both', labelsize=12)
             ax[-1].set_xlabel('x', fontsize=16)
             fig.savefig(file_str+name+'_snapshot_recon_residual.png')
+            plt.close()
 
             fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
             minm = min(np.min(original[:, :, z_value,i]), np.min(reconstruction[:, :, z_value,i]))
@@ -212,6 +217,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
                 ax[v].tick_params(axis='both', labelsize=12)
             ax[-1].set_xlabel('time', fontsize=16)
             fig.savefig(file_str+name+'_hovmoller_recon_residual.png')
+            plt.close()
 
 #### Metrics ####
 from sklearn.metrics import mean_squared_error

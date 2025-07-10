@@ -311,7 +311,7 @@ def periodic_padding(image, padding=1, asym=False):
 
 #### LOAD DATA ####
 #### LOAD DATA AND POD ####
-Data = 'RB_plume'
+Data = 'ToyData'
 if Data == 'ToyData':
     name = names = variables = ['combined']
     n_components = 3

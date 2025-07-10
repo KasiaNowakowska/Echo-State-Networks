@@ -145,6 +145,7 @@ def stats_pdf_modes(Y_t, Yh_t, indexes_to_plot, i, j, file_name, Modes=True):
             ax[v].set_xlabel(f"LV {element}")
         ax[v].legend()
     fig.savefig(file_name+f"_ens{j}_test{i}.png")
+    plt.close()
 
 def stats_pdf_global(truth, prediction, i, j, file_name):
     fig, ax = plt.subplots(2, figsize=(8,6))
@@ -166,6 +167,7 @@ def stats_pdf_global(truth, prediction, i, j, file_name):
     ax[0].set_xlabel('KE')
     ax[1].set_xlabel('q')
     fig.savefig(file_name+f"_ens{j}_test{i}.png")
+    plt.close()
 
 def plotting_number_of_plumes(truth, prediction, xx, i, j, file_name):
     fig, ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
@@ -176,6 +178,7 @@ def plotting_number_of_plumes(truth, prediction, xx, i, j, file_name):
     ax.grid()
     ax.legend()
     fig.savefig(file_name+f"_ens{j}_ens{i}.png")
+    plt.close()
 
 def hovmoller_plus_plumes(truth_data, prediction_data, truth_features, prediction_features, xx, x, variable, i, j, file_name):
     truth_data      = truth_data[..., variable]

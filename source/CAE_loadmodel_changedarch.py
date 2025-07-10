@@ -133,7 +133,7 @@ def load_data_set_RB(file, names, snapshots):
     return data, time_vals
 
 #### LOAD DATA ####
-Data = 'RB'
+Data = 'ToyData'
 if Data == 'ToyData':
     name = names = variables = ['combined']
     n_components = 3

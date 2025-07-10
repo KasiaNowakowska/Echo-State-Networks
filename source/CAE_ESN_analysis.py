@@ -704,7 +704,7 @@ print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
 test_interval = True
-validation_interval = True
+validation_interval = False
 statistics_interval = False
 fourier = False
 vertical_profiles = False
@@ -1207,7 +1207,7 @@ if test_interval:
 
                         if Data == 'RB_plume':
                             plotting_number_of_plumes(true_counts, pred_counts_rounded, xx, i, j, images_test_path+f"/number_of_plumes")
-                            hovmoller_plus_plumes(reconstructed_truth, reconstructed_predictions, images_test_path, plume_features_predictions, xx, x, 1, i, j, images_val_path+f"/hovmol_plumes")
+                            hovmoller_plus_plumes(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j, images_val_path+f"/hovmol_plumes")
 
 
         # accumulation for each ensemble member
