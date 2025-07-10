@@ -142,7 +142,7 @@ def load_data_set_RB(file, names, snapshots):
     return data, time_vals
 
 #### LOAD DATA AND POD ####
-Data = 'RB'
+Data = 'ToyData'
 if Data == 'ToyData':
     name = names = variables = ['combined']
     n_components = 3
@@ -671,20 +671,24 @@ def main():
             nrmse_sep_value    = NRMSE_per_channel(original_unscaled, decoded_unscaled)
             nrmse_sep_0       += nrmse_sep_value
 
-            active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(original_unscaled, decoded_unscaled, z)
-            accuracy = np.mean(active_array == active_array_reconstructed)
-            if np.any(mask):  # Check if plumes exist
-                masked_truth = original_unscaled[mask]
-                masked_pred = decoded_unscaled[mask]
-                
-                print("Shape truth after mask:", masked_truth.shape)
-                print("Shape pred after mask:", masked_pred.shape)
+            if len(variables) == 4:
+                active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(original_unscaled, decoded_unscaled, z)
+                accuracy = np.mean(active_array == active_array_reconstructed)
+                if np.any(mask):  # Check if plumes exist
+                    masked_truth = original_unscaled[mask]
+                    masked_pred = decoded_unscaled[mask]
+                    
+                    print("Shape truth after mask:", masked_truth.shape)
+                    print("Shape pred after mask:", masked_pred.shape)
 
-                # Compute NRMSE only if mask is not empty
-                nrmse_plume = NRMSE(masked_truth, masked_pred)
+                    # Compute NRMSE only if mask is not empty
+                    nrmse_plume = NRMSE(masked_truth, masked_pred)
+                else:
+                    print("Mask is empty, no plumes detected.")
+                    nrmse_plume = 0  # Simply add 0 to maintain shape
             else:
-                print("Mask is empty, no plumes detected.")
-                nrmse_plume = 0  # Simply add 0 to maintain shape
+                nrmse_plume = 0
+                accuracy    = 0
 
             accuracy_0             += accuracy
             nrmse_plume_0          += nrmse_plume
@@ -738,20 +742,24 @@ def main():
                 nrmse_sep_value      = NRMSE_per_channel(original_unscaled, decoded_unscaled)
                 nrmse_sep_val       += nrmse_sep_value
 
-                active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(original_unscaled, decoded_unscaled, z)
-                accuracy = np.mean(active_array == active_array_reconstructed)
-                if np.any(mask):  # Check if plumes exist
-                    masked_truth = original_unscaled[mask]
-                    masked_pred = decoded_unscaled[mask]
-                    
-                    print("Shape truth after mask:", masked_truth.shape)
-                    print("Shape pred after mask:", masked_pred.shape)
+                if len(variables) == 4:
+                    active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(original_unscaled, decoded_unscaled, z)
+                    accuracy = np.mean(active_array == active_array_reconstructed)
+                    if np.any(mask):  # Check if plumes exist
+                        masked_truth = original_unscaled[mask]
+                        masked_pred = decoded_unscaled[mask]
+                        
+                        print("Shape truth after mask:", masked_truth.shape)
+                        print("Shape pred after mask:", masked_pred.shape)
 
-                    # Compute NRMSE only if mask is not empty
-                    nrmse_plume = NRMSE(masked_truth, masked_pred)
+                        # Compute NRMSE only if mask is not empty
+                        nrmse_plume = NRMSE(masked_truth, masked_pred)
+                    else:
+                        print("Mask is empty, no plumes detected.")
+                        nrmse_plume = 0  # Simply add 0 to maintain shape
                 else:
-                    print("Mask is empty, no plumes detected.")
-                    nrmse_plume = 0  # Simply add 0 to maintain shape
+                    nrmse_plume = 0
+                    accuracy    = 0
 
                 accuracy_val             += accuracy
                 nrmse_plume_val          += nrmse_plume
