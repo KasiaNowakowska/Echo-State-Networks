@@ -167,7 +167,7 @@ def load_data_set_RB_act(file, names, snapshots):
 
 
 #### LOAD DATA AND POD ####
-Data = 'RB'
+Data = 'ToyData'
 if Data == 'ToyData':
     name = names = variables = ['combined']
     n_components = 3

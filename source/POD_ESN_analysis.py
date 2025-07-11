@@ -154,7 +154,7 @@ def load_data_set_RB_act(file, names, snapshots):
     return data, time_vals, plume_features
 
 #### LOAD DATA AND POD ####
-Data = 'RB'
+Data = 'ToyData'
 if Data == 'ToyData':
     name = names = variables = ['combined']
     n_components = 3
@@ -224,8 +224,12 @@ if reduce_domain2:
     print(x[0], x[-1])
 
 ### global ###
-truth_global = global_parameters(data_set)
-global_labels=['KE', 'q']
+if Data == 'ToyData':
+    print('no global')
+    truth_global = 0
+else:
+    truth_global = global_parameters(data_set)
+    global_labels=['KE', 'q']
 
 data_reshape = data_set.reshape(-1, data_set.shape[-1])
 print('shape of data reshaped', data_reshape)
@@ -370,7 +374,7 @@ print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
 test_interval = True
-validation_interval = True
+validation_interval = False
 statistics_interval = False
 initiation_interval = False
 initiation_interval2 = False
@@ -782,14 +786,19 @@ if test_interval:
             print('no plume accuracy', plume_count_accuracy)
 
             ## global parameters ##
-            PODtruth_global    = global_parameters(reconstructed_truth)
-            predictions_global = global_parameters(reconstructed_predictions)
-            ens_pred_global[:,:,i,j] = predictions_global
-            true_POD_global[:,:,i] = PODtruth_global
-            true_global[:,:,i] = truth_global[N_tstart + i*N_gap: N_tstart + i*N_gap + N_intt]
-            # metrics
-            nrmse_global = NRMSE(PODtruth_global, predictions_global)
-            mse_global   = MSE(PODtruth_global, predictions_global)
+            if Data == 'ToyData':
+                print('no globals')
+                nrmse_global = 0
+                mse_global = 0
+            else:
+                PODtruth_global    = global_parameters(reconstructed_truth)
+                predictions_global = global_parameters(reconstructed_predictions)
+                ens_pred_global[:,:,i,j] = predictions_global
+                true_POD_global[:,:,i] = PODtruth_global
+                true_global[:,:,i] = truth_global[N_tstart + i*N_gap: N_tstart + i*N_gap + N_intt]
+                # metrics
+                nrmse_global = NRMSE(PODtruth_global, predictions_global)
+                mse_global   = MSE(PODtruth_global, predictions_global)
 
             # Full path for saving the file
             output_file = 'ESN_test_metrics_ens%i_test%i.json' % (j,i)
@@ -850,15 +859,14 @@ if test_interval:
                         print('reconstruction and error plot')
                         plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, int(0.5*N_lyap), x, z, xx, names, images_test_path+'/ESN_validation_ens%i_test%i' %(j,i))
 
-                        plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_test_path+'/active_plumes_test')
-                        
-                        plot_global_prediction_ts(PODtruth_global, predictions_global, xx, i, j, images_test_path+'/global_prediciton')
-                        #plot_global_prediction_ps(PODtruth_global, predictions_global, i, j, stats_path+'/global_prediciton')
+                        if len(variables)==4:
+                            plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_test_path+'/active_plumes_test')
+                            plot_global_prediction_ts(PODtruth_global, predictions_global, xx, i, j, images_test_path+'/global_prediciton')
+                            #plot_global_prediction_ps(PODtruth_global, predictions_global, i, j, stats_path+'/global_prediciton')
 
                         if Data == 'RB_plume':
                             plotting_number_of_plumes(true_counts, pred_counts_rounded, xx, i, j, images_test_path+f"/number_of_plumes")
                             hovmoller_plus_plumes(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j, images_test_path+f"/hovmol_plumes")
-
 
         # accumulation for each ensemble member
         ens_nrmse[j]       = ens_nrmse[j] / N_test
@@ -983,15 +991,19 @@ if statistics_interval:
             reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
 
             ## global parameters ##
-            PODtruth_global    = global_parameters(reconstructed_truth)
-            predictions_global = global_parameters(reconstructed_predictions)
-            ens_pred_global[:,:,i,j] = predictions_global
-            true_POD_global[:,:,i] = PODtruth_global
-            true_global[:,:,i] = truth_global[N_tstart + i*N_gap: N_tstart + i*N_gap + N_intt]
+            if Data == 'ToyData':
+                nrmse_global = 0
+                mse_global   = 0
+            else:
+                PODtruth_global    = global_parameters(reconstructed_truth)
+                predictions_global = global_parameters(reconstructed_predictions)
+                ens_pred_global[:,:,i,j] = predictions_global
+                true_POD_global[:,:,i] = PODtruth_global
+                true_global[:,:,i] = truth_global[N_tstart + i*N_gap: N_tstart + i*N_gap + N_intt]
 
-            # metrics
-            nrmse_global = NRMSE(PODtruth_global, predictions_global)
-            mse_global   = MSE(PODtruth_global, predictions_global)
+                # metrics
+                nrmse_global = NRMSE(PODtruth_global, predictions_global)
+                mse_global   = MSE(PODtruth_global, predictions_global)
 
 
             ens_nrmse_global[j]+= nrmse_global
