@@ -21,10 +21,9 @@ def plot_modes_washout(truth, prediction, xx, i, j, indexes_to_plot, file_name, 
                 ax[v].set_ylabel('Mode %i' % (index+1))
             else:
                 ax[v].set_ylabel('LV %i' % (index+1))
-        ax[-1].set_xlabel('Time[Lyapunov Times]')
+        ax[-1].set_xlabel('Time [Lyapunov Times]')
         if v==0:
             ax[0].legend(ncol=2)
-        fig.suptitle('washout_ens%i_test%i' % (j,i))
         fig.savefig(file_name+'_ens%i_test%i.png' % (j,i))
         plt.close()
         
@@ -45,10 +44,8 @@ def plot_modes_prediction(truth, prediction, xx, i, j, indexes_to_plot, file_nam
                 ax[v].set_ylabel('Mode %i' % (index+1))
             else:
                 ax[v].set_ylabel('LV %i' % (index+1))
-        ax[-1].set_xlabel('Time[Lyapunov Times]')
-        if v==0:
-            ax[0].legend(ncol=2)
-        fig.suptitle('washout_ens%i_test%i' % (j,i))
+        ax[-1].set_xlabel('Time [Lyapunov Times]')
+        ax[0].legend(ncol=2)
         fig.savefig(file_name+'_ens%i_test%i.png' % (j,i))
         plt.close()
 

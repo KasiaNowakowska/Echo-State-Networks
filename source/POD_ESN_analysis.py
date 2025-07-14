@@ -375,7 +375,7 @@ print('shape of norm:', np.shape(norm))
 
 test_interval = True
 validation_interval = False
-statistics_interval = False
+statistics_interval = True
 initiation_interval = False
 initiation_interval2 = False
 
@@ -656,6 +656,8 @@ if test_interval:
     ens_nrmse_ch_pl = np.zeros((ensemble_test))
     ens_pl_acc      = np.zeros((ensemble_test))
 
+    ens_nrmse_inPHregion = np.zeros((ensemble_test))
+
     images_test_path = output_path+'/test_images/'
     if not os.path.exists(images_test_path):
         os.makedirs(images_test_path)
@@ -739,6 +741,9 @@ if test_interval:
             evr   = EVR_recon(reconstructed_truth, reconstructed_predictions)
             SSIM  = compute_ssim_for_4d(reconstructed_truth, reconstructed_predictions)
             nrmse_ch = NRMSE_per_channel(reconstructed_truth, reconstructed_predictions)
+            PH_index = int(PH[i]*N_lyap)
+            print('PH_index', PH_index)
+            nrmse_inPHreg = NRMSE_per_channel(reconstructed_truth[:PH_index], reconstructed_predictions[:PH_index])
 
             if len(variables) == 4:
                 active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(reconstructed_truth, reconstructed_predictions, z)
@@ -819,6 +824,7 @@ if test_interval:
             "NRMSE per channel": nrmse_ch,
             "NRMSE per channel in plume": nrmse_sep_plume,
             "plume_count_accuracy": plume_count_accuracy,
+            "nrmse_inPHreg": float(nrmse_inPHreg),
             }
 
             with open(output_path_met, "w") as file:
@@ -833,6 +839,7 @@ if test_interval:
             nrmse_sep_plume = np.nan_to_num(nrmse_sep_plume, nan=0.0)  # replace NaNs with zero
             ens_nrmse_ch_pl[j] += nrmse_sep_plume
             ens_pl_acc[j]      += plume_count_accuracy
+            ens_nrmse_inPHregion[j] += nrmse_inPHreg
 
             ens_nrmse_global[j]+= nrmse_global
             ens_mse_global[j]  += mse_global
@@ -846,10 +853,10 @@ if test_interval:
                         print('indexes_to_plot', indexes_to_plot)
                         print(np.shape(U_wash))
                         xx = np.arange(U_wash[:,0].shape[0])/N_lyap
-                        plot_modes_washout(U_wash, Uh_wash, xx, i, j, indexes_to_plot, images_test_path+'/washout_test', Modes=False)
+                        plot_modes_washout(U_wash, Uh_wash, xx, i, j, indexes_to_plot, images_test_path+'/washout_test', Modes=True)
 
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                        plot_modes_prediction(Y_t, Yh_t, xx, i, j, indexes_to_plot, images_test_path+'/prediction_test', Modes=False)
+                        plot_modes_prediction(Y_t, Yh_t, xx, i, j, indexes_to_plot, images_test_path+'/prediction_test', Modes=True)
                         plot_PH(Y_err, threshold_ph, xx, i, j, images_test_path+'/PH_test')
                         
                         plot_reservoir_states_norm(Xa1, Xa2, time_vals, N_tstart, N_washout_val, i, j, N_gap, N_intt, N_units, images_test_path+'/resnorm_test')
@@ -857,7 +864,7 @@ if test_interval:
 
                         # reconstruction after scaling
                         print('reconstruction and error plot')
-                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, int(0.5*N_lyap), x, z, xx, names, images_test_path+'/ESN_validation_ens%i_test%i' %(j,i))
+                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, int(0.5*N_lyap), x, z, xx, names, images_test_path+'/ESN_validation_ens%i_test%i' %(j,i), type='POD')
 
                         if len(variables)==4:
                             plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_test_path+'/active_plumes_test')
@@ -877,6 +884,8 @@ if test_interval:
         ens_nrmse_ch[j]    = ens_nrmse_ch[j] / N_test
         ens_nrmse_ch_pl[j] = ens_nrmse_ch_pl[j] / N_test 
         ens_pl_acc[j]      = ens_pl_acc[j] / N_test
+        ens_nrmse_inPHregion[j] = ens_nrmse_inPHregion[j] / N_test
+    
              
     # Full path for saving the file
     output_file_ALL = 'ESN_test_metrics_all.json' 
@@ -898,7 +907,7 @@ if test_interval:
     "mean ssim": np.mean(ens_ssim),
     "mean NRMSE per channel": np.mean(ens_nrmse_ch),
     "mean NRMSE per channel in plume": np.nanmean(ens_nrmse_ch_pl),
-    "ens_pl_acc": np.mean(ens_pl_acc),
+    "ens_nrmse_inPHregion": np.mean(ens_nrmse_inPHregion),
     }
 
     with open(output_path_met_ALL, "w") as file:
@@ -1016,18 +1025,23 @@ if statistics_interval:
                     if j % 1 == 0:
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
                         ### global prediction ###
-                        plot_global_prediction_ts(PODtruth_global, predictions_global, xx, i, j, stats_path+'/global_prediciton')
-                        plot_global_prediction_ps(PODtruth_global, predictions_global, i, j, stats_path+'/global_prediciton_ts')
-
-            stats_pdf_modes(Y_t, Yh_t, indexes_to_plot, i, j, stats_path+'/stats_pdf_modes', Modes=False)
-            stats_pdf_global(PODtruth_global, predictions_global, i, j, stats_path+'/stats_pdf_global')
+                        if Data == 'ToyData':
+                            print('no globals')
+                        else:
+                            plot_global_prediction_ts(PODtruth_global, predictions_global, xx, i, j, stats_path+'/global_prediciton')
+                            plot_global_prediction_ps(PODtruth_global, predictions_global, i, j, stats_path+'/global_prediciton_ts')
+            if Data == 'ToyData':
+                stats_pdf_modes(Y_t, Yh_t, indexes_to_plot, i, j, stats_path+'/stats_pdf_modes', Modes=True)
+            else:
+                stats_pdf_modes(Y_t, Yh_t, indexes_to_plot, i, j, stats_path+'/stats_pdf_modes', Modes=True)
+                stats_pdf_global(PODtruth_global, predictions_global, i, j, stats_path+'/stats_pdf_global')
 
             fig, ax = plt.subplots(1, figsize=(8,6))
             ax.scatter(Y_t[:,0], Y_t[:,1], label='truth')
             ax.scatter(Yh_t[:,0], Yh_t[:,1], label='prediction')
             ax.grid()
-            ax.set_xlabel('mode 1')
-            ax.set_ylabel('mode 2')
+            ax.set_xlabel('Mode 1')
+            ax.set_ylabel('Mode 2')
             ax.legend()
             fig.savefig(stats_path+f"/trajectories_ens{j}_test{i}.png")
 

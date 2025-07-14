@@ -39,7 +39,7 @@ def plot_reconstruction(original, reconstruction, z_value, t_value, time_vals, f
     fig.savefig(output_path+'/hovmoller_recon'+file_str+'.png')
 
 
-def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x, z, time_vals, names, file_str):
+def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x, z, time_vals, names, file_str, type='Recon'):
     abs_error = np.abs(original-reconstruction)
     residual  = original - reconstruction
     if original.ndim == 3: #len(time_vals), len(x), len(z)
@@ -136,13 +136,23 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             maxm = max(np.max(original[t_value, :, :, i]), np.max(reconstruction[t_value, :, :, i]))
             c1 = ax[0].pcolormesh(x, z, original[t_value,:,:,i].T, vmin=minm, vmax=maxm)
             fig.colorbar(c1, ax=ax[0])
-            ax[0].set_title('true')
+            if type == 'Recon':
+                ax[0].set_title('True')
+            elif type == 'CAE':
+                ax[0].set_title('CAE Reconstruction (True)')
+            elif type == 'POD':
+                ax[0].set_title('POD Reconstruction (True)')
             c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm)
             fig.colorbar(c2, ax=ax[1])
-            ax[1].set_title('reconstruction')
+            if type == 'Recon':
+                ax[1].set_title('Reconstruction')
+            elif type == 'CAE':
+                ax[1].set_title('CAE Reconstruction (ESN)')
+            elif type == 'POD':
+                ax[1].set_title('POD Reconstruction (ESN)')
             c3 = ax[2].pcolormesh(x, z, abs_error[t_value,:,:, i].T, cmap='Reds')
             fig.colorbar(c3, ax=ax[2])
-            ax[2].set_title('error')
+            ax[2].set_title('Error')
             for v in range(2):
                 ax[v].set_ylabel('z')
             ax[-1].set_xlabel('x')
@@ -159,33 +169,53 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
             c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm)
             fig.colorbar(c1, ax=ax[0])
-            ax[0].set_title('true')
+            if type == 'Recon':
+                ax[0].set_title('Reconstruction')
+            elif type == 'CAE':
+                ax[0].set_title('CAE Reconstruction (ESN)')
+            elif type == 'POD':
+                ax[0].set_title('POD Reconstruction (ESN)')
             c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
             fig.colorbar(c2, ax=ax[1])
-            ax[1].set_title('reconstruction')
+            if type == 'Recon':
+                ax[1].set_title('Reconstruction')
+            elif type == 'CAE':
+                ax[1].set_title('CAE Reconstruction (ESN)')
+            elif type == 'POD':
+                ax[1].set_title('POD Reconstruction (ESN)')
             c3 = ax[2].pcolormesh(time_vals, x,  abs_error[:,:,z_value, i].T, cmap='Reds')
             fig.colorbar(c3, ax=ax[2])
-            ax[2].set_title('error')
+            ax[2].set_title('Error')
             for v in range(2):
                 ax[v].set_ylabel('x')
             ax[-1].set_xlabel('time')
             fig.savefig(file_str+name+'_hovmoller_recon_error.png')
             plt.close()
 
-            fig, ax = plt.subplots(3, figsize=(12,6), tight_layout=True, sharex=True)
+            fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
             minm = min(np.min(original[t_value, :, :, i]), np.min(reconstruction[t_value, :, :, i]))
             maxm = max(np.max(original[t_value, :, :, i]), np.max(reconstruction[t_value, :, :, i]))
             vmax_res = np.max(np.abs(residual[t_value,:,:,i]))  # Get maximum absolute value
             vmin_res = -vmax_res
             c1 = ax[0].pcolormesh(x, z, original[t_value,:,:,i].T, vmin=minm, vmax=maxm)
             fig.colorbar(c1, ax=ax[0])
-            ax[0].set_title('true', fontsize=18)
+            if type == 'Recon':
+                ax[0].set_title('Reconstruction', fontsize=18)
+            elif type == 'CAE':
+                ax[0].set_title('CAE Reconstruction (ESN)', fontsize=18)
+            elif type == 'POD':
+                ax[0].set_title('POD Reconstruction (ESN)', fontsize=18)
             c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm)
             fig.colorbar(c2, ax=ax[1])
-            ax[1].set_title('reconstruction', fontsize=18)
+            if type == 'Recon':
+                ax[1].set_title('Reconstruction', fontsize=18)
+            elif type == 'CAE':
+                ax[1].set_title('CAE Reconstruction (ESN)', fontsize=18)
+            elif type == 'POD':
+                ax[1].set_title('POD Reconstruction (ESN)', fontsize=18)
             c3 = ax[2].pcolormesh(x, z, residual[t_value,:,:, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
             fig.colorbar(c3, ax=ax[2])
-            ax[2].set_title('error', fontsize=18)
+            ax[2].set_title('Error', fontsize=18)
             for v in range(3):
                 ax[v].set_ylabel('z', fontsize=16)
                 ax[v].tick_params(axis='both', labelsize=12)
@@ -205,17 +235,27 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
             c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm)
             fig.colorbar(c1, ax=ax[0])
-            ax[0].set_title('true', fontsize=18)
+            if type == 'Recon':
+                ax[0].set_title('Reconstruction', fontsize=18)
+            elif type == 'CAE':
+                ax[0].set_title('CAE Reconstruction (ESN)', fontsize=18)
+            elif type == 'POD':
+                ax[0].set_title('POD Reconstruction (ESN)', fontsize=18)
             c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
             fig.colorbar(c2, ax=ax[1])
-            ax[1].set_title('reconstruction', fontsize=18)
+            if type == 'Recon':
+                ax[1].set_title('Reconstruction', fontsize=18)
+            elif type == 'CAE':
+                ax[1].set_title('CAE Reconstruction (ESN)', fontsize=18)
+            elif type == 'POD':
+                ax[1].set_title('POD Reconstruction (ESN)', fontsize=18)
             c3 = ax[2].pcolormesh(time_vals, x,  residual[:,:,z_value, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
             fig.colorbar(c3, ax=ax[2])
-            ax[2].set_title('error', fontsize=18)
+            ax[2].set_title('Error', fontsize=18)
             for v in range(3):
                 ax[v].set_ylabel('x', fontsize=16)
                 ax[v].tick_params(axis='both', labelsize=12)
-            ax[-1].set_xlabel('time', fontsize=16)
+            ax[-1].set_xlabel('Time', fontsize=16)
             fig.savefig(file_str+name+'_hovmoller_recon_residual.png')
             plt.close()
 

@@ -331,7 +331,7 @@ def global_parameters(data):
     return global_params
 
 #### LOAD DATA ####
-Data = 'RB_plume'
+Data = 'ToyData'
 if Data == 'ToyData':
     name = names = variables = ['combined']
     n_components = 3
@@ -374,8 +374,11 @@ if reduce_data_set:
     print(x[0], x[-1])
 
 ### global ###
-truth_global = global_parameters(data_set)
-global_labels=['KE', 'q']
+if Data == 'ToyData':
+    print('no globals')
+else:
+    truth_global = global_parameters(data_set)
+    global_labels=['KE', 'q']
 
 U = data_set
 # Load hyperparameters from a YAML file
@@ -563,8 +566,12 @@ for i in range(N_parallel):
 ##### Compute encoded time_series #####
 #set U to the standard scaler version
 if encoded_data:
-    with h5py.File('Ra2e8/CAE_ESN/LS64/encoded_data'+str(N_latent)+'.h5', 'r') as df:
-        U_enc = np.array(df['U_enc'])
+    if Data == 'ToyData':
+        with h5py.File('ToyData/CAE_ESN/Thesis/encoded_data'+str(N_latent)+'.h5', 'r') as df:
+            U_enc = np.array(df['U_enc'])
+    else:
+        with h5py.File('Ra2e8/CAE_ESN/LS64/encoded_data'+str(N_latent)+'.h5', 'r') as df:
+            U_enc = np.array(df['U_enc'])
 else:
     U = U_scaled
     train_leng = 0
@@ -1008,6 +1015,8 @@ if test_interval:
     ens_nrmse_ch_pl = np.zeros((ensemble_test))
     ens_pl_acc      = np.zeros((ensemble_test))
 
+    ens_nrmse_inPHregion = np.zeros((ensemble_test))
+
     images_test_path = output_path+'/test_images/'
     if not os.path.exists(images_test_path):
         os.makedirs(images_test_path)
@@ -1097,6 +1106,9 @@ if test_interval:
             evr   = EVR_recon(reconstructed_truth, reconstructed_predictions)
             SSIM  = compute_ssim_for_4d(reconstructed_truth, reconstructed_predictions)
             nrmse_ch = NRMSE_per_channel(reconstructed_truth, reconstructed_predictions)
+            PH_index = int(PH[i]*N_lyap)
+            print('PH_index', PH_index)
+            nrmse_inPHreg = NRMSE_per_channel(reconstructed_truth[:PH_index], reconstructed_predictions[:PH_index])
 
             if len(variables) == 4:
                 active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(reconstructed_truth, reconstructed_predictions, z)
@@ -1146,7 +1158,6 @@ if test_interval:
             print('NRMSE per channel', nrmse_ch)
             print('NRMSE per channel in plume', nrmse_sep_plume)
 
-
             # Full path for saving the file
             output_file = 'ESN_test_metrics_ens%i_test%i.json' % (j,i)
 
@@ -1165,6 +1176,7 @@ if test_interval:
             "NRMSE per channel": float(nrmse_ch),
             "NRMSE per channel in plume": float(nrmse_sep_plume),
             "plume_count_accuracy": float(plume_count_accuracy),
+            "nrmse_inPHreg": float(nrmse_inPHreg),
             }
 
             with open(output_path_met, "w") as file:
@@ -1180,6 +1192,7 @@ if test_interval:
             nrmse_sep_plume = np.nan_to_num(nrmse_sep_plume, nan=0.0)  # replace NaNs with zero
             ens_nrmse_ch_pl[j] += nrmse_sep_plume
             ens_pl_acc[j]      += plume_count_accuracy
+            ens_nrmse_inPHregion[j] += nrmse_inPHreg
 
             if plot:
                 #left column has the washout (open-loop) and right column the prediction (closed-loop)
@@ -1201,9 +1214,10 @@ if test_interval:
 
                         # reconstruction after scaling
                         print('reconstruction and error plot')
-                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, x, z, xx, names, images_test_path+'/ESN_validation_ens%i_test%i' %(j,i))
-
-                        plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_test_path+'/active_plumes_test')
+                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, x, z, xx, names, images_test_path+'/ESN_test_ens%i_test%i' %(j,i), type='CAE')
+                        
+                        if len(variables) == 4:
+                            plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_test_path+'/active_plumes_test')
 
                         if Data == 'RB_plume':
                             plotting_number_of_plumes(true_counts, pred_counts_rounded, xx, i, j, images_test_path+f"/number_of_plumes")
@@ -1220,6 +1234,7 @@ if test_interval:
         ens_nrmse_ch[j]    = ens_nrmse_ch[j] / N_test
         ens_nrmse_ch_pl[j] = ens_nrmse_ch_pl[j] / N_test 
         ens_pl_acc[j]      = ens_pl_acc[j] / N_test
+        ens_nrmse_inPHregion[j] = ens_nrmse_inPHregion[j] / N_test
              
     # Full path for saving the file
     output_file_ALL = 'ESN_test_metrics_all.json' 
@@ -1242,6 +1257,7 @@ if test_interval:
     "mean NRMSE per channel": np.mean(ens_nrmse_ch),
     "mean NRMSE per channel in plume": np.nanmean(ens_nrmse_ch_pl),
     "ens_pl_acc": np.mean(ens_pl_acc),
+    "ens_nrmse_inPHregion": np.mean(ens_nrmse_inPHregion),
     }
 
     with open(output_path_met_ALL, "w") as file:
@@ -1336,15 +1352,19 @@ if statistics_interval:
             reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
 
             ## global parameters ##
-            PODtruth_global    = global_parameters(reconstructed_truth)
-            predictions_global = global_parameters(reconstructed_predictions)
-            ens_pred_global[:,:,i,j] = predictions_global
-            true_POD_global[:,:,i] = PODtruth_global
-            true_global[:,:,i] = truth_global[N_tstart + i*N_gap: N_tstart + i*N_gap + N_intt]
+            if Data == 'ToyData':
+                nrmse_global = 0
+                mse_global   = 0
+            else:
+                PODtruth_global    = global_parameters(reconstructed_truth)
+                predictions_global = global_parameters(reconstructed_predictions)
+                ens_pred_global[:,:,i,j] = predictions_global
+                true_POD_global[:,:,i] = PODtruth_global
+                true_global[:,:,i] = truth_global[N_tstart + i*N_gap: N_tstart + i*N_gap + N_intt]
 
-            # metrics
-            nrmse_global = NRMSE(PODtruth_global, predictions_global)
-            mse_global   = MSE(PODtruth_global, predictions_global)
+                # metrics
+                nrmse_global = NRMSE(PODtruth_global, predictions_global)
+                mse_global   = MSE(PODtruth_global, predictions_global)
 
 
             ens_nrmse_global[j]+= nrmse_global
@@ -1356,12 +1376,18 @@ if statistics_interval:
                 if i<n_plot:
                     if j % 1 == 0:
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
+                        if Data == 'ToyData':
+                            print('no globals')
+                        else:
                         ### global prediction ###
-                        plot_global_prediction_ts(PODtruth_global, predictions_global, xx, i, j, stats_path+'/global_prediciton')
-                        plot_global_prediction_ps(PODtruth_global, predictions_global, i, j, stats_path+'/global_prediciton_ps')
+                            plot_global_prediction_ts(PODtruth_global, predictions_global, xx, i, j, stats_path+'/global_prediciton')
+                            plot_global_prediction_ps(PODtruth_global, predictions_global, i, j, stats_path+'/global_prediciton_ps')
 
-            stats_pdf_modes(Y_t, Yh_t, indexes_to_plot, i, j, stats_path+'/stats_pdf_modes', Modes=False)
-            stats_pdf_global(PODtruth_global, predictions_global, i, j, stats_path+'/stats_pdf_global')
+            if Data == 'ToyData':
+                stats_pdf_modes(Y_t, Yh_t, indexes_to_plot, i, j, stats_path+'/stats_pdf_modes', Modes=False)
+            else:
+                stats_pdf_modes(Y_t, Yh_t, indexes_to_plot, i, j, stats_path+'/stats_pdf_modes', Modes=False)
+                stats_pdf_global(PODtruth_global, predictions_global, i, j, stats_path+'/stats_pdf_global')
 
             fig, ax = plt.subplots(1, figsize=(8,6))
             ax.scatter(Y_t[:,0], Y_t[:,1], label='truth')
