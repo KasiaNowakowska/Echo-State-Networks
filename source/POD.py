@@ -172,8 +172,11 @@ if projection:
 #### plot dataset ####
 if Data == 'ToyData':
     fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
-    c1 = ax.pcolormesh(time_vals, x, data_set[:,:,32,0].T)
-    fig.colorbar(c1, ax=ax)
+    c1 = ax.pcolormesh(time_vals[:500], x, data_set[:500,:,32,0].T)
+    fig.colorbar(c1, ax=ax, label=r"$h$")
+    ax.set_xlabel('Time', fontsize=16)
+    ax.set_ylabel(r"$x$", fontsize=16)
+    ax.tick_params(axis='both', labelsize=12)
     fig.savefig(input_path+'/combined_hovmoller_small_domain.png')
 if Data == 'RB':
     fig, ax = plt.subplots(len(variables), figsize=(12, 3*len(variables)), tight_layout=True, sharex=True)
@@ -194,7 +197,7 @@ data_reshape = data_set.reshape(-1, data_set.shape[-1])
 print('shape of data reshaped', np.shape(data_reshape))
 
 # fit the scaler
-scaling = 'None'
+scaling = 'SS'
 if scaling == 'SS':
     print('applying standard scaler')
     scaler = StandardScaler()
@@ -277,6 +280,7 @@ if POD_type == 'together':
         ### plt part of domain ###
         plot_reconstruction_and_error(data_set[:500], data_reconstructed[:500], 32, 75, x, z, time_vals[:500], names, output_path+c_names[index]+'_500')
         np.save(output_path+'/POD_reconstructed.npy', data_reconstructed[:500])
+        np.save(output_path+'/TrueData.npy', data_set[:500])
 
         print('NRMSE', nrmse)
         print('MSE', mse)

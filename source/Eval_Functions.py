@@ -172,9 +172,9 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             if type == 'Recon':
                 ax[0].set_title('Reconstruction')
             elif type == 'CAE':
-                ax[0].set_title('CAE Reconstruction (ESN)')
+                ax[0].set_title('CAE Reconstruction (True)')
             elif type == 'POD':
-                ax[0].set_title('POD Reconstruction (ESN)')
+                ax[0].set_title('POD Reconstruction (True)')
             c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
             fig.colorbar(c2, ax=ax[1])
             if type == 'Recon':
@@ -202,9 +202,9 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             if type == 'Recon':
                 ax[0].set_title('Reconstruction', fontsize=18)
             elif type == 'CAE':
-                ax[0].set_title('CAE Reconstruction (ESN)', fontsize=18)
+                ax[0].set_title('CAE Reconstruction (True)', fontsize=18)
             elif type == 'POD':
-                ax[0].set_title('POD Reconstruction (ESN)', fontsize=18)
+                ax[0].set_title('POD Reconstruction (True)', fontsize=18)
             c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm)
             fig.colorbar(c2, ax=ax[1])
             if type == 'Recon':
@@ -238,9 +238,9 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             if type == 'Recon':
                 ax[0].set_title('Reconstruction', fontsize=18)
             elif type == 'CAE':
-                ax[0].set_title('CAE Reconstruction (ESN)', fontsize=18)
+                ax[0].set_title('CAE Reconstruction (True)', fontsize=18)
             elif type == 'POD':
-                ax[0].set_title('POD Reconstruction (ESN)', fontsize=18)
+                ax[0].set_title('POD Reconstruction (True)', fontsize=18)
             c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
             fig.colorbar(c2, ax=ax[1])
             if type == 'Recon':
