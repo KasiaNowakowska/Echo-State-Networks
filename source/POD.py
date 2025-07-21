@@ -105,7 +105,7 @@ def load_data_set_Ra2e7(file, names, snapshots):
     return data, time_vals
 
 #### LOAD DATA AND POD ####
-Data = 'ToyData'
+Data = 'RB'
 if Data == 'ToyData':
     name = names = variables = ['combined']
     n_components = 3
@@ -126,11 +126,20 @@ elif Data == 'RB':
     dt = 2
 
 #### change chape of dataset/add projecyion ####
-reduce_data_set = False
+reduce_data_set = True
 if reduce_data_set:
-    data_set = data_set[200:392,60:80,:,:]
-    x = x[60:80]
-    time_vals = time_vals[200:392]
+    print('reducing data set')
+    # data_set = data_set[200:392,60:80,:,:]
+    # x = x[60:80]
+    # time_vals = time_vals[200:392]
+    # print('reduced domain shape', np.shape(data_set))
+    # print('reduced x domain', np.shape(x))
+    # print('reduced x domain', len(x))
+    # print(x[0], x[-1])
+
+    data_set = data_set[170:370,32:108,:,:]
+    x = x[32:108]
+    time_vals = time_vals[170:370]
     print('reduced domain shape', np.shape(data_set))
     print('reduced x domain', np.shape(x))
     print('reduced x domain', len(x))
@@ -278,7 +287,10 @@ if POD_type == 'together':
             nrmse_sep_plume = np.inf
 
         ### plt part of domain ###
-        plot_reconstruction_and_error(data_set[:500], data_reconstructed[:500], 32, 75, x, z, time_vals[:500], names, output_path+c_names[index]+'_500')
+        if reduce_data_set:
+             plot_reconstruction_and_error(data_set[:500], data_reconstructed[:500], 32, 100, x, z, time_vals[:500], names, output_path+c_names[index]+'_500')
+        else:
+            plot_reconstruction_and_error(data_set[:500], data_reconstructed[:500], 32, 75, x, z, time_vals[:500], names, output_path+c_names[index]+'_500')
         np.save(output_path+'/POD_reconstructed.npy', data_reconstructed[:500])
         np.save(output_path+'/TrueData.npy', data_set[:500])
 

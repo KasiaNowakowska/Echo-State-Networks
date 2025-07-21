@@ -58,6 +58,7 @@ from scipy.io import loadmat, savemat
 from sklearn.metrics import mean_squared_error
 from skimage.metrics import structural_similarity as ssim
 from scipy.stats import gaussian_kde
+from scipy.stats import wasserstein_distance
 from Eval_Functions import *
 from Plotting_Functions import *
 sys.stdout.reconfigure(line_buffering=True)
@@ -710,9 +711,9 @@ print('norm:', norm)
 print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
-test_interval = True
+test_interval = False
 validation_interval = False
-statistics_interval = False
+statistics_interval = True
 fourier = False
 vertical_profiles = False
 reservoir_investigation = False
@@ -1271,7 +1272,7 @@ if statistics_interval:
         os.makedirs(stats_path)
         print('made directory')
 
-    N_test   = 1                    #number of intervals in the test set
+    N_test   = 50                    #number of intervals in the test set
     N_tstart = int(N_washout)   #where the first test interval starts
     N_intt   = 35*N_lyap             #length of each test set interval
     N_washout = int(N_washout)
@@ -1293,6 +1294,9 @@ if statistics_interval:
     ens_PH          = np.zeros((N_intt, ensemble_test))
     ens_nrmse_global= np.zeros((ensemble_test))
     ens_mse_global  = np.zeros((ensemble_test))
+
+    true_data  = U_data
+    pred_data  = np.zeros((N_intt, dim, N_test, ensemble_test))
 
     for j in range(ensemble_test):
 
@@ -1334,6 +1338,8 @@ if statistics_interval:
             # Prediction Horizon
             Yh_t        = closed_loop(N_intt-1, Xa1[-1], Wout, sigma_in, rho)[0]
             print(np.shape(Yh_t))
+            pred_data[:, :, i, j] = Yh_t
+
 
             Y_err       = np.sqrt(np.mean((Y_t-Yh_t)**2,axis=1))/sigma_ph
             PH[i]       = np.argmax(Y_err>threshold_ph)/N_lyap
@@ -1401,12 +1407,27 @@ if statistics_interval:
         # accumulation for each ensemble member
         ens_nrmse_global[j]= ens_nrmse_global[j]/N_test
 
+    pred_data_flat = pred_data.reshape(pred_data.shape[0]*pred_data.shape[2]*pred_data.shape[3], pred_data.shape[1])
+    wasserstein_per_mode = []
+
+    scaler_modes = StandardScaler()
+    true_data_ss = scaler_modes.fit_transform(true_data)
+    pred_data_flat_ss = scaler_modes.transform(pred_data_flat)
+
+    for m in range(dim):
+        wd = wasserstein_distance(true_data_ss[:, m], pred_data_flat_ss[:, m])
+        wasserstein_per_mode.append(wd)
+
+    mean_wasserstein = np.mean(wasserstein_per_mode)
+
     # Full path for saving the file
     output_file_ALL = 'ESN_statistics_metrics_all.json' 
 
     output_path_met_ALL = os.path.join(stats_path, output_file_ALL)
 
     metrics_ens_ALL = {
+    **{f"Wasserstein distance mode {m+1}": float(wasserstein_per_mode[m]) for m in range(dim)},
+    "Mean Wasserstein distance": float(mean_wasserstein),
     "mean global NRMSE": np.mean(ens_nrmse_global),
     }
 

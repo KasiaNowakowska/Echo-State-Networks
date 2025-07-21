@@ -197,7 +197,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             maxm = max(np.max(original[t_value, :, :, i]), np.max(reconstruction[t_value, :, :, i]))
             vmax_res = np.max(np.abs(residual[t_value,:,:,i]))  # Get maximum absolute value
             vmin_res = -vmax_res
-            c1 = ax[0].pcolormesh(x, z, original[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+            c1 = ax[0].pcolormesh(x, z, original[t_value,:,:,i].T, vmin=minm, vmax=maxm, rasterized=True, zorder=0, edgecolors='none')
             fig.colorbar(c1, ax=ax[0])
             if type == 'Recon':
                 ax[0].set_title('Reconstruction', fontsize=18)
@@ -205,7 +205,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
                 ax[0].set_title('CAE Reconstruction (True)', fontsize=18)
             elif type == 'POD':
                 ax[0].set_title('POD Reconstruction (True)', fontsize=18)
-            c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm)
+            c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm, rasterized=True, zorder=0, edgecolors='none')
             fig.colorbar(c2, ax=ax[1])
             if type == 'Recon':
                 ax[1].set_title('Reconstruction', fontsize=18)
@@ -213,7 +213,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
                 ax[1].set_title('CAE Reconstruction (ESN)', fontsize=18)
             elif type == 'POD':
                 ax[1].set_title('POD Reconstruction (ESN)', fontsize=18)
-            c3 = ax[2].pcolormesh(x, z, residual[t_value,:,:, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
+            c3 = ax[2].pcolormesh(x, z, residual[t_value,:,:, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res, rasterized=True, zorder=0, edgecolors='none')
             fig.colorbar(c3, ax=ax[2])
             ax[2].set_title('Error', fontsize=18)
             for v in range(3):
@@ -221,6 +221,8 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
                 ax[v].tick_params(axis='both', labelsize=12)
             ax[-1].set_xlabel('x', fontsize=16)
             fig.savefig(file_str+name+'_snapshot_recon_residual.png')
+            fig.savefig(file_str+name+'_snapshot_recon_residual.eps', format='eps')
+            fig.savefig(file_str+name+'_snapshot_recon_residual.pdf', format='pdf')
             plt.close()
 
             fig, ax = plt.subplots(3, figsize=(12,9), tight_layout=True, sharex=True)
@@ -233,7 +235,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             print("time shape:", np.shape(time_vals))
             print("x shape:", np.shape(x))
             print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
-            c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm, rasterized=True, zorder=0, edgecolors='none')
             fig.colorbar(c1, ax=ax[0])
             if type == 'Recon':
                 ax[0].set_title('Reconstruction', fontsize=18)
@@ -241,7 +243,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
                 ax[0].set_title('CAE Reconstruction (True)', fontsize=18)
             elif type == 'POD':
                 ax[0].set_title('POD Reconstruction (True)', fontsize=18)
-            c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm)
+            c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm, rasterized=True, zorder=0, edgecolors='none')
             fig.colorbar(c2, ax=ax[1])
             if type == 'Recon':
                 ax[1].set_title('Reconstruction', fontsize=18)
@@ -249,7 +251,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
                 ax[1].set_title('CAE Reconstruction (ESN)', fontsize=18)
             elif type == 'POD':
                 ax[1].set_title('POD Reconstruction (ESN)', fontsize=18)
-            c3 = ax[2].pcolormesh(time_vals, x,  residual[:,:,z_value, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res)
+            c3 = ax[2].pcolormesh(time_vals, x,  residual[:,:,z_value, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res, rasterized=True, zorder=0, edgecolors='none')
             fig.colorbar(c3, ax=ax[2])
             ax[2].set_title('Error', fontsize=18)
             for v in range(3):
@@ -257,6 +259,8 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
                 ax[v].tick_params(axis='both', labelsize=12)
             ax[-1].set_xlabel('Time', fontsize=16)
             fig.savefig(file_str+name+'_hovmoller_recon_residual.png')
+            fig.savefig(file_str+name+'_hovmoller_recon_residual.eps', format='eps')
+            fig.savefig(file_str+name+'_hovmoller_recon_residual.pdf', format='pdf')
             plt.close()
 
 #### Metrics ####
@@ -534,6 +538,9 @@ def ss_transform(data, scaler):
     print('implementing standard scaler')
     if data.ndim == 4: #len(time_vals), len(x), len(z), len(var)
         data_reshape = data.reshape(-1, data.shape[-1])
+    elif data.ndim == 2:
+        print('data already 2D')
+        data_reshape = data
     else:
         print('data needs to be 4 dimensions')
     if data_reshape.ndim == 2:

@@ -47,6 +47,7 @@ def plot_modes_prediction(truth, prediction, xx, i, j, indexes_to_plot, file_nam
         ax[-1].set_xlabel('Time [Lyapunov Times]')
         ax[0].legend(ncol=2)
         fig.savefig(file_name+'_ens%i_test%i.png' % (j,i))
+        fig.savefig(file_name+'_ens%i_test%i.eps' % (j,i), format='eps')
         plt.close()
 
 def plot_PH(error, threshold_ph, xx, i, j, file_name):
@@ -122,7 +123,7 @@ def plot_global_prediction_ps(truth, prediciton, i, j, file_name):
     plt.close()
 
 def stats_pdf_modes(Y_t, Yh_t, indexes_to_plot, i, j, file_name, Modes=True):
-    fig, ax = plt.subplots(len(indexes_to_plot), figsize=(12, 12), tight_layout=True)
+    fig, ax = plt.subplots(len(indexes_to_plot), figsize=(12, 3*len(indexes_to_plot)), tight_layout=True)
     for v, element in enumerate(indexes_to_plot):
         kde_true  = gaussian_kde(Y_t[:,element])
         kde_pred  = gaussian_kde(Yh_t[:,element])
@@ -132,15 +133,16 @@ def stats_pdf_modes(Y_t, Yh_t, indexes_to_plot, i, j, file_name, Modes=True):
         var_vals_pred      = np.linspace(min(Yh_t[:,element]), max(Yh_t[:,element]), 1000)  # X range
         pdf_vals_pred      = kde_pred(var_vals_pred)
 
-        ax[v].plot(var_vals_true, pdf_vals_true, label="truth")
-        ax[v].plot(var_vals_pred, pdf_vals_pred, label="prediction")
+        ax[v].plot(var_vals_true, pdf_vals_true, label="Truth")
+        ax[v].plot(var_vals_pred, pdf_vals_pred, label="ESN")
         ax[v].grid()
-        ax[v].set_ylabel('Denisty')
+        ax[v].set_ylabel('Denisty', fontsize=16)
+        ax[v].tick_params(axis='both', labelsize=12)
         if Modes == True:
-            ax[v].set_xlabel(f"Mode {element}")
+            ax[v].set_xlabel(f"Mode {element+1}", fontsize=16)
         else:
-            ax[v].set_xlabel(f"LV {element}")
-        ax[v].legend()
+            ax[v].set_xlabel(f"LV {element+1}", fontsize=16)
+    ax[0].legend(fontsize=14)
     fig.savefig(file_name+f"_ens{j}_test{i}.png")
     plt.close()
 

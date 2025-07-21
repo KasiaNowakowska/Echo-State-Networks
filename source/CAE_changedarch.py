@@ -142,7 +142,7 @@ def load_data_set_RB(file, names, snapshots):
     return data, time_vals
 
 #### LOAD DATA AND POD ####
-Data = 'ToyData'
+Data = 'RB'
 if Data == 'ToyData':
     name = names = variables = ['combined']
     n_components = 3
@@ -167,14 +167,21 @@ elif Data == 'RB':
 reduce_domain = reduce_domain
 
 if reduce_domain:
-    data_set = data_set[200:424,60:80,:,:] # 408 so we have 13 batches 12 for training and 1 for 'validation'
-    x = x[60:80]
-    time_vals = time_vals[200:424]
+    # data_set = data_set[200:424,60:80,:,:] # 408 so we have 13 batches 12 for training and 1 for 'validation'
+    # x = x[60:80]
+    # time_vals = time_vals[200:424]
+    # print('reduced domain shape', np.shape(data_set))
+    # print('reduced x domain', np.shape(x))
+    # print('reduced x domain', len(x))
+    # print(x[0], x[-1])
+
+    data_set = data_set[170:410,32:108,:,:] ## 370 but to make divisble by 16 here and add 2 extra batches for val and test
+    x = x[32:108]
+    time_vals = time_vals[170:410]
     print('reduced domain shape', np.shape(data_set))
     print('reduced x domain', np.shape(x))
     print('reduced x domain', len(x))
     print(x[0], x[-1])
-
 
 #### plot dataset ####
 if Data == 'ToyData':
@@ -362,7 +369,7 @@ def main():
     #### load in data ###
     if reduce_domain:    
         b_size      = wandb.config.b_size   #batch_size
-        n_batches   = 12 #int((U.shape[0]/b_size) *0.7)  #number of batches #20
+        n_batches   = 13 #int((U.shape[0]/b_size) *0.7)  #number of batches #20
         val_batches = 1 #int((U.shape[0]/b_size) *0.2)    #int(n_batches*0.2) # validation set size is 0.2 the size of the training set #2
         test_batches = 1 # int((U.shape[0]/b_size) *0.1)
     else:
