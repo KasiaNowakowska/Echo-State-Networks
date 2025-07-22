@@ -24,8 +24,26 @@ def step(x_pre, u, sigma_in, rho):
         u_augmented = np.hstack((u, bias_in))
     elif normalisation == 'standard_plusregions':
         u_augmented = np.hstack(((u[:n_components]-u_mean_pr)/norm_std_pr, u[n_components:], bias_in))
+    elif normalisation == 'off_plusfeatures':
+        u_pods = u[:n_components]
+        u_feats = (u[n_components:] - mean_feats)/ std_feats 
+
+        u_pods_scaled = u_pods*sigma_in 
+        u_feats_scaled = u_feats*sigma_in_feats
+        bias_in_scaled = bias_in*sigma_in
+
+        u_augmented = np.hstack((u_pods_scaled, u_feats_scaled, bias_in_scaled))
+
+    elif normalisation == 'modeweight':
+        u_augmented = np.hstack((u * weights * sigma_in, bias_in))
+
     # reservoir update
-    x_post_part      = np.tanh(Win.dot(u_augmented*sigma_in) + W.dot(rho*x_pre))
+    if normalisation == 'off_plusfeatures':
+        x_post_part      = np.tanh(Win.dot(u_augmented) + W.dot(rho*x_pre))
+    elif normalisation == 'modeweight':
+        x_post_part      = np.tanh(Win.dot(u_augmented) + W.dot(rho*x_pre))
+    else:
+        x_post_part      = np.tanh(Win.dot(u_augmented*sigma_in) + W.dot(rho*x_pre))
 
     x_post           = (1-alpha0) * x_pre + alpha0 * x_post_part
 

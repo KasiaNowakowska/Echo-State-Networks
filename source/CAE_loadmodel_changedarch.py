@@ -133,7 +133,7 @@ def load_data_set_RB(file, names, snapshots):
     return data, time_vals
 
 #### LOAD DATA ####
-Data = 'ToyData'
+Data = 'RB'
 if Data == 'ToyData':
     name = names = variables = ['combined']
     n_components = 3
@@ -156,9 +156,17 @@ elif Data == 'RB':
 reduce_domain = reduce_domain
 
 if reduce_domain:
-    data_set = data_set[200:424,60:80,:,:] # 408 so we have 13 batches 12 for training and 1 for 'validation'
-    x = x[60:80]
-    time_vals = time_vals[200:424]
+    # data_set = data_set[200:424,60:80,:,:] # 408 so we have 13 batches 12 for training and 1 for 'validation'
+    # x = x[60:80]
+    # time_vals = time_vals[200:424]
+    # print('reduced domain shape', np.shape(data_set))
+    # print('reduced x domain', np.shape(x))
+    # print('reduced x domain', len(x))
+    # print(x[0], x[-1])
+
+    data_set = data_set[170:410,32:108,:,:] ## 370 but to make divisble by 16 here and add 2 extra batches for val and test
+    x = x[32:108]
+    time_vals = time_vals[170:410]
     print('reduced domain shape', np.shape(data_set))
     print('reduced x domain', np.shape(x))
     print('reduced x domain', len(x))
@@ -348,7 +356,7 @@ def periodic_padding(image, padding=1, asym=False):
 
 #### load in data ###
 if reduce_domain:
-    n_batches   = 12 #int((U.shape[0]/b_size) *0.7)  #number of batches #20
+    n_batches   = 13 #int((U.shape[0]/b_size) *0.7)  #number of batches #20
     val_batches = 1 #int((U.shape[0]/b_size) *0.2)    #int(n_batches*0.2) # validation set size is 0.2 the size of the training set #2
     test_batches = 1#int((U.shape[0]/b_size) *0.1)
 else:
@@ -540,9 +548,9 @@ for i in range(N_parallel):
     b[i] = tf.keras.models.load_model(models_dir + '/dec_mod'+str(ker_size[i])+'_'+str(N_latent)+'.h5',
                                             custom_objects={"PerPad2D": PerPad2D})
 
-validation_data = False
-test_data = True
-all_data = True
+validation_data = True
+test_data = False
+all_data = False
 visualisation = False
 encoded_data_investigation = False
 
@@ -563,17 +571,11 @@ if validation_data:
     print('shape of validation prediction', np.shape(decoded_unscaled))
     print('shape of validation truth', np.shape(truth_unscaled))
 
-    #SSIM
     test_ssim = compute_ssim_for_4d(truth_unscaled, decoded_unscaled)
-
-    #MSE
     mse = MSE(truth_unscaled, decoded_unscaled)
-
-    #NRMSE
     nrmse = NRMSE(truth_unscaled, decoded_unscaled)
-
-    #EVR 
     evr = EVR_recon(truth_unscaled, decoded_unscaled)
+    nrmse_sep = NRMSE_per_channel(truth_unscaled, decoded_unscaled)
 
     print("nrmse:", nrmse)
     print("mse:", mse)
@@ -598,25 +600,24 @@ if validation_data:
     output_path_met = os.path.join(output_path, output_file)
 
     metrics = {
-    "MSE": mse,
-    "NRMSE": nrmse,
-    "SSIM": test_ssim,
-    "EVR": evr,
-    "plume NRMSE": nrmse_plume,
+        "MSE": mse,
+        "NRMSE": nrmse,
+        "SSIM": test_ssim,
+        "EVR": evr,
+        "NRMSE sep": nrmse_sep,
+        "NRMSE sep plume": nrmse_sep_plume,
     }
 
     with open(output_path_met, "w") as file:
         json.dump(metrics, file, indent=4)
 
     ### plot from index 0
-    index = 0
-    plot_reconstruction_and_error(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], 32, 0, f"/validation_{index}")
-
-    index = 500
-    plot_reconstruction_and_error(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], 32, 0, f"/validation_{index}")
-
-    index = 1000
-    plot_reconstruction_and_error(truth_unscaled[index:index+500], decoded_unscaled[index:index+500], 32, 0, f"/validation_{index}")
+    plot_reconstruction_and_error(
+        truth_unscaled[:500],
+        decoded_unscaled[:500],
+        32, 10, x, z, time_vals[:500], variables,
+        output_path+f"/test_all"
+    )
 
 #### TESTING UNSEEN DATA ####
 if test_data:

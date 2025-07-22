@@ -155,7 +155,7 @@ def load_data_set_RB_act(file, names, snapshots):
     return data, time_vals, plume_features
 
 #### LOAD DATA AND POD ####
-Data = 'ToyData'
+Data = 'RB'
 if Data == 'ToyData':
     name = names = variables = ['combined']
     n_components = 3
@@ -292,6 +292,15 @@ u_mean = U_data.mean(axis=0)
 norm_std = U_data.std(axis=0)
 normalisation = normalisation #on, off, standard
 
+n_feat = U_data.shape[1] - n_components
+if Data == 'RB_plume':
+    mean_feats = U_data[:, n_components:].mean(axis=0)
+    std_feats  = U_data[:, n_components:].std(axis=0)
+    std_feats[std_feats == 0] = 1.0
+else:
+    mean_feats = np.zeros(n_feat)
+    std_feats  = np.ones(n_feat)
+
 print('norm', norm)
 print('u_mean', u_mean)
 print('norm_std', norm_std)
@@ -339,6 +348,13 @@ elif normalisation == 'standard':
     bias_in   = np.array([np.mean(np.abs((U_data-u_mean)/norm_std))]) #input bias (average absolute value of the inputs)
 elif normalisation == 'off':
     bias_in   = np.array([np.mean(np.abs(U_data))]) #input bias (average absolute value of the inputs)
+elif normalisation == 'off_plusfeatures':
+    u_pods = U_data[:, :n_components]
+    u_feats = (U_data[:, n_components:] - mean_feats)/ std_feats 
+    u_combined = np.hstack((u_pods, u_feats))
+    bias_in = np.array([np.mean(np.abs(u_combined))])            
+    sigma_in_feats = 1.0           
+
 bias_out  = np.array([1.]) #output bias
 
 N_units      = Nr #neurons
@@ -374,9 +390,9 @@ print('norm:', norm)
 print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
-test_interval = False
+test_interval = True
 validation_interval = False
-statistics_interval = True
+statistics_interval = False
 initiation_interval = False
 initiation_interval2 = False
 
@@ -744,7 +760,10 @@ if test_interval:
             nrmse_ch = NRMSE_per_channel(reconstructed_truth, reconstructed_predictions)
             PH_index = int(PH[i]*N_lyap)
             print('PH_index', PH_index)
-            nrmse_inPHreg = NRMSE_per_channel(reconstructed_truth[:PH_index], reconstructed_predictions[:PH_index])
+            if PH_index == 0:
+                nrmse_inPHreg = 0
+            else:
+                nrmse_inPHreg = NRMSE_per_channel(reconstructed_truth[:PH_index], reconstructed_predictions[:PH_index])
 
             if len(variables) == 4:
                 active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(reconstructed_truth, reconstructed_predictions, z)

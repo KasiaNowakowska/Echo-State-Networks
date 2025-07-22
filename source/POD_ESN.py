@@ -167,7 +167,7 @@ def load_data_set_RB_act(file, names, snapshots):
 
 
 #### LOAD DATA AND POD ####
-Data = 'ToyData'
+Data = 'RB'
 if Data == 'ToyData':
     name = names = variables = ['combined']
     n_components = 3
@@ -421,6 +421,15 @@ normalisation = normalisation #on, off, standard
 norm_std_pr = U_data[:, :n_components].std(axis=0)
 u_mean_pr   = U_data[:, :n_components].mean(axis=0)
 
+n_feat = U_data.shape[1] - n_components
+if Data == 'RB_plume':
+    mean_feats = U_data[:, n_components:].mean(axis=0)
+    std_feats  = U_data[:, n_components:].std(axis=0)
+    std_feats[std_feats == 0] = 1.0
+else:
+    mean_feats = np.zeros(n_feat)
+    std_feats  = np.ones(n_feat)
+
 print('norm', norm)
 print('u_mean', u_mean)
 print('norm_std', norm_std)
@@ -470,6 +479,24 @@ elif normalisation == 'off':
     bias_in   = np.array([np.mean(np.abs(U_data))]) #input bias (average absolute value of the inputs)
 elif normalisation == 'standard_plusregions':
     bias_in   = np.array([np.mean(np.abs((U_data[:,:n_components]-u_mean_pr)/norm_std_pr))]) #input bias (average absolute value of the inputs)
+elif normalisation == 'off_plusfeatures':
+    u_pods = U_data[:, :n_components]
+    u_feats = (U_data[:, n_components:] - mean_feats)/ std_feats 
+    u_combined = np.hstack((u_pods, u_feats))
+    bias_in = np.array([np.mean(np.abs(u_combined))])            
+    sigma_in_feats = 0.01           
+elif normalisation == 'modeweight':
+    bias_in   = np.array([np.mean(np.abs(U_data))])
+
+    explained_variance_ratio = pca_.explained_variance_ratio_
+
+    power = 1
+    weights_raw = explained_variance_ratio ** power
+    weights = weights_raw / np.max(weights_raw)
+
+    min_weight = 0.1
+    weights = np.maximum(weights, min_weight)
+
 bias_out  = np.array([1.]) #output bias
 
 N_units      = Nr #neurons
