@@ -1,7 +1,7 @@
 """
 python script for POD.
 
-Usage: lyapunov.py [--input_path=<input_path> --output_path=<output_path> --modes=<modes> --hyperparam_file=<hyperparam_file> --config_number=<config_number> --reduce_domain=<reduce_domain> --w_threshold=<w_threshold> --reduce_domain2=<reduce_domain2>]
+Usage: lyapunov.py [--input_path=<input_path> --output_path=<output_path> --modes=<modes> --hyperparam_file=<hyperparam_file> --config_number=<config_number> --reduce_domain=<reduce_domain> --w_threshold=<w_threshold> --reduce_domain2=<reduce_domain2> --Data=<Data>]
 
 Options:
     --input_path=<input_path>            file path to use for data
@@ -12,6 +12,7 @@ Options:
     --reduce_domain=<reduce_domain>      reduce size of domain [default: False]
     --reduce_domain2=<reduce_domain2>    reduce size of domain keep time period [default: False]
     --w_threshold=<w_threshold>          w_threshold [defualt: False]
+    --Data=<Data>                        Datatype [default: RB]
 """
 
 import os
@@ -57,6 +58,7 @@ output_path = args['--output_path']
 modes = int(args['--modes'])
 hyperparam_file = args['--hyperparam_file']
 config_number = int(args['--config_number'])
+data_type = args['--Data']
 
 
 reduce_domain = args['--reduce_domain']
@@ -106,6 +108,8 @@ with open(hyperparam_file, "r") as f:
     alpha0 = hyperparams["alpha0"]
     n_forward = hyperparams["n_forward"]
     threshold_ph = hyperparams.get("threshold_ph", 0.2)
+    Win_method = hyperparams.get("Win_method", "LM")
+    sigma_in_feats = hyperparams.get("sigma_in_feats", 0.1)
 
 def load_data_set_TD(file, names, snapshots):
     with h5py.File(file, 'r') as hf:
@@ -167,7 +171,8 @@ def load_data_set_RB_act(file, names, snapshots):
 
 
 #### LOAD DATA AND POD ####
-Data = 'RB'
+Data = data_type
+print('datatype:', Data)
 if Data == 'ToyData':
     name = names = variables = ['combined']
     n_components = 3
@@ -423,12 +428,21 @@ u_mean_pr   = U_data[:, :n_components].mean(axis=0)
 
 n_feat = U_data.shape[1] - n_components
 if Data == 'RB_plume':
+    u_mean_modes_only = U_data[:,:n_components].mean(axis=0)
+    m_modes_only = U_data[:,:n_components].min(axis=0)
+    M_modes_only = U_data[:,:n_components].max(axis=0)
+    norm_modes_only = M_modes_only - m_modes_only
     mean_feats = U_data[:, n_components:].mean(axis=0)
     std_feats  = U_data[:, n_components:].std(axis=0)
     std_feats[std_feats == 0] = 1.0
 else:
     mean_feats = np.zeros(n_feat)
     std_feats  = np.ones(n_feat)
+
+#normalisation across all data
+u_min_all  = U_data.min()
+u_max_all  = U_data.max()
+u_norm_all = u_max_all-u_min_all
 
 print('norm', norm)
 print('u_mean', u_mean)
@@ -484,18 +498,47 @@ elif normalisation == 'off_plusfeatures':
     u_feats = (U_data[:, n_components:] - mean_feats)/ std_feats 
     u_combined = np.hstack((u_pods, u_feats))
     bias_in = np.array([np.mean(np.abs(u_combined))])            
-    sigma_in_feats = 0.01           
+    sigma_in_feats = sigma_in_feats        
+elif normalisation == 'range_plusfeatures':
+    u_pods = (U_data[:, :n_components]-u_mean_modes_only)/norm_modes_only
+    u_feats = (U_data[:, n_components:] - mean_feats)/ std_feats 
+    print('shape of u_pods', np.shape(u_pods))
+    print('shape of u_feats', np.shape(u_feats))
+    u_combined = np.hstack((u_pods, u_feats))
+    bias_in = np.array([np.mean(np.abs(u_combined))])            
+    sigma_in_feats = sigma_in_feats    
+
+elif normalisation == 'range_plusfeatures_IS_same':
+    u_pods = (U_data[:, :n_components]-u_mean_modes_only)/norm_modes_only
+    u_feats = (U_data[:, n_components:] - mean_feats)/ std_feats 
+    print('shape of u_pods', np.shape(u_pods))
+    print('shape of u_feats', np.shape(u_feats))
+    u_combined = np.hstack((u_pods, u_feats))
+    bias_in = np.array([np.mean(np.abs(u_combined))])            
 elif normalisation == 'modeweight':
     bias_in   = np.array([np.mean(np.abs(U_data))])
 
     explained_variance_ratio = pca_.explained_variance_ratio_
 
-    power = 1
+    power = 0.9
     weights_raw = explained_variance_ratio ** power
     weights = weights_raw / np.max(weights_raw)
 
     min_weight = 0.1
     weights = np.maximum(weights, min_weight)
+elif normalisation == 'modeweight_pluson':
+    bias_in   = np.array([np.mean(np.abs((U_data-u_mean)/norm))])
+
+    explained_variance_ratio = pca_.explained_variance_ratio_
+
+    power = 0.9
+    weights_raw = explained_variance_ratio ** power
+    weights = weights_raw / np.max(weights_raw)
+
+    min_weight = 0.1
+    weights = np.maximum(weights, min_weight)
+elif normalisation == 'across_range':
+    bias_in   = np.array([np.mean(np.abs((U_data-u_min_all)/u_norm_all))]) #input bias (average absolute value of the inputs)
 
 bias_out  = np.array([1.]) #output bias
 
@@ -635,11 +678,21 @@ for i in range(ensemble):
     seed= i+1
     rnd = np.random.RandomState(seed)
 
-    #sparse syntax for the input and state matrices
-    Win  = lil_matrix((N_units,dim+1))
-    for j in range(N_units):
-        Win[j,rnd.randint(0, dim+1)] = rnd.uniform(-1, 1) #only one element different from zero
-    Win = Win.tocsr()
+    if Win_method == 'LM':
+        #sparse syntax for the input and state matrices
+        Win  = lil_matrix((N_units,dim+1))
+        for j in range(N_units):
+            Win[j,rnd.randint(0, dim+1)] = rnd.uniform(-1, 1) #only one element different from zero
+        Win = Win.tocsr()
+    elif Win_method == 'KN':
+        Win = lil_matrix((N_units, dim + 1))
+        for j in range(N_units):
+            # bias toward connecting to earlier modes
+            prob = np.exp(-np.arange(dim + 1))  # bias toward low indices
+            prob /= prob.sum()
+            idx = np.random.choice(np.arange(dim + 1), p=prob)
+            Win[j, idx] = np.random.uniform(-1, 1)
+        Win = Win.tocsr()
 
     W = csr_matrix( #on average only connectivity elements different from zero
         rnd.uniform(-1, 1, (N_units, N_units)) * (rnd.rand(N_units, N_units) < (1-sparseness)))

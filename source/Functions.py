@@ -34,13 +34,43 @@ def step(x_pre, u, sigma_in, rho):
 
         u_augmented = np.hstack((u_pods_scaled, u_feats_scaled, bias_in_scaled))
 
+    elif normalisation == 'range_plusfeatures':
+        print('shape of u', np.shape(u))
+        u_pods = (u[:n_components]-u_mean_modes_only)/norm_modes_only
+        u_feats = (u[n_components:] - mean_feats)/ std_feats 
+
+        u_pods_scaled = u_pods*sigma_in 
+        u_feats_scaled = u_feats*sigma_in_feats
+        bias_in_scaled = bias_in*sigma_in
+        print(np.shape(u_pods_scaled), np.shape(u_feats_scaled), np.shape(bias_in_scaled))
+        u_augmented = np.hstack((u_pods_scaled, u_feats_scaled, bias_in_scaled))
+
+    elif normalisation == 'range_plusfeatures_IS_same':
+        print('shape of u', np.shape(u))
+        u_pods = (u[:n_components]-u_mean_modes_only)/norm_modes_only
+        u_feats = (u[n_components:] - mean_feats)/ std_feats 
+
+        u_pods_scaled = u_pods*sigma_in 
+        u_feats_scaled = u_feats*sigma_in
+        bias_in_scaled = bias_in*sigma_in
+        print(np.shape(u_pods_scaled), np.shape(u_feats_scaled), np.shape(bias_in_scaled))
+        u_augmented = np.hstack((u_pods_scaled, u_feats_scaled, bias_in_scaled))
+
+
     elif normalisation == 'modeweight':
         u_augmented = np.hstack((u * weights * sigma_in, bias_in))
+    elif normalisation == 'modeweight_pluson':
+        u_pods = np.array([np.mean(np.abs((u-u_mean)/norm))])
+        u_augmented = np.hstack((u_pods * weights * sigma_in, bias_in))
+    elif normalisation == 'across_range':
+        u_augmented = np.hstack(((u-u_min_all)/u_norm_all, bias_in))
 
     # reservoir update
     if normalisation == 'off_plusfeatures':
         x_post_part      = np.tanh(Win.dot(u_augmented) + W.dot(rho*x_pre))
-    elif normalisation == 'modeweight':
+    elif normalisation == 'modeweight' :
+        x_post_part      = np.tanh(Win.dot(u_augmented) + W.dot(rho*x_pre))
+    elif normalisation == 'modeweight_pluson':
         x_post_part      = np.tanh(Win.dot(u_augmented) + W.dot(rho*x_pre))
     else:
         x_post_part      = np.tanh(Win.dot(u_augmented*sigma_in) + W.dot(rho*x_pre))
