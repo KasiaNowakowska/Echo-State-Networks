@@ -238,3 +238,23 @@ def hovmoller_plus_plumes(truth_data, prediction_data, truth_features, predictio
 
     fig.savefig(file_name+f"_ens{j}_test{i}.png")
     plt.close(fig)
+
+def hovmoller_plus_plume_pos(truth_data, prediction_data, truth_features, prediction_features, xx, x, variable, i, j, file_name):
+    truth_data      = truth_data[..., variable]
+    prediction_data = prediction_data[..., variable]
+
+    z_value =32
+    
+    fig, ax = plt.subplots(3, figsize=(12, 9), tight_layout=True)
+    
+    minm = min(np.min(truth_data[:, :, z_value]), np.min(prediction_data[:, :, z_value]))
+    maxm = max(np.max(truth_data[:, :, z_value]), np.max(prediction_data[:, :, z_value]))  
+
+    c1 = ax[0].pcolormesh(xx, x, truth_data[:, :, z_value].T, vmin=minm, vmax=maxm)
+    fig.colorbar(c1, ax=ax[0])
+    ax[0].set_title('true')
+    c2 = ax[1].pcolormesh(xx, x, prediction_data[:, :, z_value].T, vmin=minm, vmax=maxm)
+    fig.colorbar(c2, ax=ax[1])
+    ax[1].set_title('reconstruction')
+
+

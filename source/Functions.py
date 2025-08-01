@@ -35,9 +35,9 @@ def step(x_pre, u, sigma_in, rho):
         u_augmented = np.hstack((u_pods_scaled, u_feats_scaled, bias_in_scaled))
 
     elif normalisation == 'range_plusfeatures':
-        print('shape of u', np.shape(u))
+        #print('shape of u', np.shape(u))
         u_pods = (u[:n_components]-u_mean_modes_only)/norm_modes_only
-        u_feats = (u[n_components:] - mean_feats)/ std_feats 
+        u_feats = (u[n_components:] - mean_feats)/ norm_feats 
 
         u_pods_scaled = u_pods*sigma_in 
         u_feats_scaled = u_feats*sigma_in_feats
@@ -45,8 +45,19 @@ def step(x_pre, u, sigma_in, rho):
         print(np.shape(u_pods_scaled), np.shape(u_feats_scaled), np.shape(bias_in_scaled))
         u_augmented = np.hstack((u_pods_scaled, u_feats_scaled, bias_in_scaled))
 
+    elif normalisation == 'range_plusfeatures_doubled':
+        #print('shape of u', np.shape(u))
+        u_pods = (u[:n_components]-u_mean_modes_only)/norm_modes_only
+        u_feats = (u[n_components:] - mean_feats)/ norm_feats 
+
+        u_pods_scaled = u_pods*sigma_in 
+        u_feats_scaled = u_feats*sigma_in*sigma_in_mult
+        bias_in_scaled = bias_in*sigma_in
+        print(np.shape(u_pods_scaled), np.shape(u_feats_scaled), np.shape(bias_in_scaled))
+        u_augmented = np.hstack((u_pods_scaled, u_feats_scaled, bias_in_scaled))
+
     elif normalisation == 'range_plusfeatures_IS_same':
-        print('shape of u', np.shape(u))
+        #print('shape of u', np.shape(u))
         u_pods = (u[:n_components]-u_mean_modes_only)/norm_modes_only
         u_feats = (u[n_components:] - mean_feats)/ std_feats 
 
