@@ -61,6 +61,7 @@ hyperparam_file = args['--hyperparam_file']
 config_number = int(args['--config_number'])
 number_of_tests = int(args['--number_of_tests'])
 data_type = args['--Data']
+plumetype = args['--plumetype']
 
 reduce_domain2 = args['--reduce_domain2']
 if reduce_domain2 == 'False':
@@ -98,6 +99,10 @@ with open(hyperparam_file, "r") as f:
     alpha = hyperparams["alpha"]
     alpha0 = hyperparams["alpha0"]
     n_forward = hyperparams["n_forward"]
+    threshold_ph = hyperparams.get("threshold_ph", 0.2)
+    Win_method = hyperparams.get("Win_method", "LM")
+    sigma_in_feats = hyperparams.get("sigma_in_feats", 0.1)
+    sigma_in_mult = hyperparams.get("sigma_in_mult", 1)
 
 def load_data_set_TD(file, names, snapshots):
     with h5py.File(file, 'r') as hf:
@@ -1009,6 +1014,9 @@ if test_interval:
                             if plumetype == 'features':
                                 plotting_number_of_plumes(true_counts, pred_counts_rounded, xx, i, j, images_test_path+f"/number_of_plumes")
                                 hovmoller_plus_plumes(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j, images_test_path+f"/hovmol_plumes")
+                            elif plumetype == 'positions':
+                                hovmoller_plus_plume_pos(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j, images_test_path+f"/hovmol_plume_positions")
+
 
         # accumulation for each ensemble member
         ens_nrmse[j]       = ens_nrmse[j] / N_test

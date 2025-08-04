@@ -245,16 +245,27 @@ def hovmoller_plus_plume_pos(truth_data, prediction_data, truth_features, predic
 
     z_value =32
     
-    fig, ax = plt.subplots(3, figsize=(12, 9), tight_layout=True)
+    fig, ax = plt.subplots(2, figsize=(12, 9), tight_layout=True)
     
     minm = min(np.min(truth_data[:, :, z_value]), np.min(prediction_data[:, :, z_value]))
     maxm = max(np.max(truth_data[:, :, z_value]), np.max(prediction_data[:, :, z_value]))  
 
     c1 = ax[0].pcolormesh(xx, x, truth_data[:, :, z_value].T, vmin=minm, vmax=maxm)
     fig.colorbar(c1, ax=ax[0])
-    ax[0].set_title('true')
+    ax[0].set_title('True')
     c2 = ax[1].pcolormesh(xx, x, prediction_data[:, :, z_value].T, vmin=minm, vmax=maxm)
     fig.colorbar(c2, ax=ax[1])
-    ax[1].set_title('reconstruction')
-
-
+    ax[1].set_title('Reconstruction')
+    for v in range(5):
+        x_vals_truth        = truth_features[:, v]
+        x_vals_pred         = prediction_features[:, v]
+        valid_mask_truth    = x_vals_truth > 0
+        valid_mask_pred     = x_vals_pred > 0
+        ax[0].scatter(xx[valid_mask_truth], x_vals_truth[valid_mask_truth], marker='x', color='tab:orange')
+        ax[1].scatter(xx[valid_mask_pred], x_vals_pred[valid_mask_pred], marker='x', color='tab:orange')
+    for l in range(2):
+        ax[l].set_ylabel('x', fontsize=14)
+    ax[-1].set_xlabel('Time [Lyapunov Times]')
+    
+    fig.savefig(file_name+f"_ens{j}_test{i}.png")
+    plt.close(fig)

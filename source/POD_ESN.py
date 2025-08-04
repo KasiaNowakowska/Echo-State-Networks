@@ -729,6 +729,15 @@ for i in range(ensemble):
             idx = np.random.choice(np.arange(dim + 1), p=prob)
             Win[j, idx] = np.random.uniform(-1, 1)
         Win = Win.tocsr()
+    elif Win_method == 'denser':
+        connections_per_row = 5  # or try 3, 10, etc.
+        Win = lil_matrix((N_units, dim + 1))
+        for j in range(N_units):
+            indices = np.random.choice(dim + 1, size=connections_per_row, replace=False)
+            values = np.random.uniform(-1, 1, size=connections_per_row)
+            for idx, v in zip(indices, values):
+                Win[j, idx] = v
+        Win = Win.tocsr()
 
     W = csr_matrix( #on average only connectivity elements different from zero
         rnd.uniform(-1, 1, (N_units, N_units)) * (rnd.rand(N_units, N_units) < (1-sparseness)))
