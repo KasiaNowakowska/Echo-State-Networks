@@ -1,7 +1,7 @@
 """
 python script for convolutional autoencoder.
 
-Usage: CAE.py [--input_path=<input_path> --output_path=<output_path> --CAE_model_path=<CAE_model_path> --CAE_hyperparam_file=<CAE_hyperparam_file> --ESN_hyperparam_file=<ESN_hyperparam_file> --number_of_tests=<number_of_tests> --encoded_data=<encoded_data>]
+Usage: CAE.py [--input_path=<input_path> --output_path=<output_path> --CAE_model_path=<CAE_model_path> --CAE_hyperparam_file=<CAE_hyperparam_file> --ESN_hyperparam_file=<ESN_hyperparam_file> --number_of_tests=<number_of_tests> --encoded_data=<encoded_data> --Data=<Data> --plumetype=<plumetype>]
 
 Options:
     --input_path=<input_path>                   file path to use for data
@@ -11,6 +11,8 @@ Options:
     --ESN_hyperparam_file=<ESN_hyperparam_file> file with hyperparams for ESN
     --number_of_tests=<number_of_tests>         number of tests [default: 5]
     --encoded_data=<encoded_data>               encoded data exists already [default: True]  
+    --Data=<Data>                        Datatype [default: RB]
+    --plumetype=<plumetype>              plume type [default: features]
 """
 
 # import packages
@@ -77,6 +79,8 @@ ESN_model_path = output_path
 CAE_hyperparam_file = args['--CAE_hyperparam_file']
 ESN_hyperparam_file = args['--ESN_hyperparam_file']
 number_of_tests = int(args['--number_of_tests'])
+data_type = args['--Data']
+plumetype = args['--plumetype']
 
 encoded_data = args['--encoded_data']
 if encoded_data == 'False':
@@ -113,6 +117,15 @@ with open(ESN_hyperparam_file, "r") as f:
     alpha = hyperparams["alpha"]
     alpha0 = hyperparams["alpha0"]
     n_forward = hyperparams["n_forward"]
+    threshold_ph = hyperparams.get("threshold_ph", 0.2)
+    Win_method = hyperparams.get("Win_method", "LM")
+    sigma_in_feats = hyperparams.get("sigma_in_feats", 0.1)
+    sigma_in_mult = hyperparams.get("sigma_in_mult", 1)
+    spec_in_val = hyperparams.get("spec_in_val", 0.1)
+    spec_end_val = hyperparams.get("spec_end_val", 1.0)
+    in_scal_in_val = hyperparams.get("in_scal_in_val", 0.1)
+    in_scal_end_val = hyperparams.get("in_scal_end_val", 5.0)
+
 
 def load_data_set_TD(file, names, snapshots):
     with h5py.File(file, 'r') as hf:
@@ -332,7 +345,9 @@ def global_parameters(data):
     return global_params
 
 #### LOAD DATA ####
-Data = 'ToyData'
+Data = data_type
+plumetype = plumetype
+print('datatype:', Data)
 if Data == 'ToyData':
     name = names = variables = ['combined']
     n_components = 3
@@ -353,14 +368,34 @@ elif Data == 'RB':
     dt = 2
 
 elif Data == 'RB_plume':
-    variables = ['q_all', 'w_all', 'u_all', 'b_all']
-    variables_plus_act = ['q_all', 'w_all', 'u_all', 'b_all', 'plume_features']
-    names = ['q_all', 'w_all', 'u_all', 'b_all']
-    names_plus_act = ['q', 'w', 'u', 'b', 'active']
     x = np.load(input_path+'/x.npy')
     z = np.load(input_path+'/z.npy')
     snapshots_load = 16000
-    data_set, time_vals, plume_features = load_data_set_RB_act(input_path+'/data_4var_5000_48000_plumes.h5', variables_plus_act, snapshots_load)
+    if plumetype == 'features':
+        variables = ['q_all', 'w_all', 'u_all', 'b_all']
+        variables_plus_act = ['q_all', 'w_all', 'u_all', 'b_all', 'plume_features']
+        names = ['q_all', 'w_all', 'u_all', 'b_all']
+        names_plus_act = ['q', 'w', 'u', 'b', 'active']
+        data_set, time_vals, plume_features = load_data_set_RB_act(input_path+'/data_4var_5000_48000_plumes.h5', variables_plus_act, snapshots_load)
+    elif plumetype == 'positions':
+        variables = ['q_all', 'w_all', 'u_all', 'b_all']
+        variables_plus_act = ['q_all', 'w_all', 'u_all', 'b_all', 'plume_positions']
+        names = ['q_all', 'w_all', 'u_all', 'b_all']
+        names_plus_act = ['q', 'w', 'u', 'b', 'active']
+        data_set, time_vals, plume_features = load_data_set_RB_act(input_path+'/data_4var_5000_48000_positions.h5', variables_plus_act, snapshots_load)
+    print('shape of dataset', np.shape(data_set))
+    dt = 2
+    print('shape of plume_features', np.shape(plume_features))
+
+elif Data == 'RB_plume_binarypos':
+    x = np.load(input_path+'/x.npy')
+    z = np.load(input_path+'/z.npy')
+    snapshots_load = 16000
+    variables = ['q_all', 'w_all', 'u_all', 'b_all']
+    variables_plus_act = ['q_all', 'w_all', 'u_all', 'b_all', 'plume_positions']
+    names = ['q_all', 'w_all', 'u_all', 'b_all']
+    names_plus_act = ['q', 'w', 'u', 'b', 'active']
+    data_set, time_vals, plume_features = load_data_set_RB_act(input_path+'/data_4var_5000_48000_allpositions.h5', variables_plus_act, snapshots_load)
     print('shape of dataset', np.shape(data_set))
     dt = 2
     print('shape of plume_features', np.shape(plume_features))
@@ -571,7 +606,11 @@ if encoded_data:
         with h5py.File('ToyData/CAE_ESN/Thesis/encoded_data'+str(N_latent)+'.h5', 'r') as df:
             U_enc = np.array(df['U_enc'])
     else:
-        with h5py.File('Ra2e8/CAE_ESN/LS64/encoded_data'+str(N_latent)+'.h5', 'r') as df:
+        #with h5py.File('Ra2e8/CAE_ESN/LS64/encoded_data'+str(N_latent)+'.h5', 'r') as df:
+        # Go two directories up from output_path and construct the path
+        base_dir = os.path.abspath(os.path.join(output_path, '..', '..', '..'))
+        encoded_file = os.path.join(base_dir, f'encoded_data{N_latent}.h5')
+        with h5py.File(encoded_file, 'r') as df:
             U_enc = np.array(df['U_enc'])
 else:
     U = U_scaled
@@ -633,6 +672,32 @@ u_mean = U_data.mean(axis=0)
 norm_std = U_data.std(axis=0)
 normalisation = normalisation #on, off, standard
 
+#standardisation_plusregions
+norm_std_pr = U_data[:, :n_components].std(axis=0)
+u_mean_pr   = U_data[:, :n_components].mean(axis=0)
+
+n_feat = U_data.shape[1] - n_components
+if Data == 'RB_plume':
+    u_mean_modes_only     = U_data[:,:n_components].mean(axis=0)
+    m_modes_only          = U_data[:,:n_components].min(axis=0)
+    M_modes_only          = U_data[:,:n_components].max(axis=0)
+    norm_modes_only       = M_modes_only - m_modes_only
+    mean_feats            = U_data[:, n_components:].mean(axis=0)
+    std_feats             = U_data[:, n_components:].std(axis=0)
+    std_feats[std_feats == 0] = 1.0
+    m_feats               = U_data[:,n_components:].min(axis=0)
+    M_feats               = U_data[:,n_components:].max(axis=0)
+    norm_feats            = M_feats - m_feats
+else:
+    mean_feats = np.zeros(n_feat)
+    std_feats  = np.ones(n_feat)
+    norm_feats = np.ones(n_feat)
+
+#normalisation across all data
+u_min_all  = U_data.min()
+u_max_all  = U_data.max()
+u_norm_all = u_max_all-u_min_all
+
 print('norm', norm)
 print('u_mean', u_mean)
 print('norm_std', norm_std)
@@ -680,6 +745,41 @@ elif normalisation == 'standard':
     bias_in   = np.array([np.mean(np.abs((U_data-u_mean)/norm_std))]) #input bias (average absolute value of the inputs)
 elif normalisation == 'off':
     bias_in   = np.array([np.mean(np.abs(U_data))]) #input bias (average absolute value of the inputs)
+elif normalisation == 'standard_plusregions':
+    bias_in   = np.array([np.mean(np.abs((U_data[:,:n_components]-u_mean_pr)/norm_std_pr))]) #input bias (average absolute value of the inputs)
+elif normalisation == 'off_plusfeatures':
+    u_pods = U_data[:, :n_components]
+    u_feats = (U_data[:, n_components:] - mean_feats)/ std_feats 
+    u_combined = np.hstack((u_pods, u_feats))
+    bias_in = np.array([np.mean(np.abs(u_combined))])            
+    sigma_in_feats = sigma_in_feats        
+elif normalisation == 'range_plusfeatures':
+    u_pods = (U_data[:, :n_components]-u_mean_modes_only)/norm_modes_only
+    u_feats = (U_data[:, n_components:] - mean_feats)/ norm_feats #std_feats 
+    print('shape of u_pods', np.shape(u_pods))
+    print('shape of u_feats', np.shape(u_feats))
+    u_combined = np.hstack((u_pods, u_feats))
+    bias_in = np.array([np.mean(np.abs(u_combined))])            
+    sigma_in_feats = sigma_in_feats    
+
+elif normalisation == 'range_plusfeatures_IS_same':
+    u_pods = (U_data[:, :n_components]-u_mean_modes_only)/norm_modes_only
+    u_feats = (U_data[:, n_components:] - mean_feats)/ std_feats 
+    print('shape of u_pods', np.shape(u_pods))
+    print('shape of u_feats', np.shape(u_feats))
+    u_combined = np.hstack((u_pods, u_feats))
+    bias_in = np.array([np.mean(np.abs(u_combined))])
+
+elif normalisation == 'range_plusfeatures_doubled':
+    u_pods = (U_data[:, :n_components]-u_mean_modes_only)/norm_modes_only
+    u_feats = (U_data[:, n_components:] - mean_feats)/ norm_feats #std_feats 
+    print('shape of u_pods', np.shape(u_pods))
+    print('shape of u_feats', np.shape(u_feats))
+    u_combined = np.hstack((u_pods, u_feats))
+    bias_in = np.array([np.mean(np.abs(u_combined))])            
+elif normalisation == 'across_range':
+    bias_in   = np.array([np.mean(np.abs((U_data-u_min_all)/u_norm_all))]) #input bias (average absolute value of the inputs)
+
 bias_out  = np.array([1.]) #output bias
 
 N_units      = Nr #neurons
@@ -711,9 +811,9 @@ print('norm:', norm)
 print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
-test_interval = False
+test_interval = True
 validation_interval = False
-statistics_interval = True
+statistics_interval = False
 fourier = False
 vertical_profiles = False
 reservoir_investigation = False
@@ -733,12 +833,14 @@ if validation_interval:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.2
+    sigma_ph_modes = np.sqrt(np.mean(np.var(U[:,:n_components],axis=1)))
+    ensemble_test = ens
 
     ensemble_test = ens
 
     ens_pred        = np.zeros((N_intt, dim, ensemble_test))
     ens_PH          = np.zeros((N_test, ensemble_test))
+    ens_PH_modes    = np.zeros((N_test, ensemble_test))
     ens_PH2         = np.zeros((ensemble_test))
     ens_nrmse       = np.zeros((ensemble_test))
     ens_ssim        = np.zeros((ensemble_test))
@@ -805,6 +907,14 @@ if validation_interval:
             if PH[i] == 0 and Y_err[0]<threshold_ph: PH[i] = N_intt/N_lyap #(in case PH is larger than interval)
             ens_PH[i,j] = PH[i]
             nrmse_error[i, :] = Y_err
+
+            if Data == 'RB_plume':
+                Y_err_modes      = np.sqrt(np.mean((Y_t[:,:n_components]-Yh_t[:,:n_components])**2,axis=1))/sigma_ph_modes
+                PH_modes_val = np.argmax(Y_err_modes>threshold_ph)/N_lyap
+                if PH_modes_val == 0 and Y_err_modes[0]<threshold_ph: PH_modes_val = N_intt/N_lyap #(in case PH is larger than interval)
+                ens_PH_modes[i,j] = PH_modes_val
+            else:
+                ens_PH_modes[i,j] = ens_PH[i,j]
 
             ##### reconstructions ####
             if Data == 'RB_plume':
@@ -942,8 +1052,9 @@ if validation_interval:
                         plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_val_path+'/active_plumes_validation')
                         
                         if Data == 'RB_plume':
-                            plotting_number_of_plumes(true_counts, pred_counts_rounded, xx, i, j, images_val_path+f"/number_of_plumes")
-                            hovmoller_plus_plumes(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j, images_val_path+f"/hovmol_plumes")
+                            if plumetype == 'features':
+                                plotting_number_of_plumes(true_counts, pred_counts_rounded, xx, i, j, images_val_path+f"/number_of_plumes")
+                                hovmoller_plus_plumes(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j, images_val_path+f"/hovmol_plumes")
 
 
         # accumulation for each ensemble member
@@ -961,7 +1072,8 @@ if validation_interval:
 
     output_path_met_ALL = os.path.join(output_path, output_file_ALL)
 
-    flatten_PH = ens_PH.flatten()
+    flatten_PH       = ens_PH.flatten()
+    flatten_PH_modes = ens_PH_modes.flatten()
     print('flat PH', flatten_PH)
 
     metrics_ens_ALL = {
@@ -976,6 +1088,10 @@ if validation_interval:
     "mean NRMSE per channel": np.mean(ens_nrmse_ch),
     "mean NRMSE per channel in plume": np.nanmean(ens_nrmse_ch_pl),
     "ens_pl_acc": np.mean(ens_pl_acc),
+    "mean PH2 (modes)":  np.mean(flatten_PH_modes),
+    "lower PH (modes)": np.quantile(flatten_PH_modes, 0.75),
+    "upper PH (modes)": np.quantile(flatten_PH_modes, 0.25),
+    "median PH (modes)": np.median(flatten_PH_modes),
     }
 
     with open(output_path_met_ALL, "w") as file:
@@ -1000,12 +1116,12 @@ if test_interval:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.2
-
+    sigma_ph_modes = np.sqrt(np.mean(np.var(U[:,:n_components],axis=1)))
     ensemble_test = ens
 
     ens_pred        = np.zeros((N_intt, dim, ensemble_test))
     ens_PH          = np.zeros((N_test, ensemble_test))
+    ens_PH_modes    = np.zeros((N_test, ensemble_test))
     ens_PH2         = np.zeros((ensemble_test))
     ens_nrmse       = np.zeros((ensemble_test))
     ens_ssim        = np.zeros((ensemble_test))
@@ -1047,7 +1163,7 @@ if test_interval:
         plot = True
         Plotting = True
         if plot:
-            n_plot = 5
+            n_plot = 20
             plt.rcParams["figure.figsize"] = (15,3*n_plot)
             plt.figure()
             plt.tight_layout()
@@ -1074,6 +1190,14 @@ if test_interval:
             if PH[i] == 0 and Y_err[0]<threshold_ph: PH[i] = N_intt/N_lyap #(in case PH is larger than interval)
             ens_PH[i,j] = PH[i]
             nrmse_error[i, :] = Y_err
+
+            if Data == 'RB_plume':
+                Y_err_modes      = np.sqrt(np.mean((Y_t[:,:n_components]-Yh_t[:,:n_components])**2,axis=1))/sigma_ph_modes
+                PH_modes_val = np.argmax(Y_err_modes>threshold_ph)/N_lyap
+                if PH_modes_val == 0 and Y_err_modes[0]<threshold_ph: PH_modes_val = N_intt/N_lyap #(in case PH is larger than interval)
+                ens_PH_modes[i,j] = PH_modes_val
+            else:
+                ens_PH_modes[i,j] = ens_PH[i,j]
 
             ##### reconstructions ####
             if Data == 'RB_plume':
@@ -1109,7 +1233,10 @@ if test_interval:
             nrmse_ch = NRMSE_per_channel(reconstructed_truth, reconstructed_predictions)
             PH_index = int(PH[i]*N_lyap)
             print('PH_index', PH_index)
-            nrmse_inPHreg = NRMSE_per_channel(reconstructed_truth[:PH_index], reconstructed_predictions[:PH_index])
+            if PH_index == 0:
+                nrmse_inPHreg = 0
+            else:
+                nrmse_inPHreg = NRMSE_per_channel(reconstructed_truth[:PH_index], reconstructed_predictions[:PH_index])
 
             if len(variables) == 4:
                 active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(reconstructed_truth, reconstructed_predictions, z)
@@ -1221,9 +1348,11 @@ if test_interval:
                             plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_test_path+'/active_plumes_test')
 
                         if Data == 'RB_plume':
-                            plotting_number_of_plumes(true_counts, pred_counts_rounded, xx, i, j, images_test_path+f"/number_of_plumes")
-                            hovmoller_plus_plumes(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j, images_val_path+f"/hovmol_plumes")
-
+                            if plumetype == 'features':
+                                plotting_number_of_plumes(true_counts, pred_counts_rounded, xx, i, j, images_test_path+f"/number_of_plumes")
+                                hovmoller_plus_plumes(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j, images_test_path+f"/hovmol_plumes")
+                            elif plumetype == 'positions':
+                                hovmoller_plus_plume_pos(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j, images_test_path+f"/hovmol_plume_positions")
 
         # accumulation for each ensemble member
         ens_nrmse[j]       = ens_nrmse[j] / N_test
@@ -1242,7 +1371,8 @@ if test_interval:
 
     output_path_met_ALL = os.path.join(output_path, output_file_ALL)
 
-    flatten_PH = ens_PH.flatten()
+    flatten_PH       = ens_PH.flatten()
+    flatten_PH_modes = ens_PH_modes.flatten()
     print('flat PH', flatten_PH)
 
     metrics_ens_ALL = {
@@ -1259,6 +1389,10 @@ if test_interval:
     "mean NRMSE per channel in plume": np.nanmean(ens_nrmse_ch_pl),
     "ens_pl_acc": np.mean(ens_pl_acc),
     "ens_nrmse_inPHregion": np.mean(ens_nrmse_inPHregion),
+    "mean PH2 (modes)":  np.mean(flatten_PH_modes),
+    "lower PH (modes)": np.quantile(flatten_PH_modes, 0.75),
+    "upper PH (modes)": np.quantile(flatten_PH_modes, 0.25),
+    "median PH (modes)": np.median(flatten_PH_modes),
     }
 
     with open(output_path_met_ALL, "w") as file:

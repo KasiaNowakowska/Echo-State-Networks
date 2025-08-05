@@ -1,22 +1,19 @@
 """
-python script for convolutional autoencoder.
+python script for POD.
 
-Usage: CAE.py [--input_path=<input_path> --output_path=<output_path> --model_path=<model_path> --CAE_hyperparam_file=<CAE_hyperparam_file> --ESN_hyperparam_file=<ESN_hyperparam_file> --encoded_data=<encoded_data> --config_number=<config_number> --Data=<Data> --plumetype=<plumetype>]
+Usage: lyapunov.py [--input_path=<input_path> --output_path=<output_path> --hyperparam_file=<hyperparam_file> --config_number=<config_number> --reduce_domain=<reduce_domain> --w_threshold=<w_threshold> --reduce_domain2=<reduce_domain2> --Data=<Data> --plumetype=<plumetype>]
 
 Options:
-    --input_path=<input_path>                   file path to use for data
-    --output_path=<output_path>                 file path to save images output [default: ./images]
-    --model_path=<model_path>                   file path to location of job 
-    --CAE_hyperparam_file=<CAE_hyperparam_file> file with hyperparmas from CAE
-    --ESN_hyperparam_file=<ESN_hyperparam_file> file with hyperparams for ESN
-    --encoded_data=<encoded_data>               data already encoded [default: False]
-    --config_number=<config_number>             config number 
+    --input_path=<input_path>            file path to use for data
+    --output_path=<output_path>          file path to save images output [default: ./images]
+    --hyperparam_file=<hyperparam_file>  hyperparameters for ESN
+    --config_number=<config_number>      config_number [default: 0]
+    --reduce_domain=<reduce_domain>      reduce size of domain [default: False]
+    --reduce_domain2=<reduce_domain2>    reduce size of domain keep time period [default: False]
+    --w_threshold=<w_threshold>          w_threshold [defualt: False]
     --Data=<Data>                        Datatype [default: RB]
     --plumetype=<plumetype>              plume type [default: features]
 """
-
-# import packages
-import time
 
 import os
 import sys
@@ -24,44 +21,33 @@ sys.path.append(os.getcwd())
 import matplotlib
 matplotlib.use('Agg')  # Set the backend to Agg
 import matplotlib.pyplot as plt
-from matplotlib.colors import TwoSlopeNorm
 #import pandas as pd
 import numpy as np
 import h5py
-import yaml
-import skopt
-from skopt.space import Real
-
-from docopt import docopt
-args = docopt(__doc__)
-
-os.environ["OMP_NUM_THREADS"] = "1" #set cores for numpy
-import tensorflow as tf
-import json
-tf.get_logger().setLevel('ERROR') #no info and warnings are printed
-tf.config.threading.set_inter_op_parallelism_threads(1) #set cores for TF
-tf.config.threading.set_intra_op_parallelism_threads(1)
-print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('GPU')))
-gpus = tf.config.list_physical_devices('GPU')
-print(gpus)
-for gpu in gpus:
-    tf.config.experimental.set_memory_growth(gpu, True)
-# tf.config.set_visible_devices([], 'GPU') #runs the code without GPU
-from pathlib import Path
 from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
 
-import matplotlib.colors as mcolors
+sys.stdout.reconfigure(line_buffering=True)
+
 from scipy.sparse import csr_matrix, csc_matrix, lil_matrix
 from scipy.sparse.linalg import eigs as sparse_eigs
-from skopt.plots import plot_convergence
+import skopt
+from skopt.space import Real
 from skopt.learning import GaussianProcessRegressor as GPR
 from skopt.learning.gaussian_process.kernels import Matern, WhiteKernel, Product, ConstantKernel
 from scipy.io import loadmat, savemat
+from skopt.plots import plot_convergence
 from sklearn.metrics import mean_squared_error
 from skimage.metrics import structural_similarity as ssim
 from Eval_Functions import *
 from Plotting_Functions import *
-sys.stdout.reconfigure(line_buffering=True)
+from POD_functions import *
+
+import json
+import time as time
+
+from docopt import docopt
+args = docopt(__doc__)
 
 exec(open("Val_Functions.py").read())
 exec(open("Functions.py").read())
@@ -69,26 +55,37 @@ print('run functions files')
 
 input_path = args['--input_path']
 output_path = args['--output_path']
-model_path = args['--model_path']
-CAE_hyperparam_file = args['--CAE_hyperparam_file']
-ESN_hyperparam_file = args['--ESN_hyperparam_file']
-config_number = args['--config_number']
+hyperparam_file = args['--hyperparam_file']
+config_number = int(args['--config_number'])
 data_type = args['--Data']
 plumetype = args['--plumetype']
 
-encoded_data = args['--encoded_data']
-if encoded_data == 'False':
-    encoded_data = False
-    print('data not already encoded so', encoded_data)
-elif encoded_data == 'True':
-    encoded_data = True
-    print('data already encoded so', encoded_data)
+reduce_domain = args['--reduce_domain']
+if reduce_domain == 'False':
+    reduce_domain = False
+    print('domain not reduced', reduce_domain)
+elif reduce_domain == 'True':
+    reduce_domain = True
+    print('domain reduced', reduce_domain)
 
-if not os.path.exists(output_path):
-    os.makedirs(output_path)
-    print('made directory')
+reduce_domain2 = args['--reduce_domain2']
+if reduce_domain2 == 'False':
+    reduce_domain2 = False
+    print('domain not reduced', reduce_domain2)
+elif reduce_domain2 == 'True':
+    reduce_domain2 = True
+    print('domain reduced', reduce_domain2)
 
-with open(ESN_hyperparam_file, "r") as f:
+w_threshold = args['--w_threshold']
+if w_threshold == 'False':
+    w_threshold = False
+    print('no threshold', w_threshold)
+elif w_threshold == 'True':
+    w_threshold = True
+    print('threshold', w_threshold)
+
+
+with open(hyperparam_file, "r") as f:
     hyperparams = json.load(f)
     Nr = hyperparams["Nr"]
     train_len = hyperparams["N_train"]
@@ -109,14 +106,10 @@ with open(ESN_hyperparam_file, "r") as f:
     alpha = hyperparams["alpha"]
     alpha0 = hyperparams["alpha0"]
     n_forward = hyperparams["n_forward"]
-    threshold_ph = hyperparams.get("threshold_ph", 0.3)
+    threshold_ph = hyperparams.get("threshold_ph", 0.2)
     Win_method = hyperparams.get("Win_method", "LM")
     sigma_in_feats = hyperparams.get("sigma_in_feats", 0.1)
     sigma_in_mult = hyperparams.get("sigma_in_mult", 1)
-    spec_in_val = hyperparams.get("spec_in_val", 0.1)
-    spec_end_val = hyperparams.get("spec_end_val", 1.0)
-    in_scal_in_val = hyperparams.get("in_scal_in_val", 0.1)
-    in_scal_end_val = hyperparams.get("in_scal_end_val", 5.0)
 
 def load_data_set_TD(file, names, snapshots):
     with h5py.File(file, 'r') as hf:
@@ -176,151 +169,8 @@ def load_data_set_RB_act(file, names, snapshots):
 
     return data, time_vals, plume_features
 
-#### AUTOENCODER ####
-def split_data(U, b_size, n_batches):
 
-    '''
-    Splits the data in batches. Each batch is created by sampling the signal with interval
-    equal to n_batches
-    '''
-    data   = np.zeros((n_batches, b_size, U.shape[1], U.shape[2], U.shape[3]))
-    for j in range(n_batches):
-        data[j] = U[::skip][j::n_batches]
-
-    return data
-
-@tf.function #this creates the tf graph
-def model(inputs, enc_mods, dec_mods, is_train=False):
-
-    '''
-    Multiscale autoencoder, taken from Hasegawa 2020. The contribution of the CNNs at different
-    scales are simply summed.
-    '''
-
-    # sum of the contributions of the different CNNs
-    encoded = 0
-    for enc_mod in enc_mods:
-        encoded += enc_mod(inputs, training=is_train)
-    print('encoded shape', np.shape(encoded))
-
-    decoded = 0
-    for dec_mod in dec_mods:
-        decoded += dec_mod(encoded, training=is_train)
-    print('decoded shape', np.shape(decoded))
-    
-
-    return encoded, decoded
-  
-@tf.function #this creates the tf graph  
-def Decoder(encoded, dec_mods, is_train=False):
-    '''
-    Multiscale autoencoder, taken from Hasegawa 2020. The contribution of the CNNs at different
-    scales are simply summed.
-    '''
-    
-    decoded = 0
-    for dec_mod in dec_mods:
-        decoded += dec_mod(encoded, training=is_train)
-
-    return decoded
-
-@tf.function #this creates the tf graph
-def train_step(inputs, enc_mods, dec_mods, train=True):
-
-    """
-    Trains the model by minimizing the loss between input and output
-    """
-
-    # autoencoded field
-    decoded  = model(inputs, enc_mods, dec_mods, is_train=train)[-1]
-
-    # loss with respect to the data
-    loss     = Loss_Mse(inputs, decoded)
-
-    # compute and apply gradients inside tf.function environment for computational efficiency
-    if train:
-        # create a variable with all the weights to perform gradient descent on
-        # appending lists is done by plus sign
-        varss    = [] #+ Dense.trainable_weights
-        for enc_mod in enc_mods:
-            varss  += enc_mod.trainable_weights
-        for dec_mod in dec_mods:
-            varss +=  dec_mod.trainable_weights
-
-        grads   = tf.gradients(loss, varss)
-        optimizer.apply_gradients(zip(grads, varss))
-
-    return loss
-
-class PerPad2D(tf.keras.layers.Layer):
-    """
-    Periodic Padding layer
-    """
-    def __init__(self, padding=1, asym=False, **kwargs):
-        self.padding = padding
-        self.asym    = asym
-        super(PerPad2D, self).__init__(**kwargs)
-
-    def get_config(self): #needed to be able to save and load the model with this layer
-        config = super(PerPad2D, self).get_config()
-        config.update({
-            'padding': self.padding,
-            'asym': self.asym,
-        })
-        return config
-
-    def call(self, x):
-        return periodic_padding(x, self.padding, self.asym)
-
-def periodic_padding(image, padding=1, asym=False):
-    '''
-    Create a periodic padding (same of np.pad('wrap')) around the image,
-    to mimic periodic boundary conditions.
-    '''
-    '''
-    # Get the shape of the input tensor
-    shape = tf.shape(image)
-    print(shape)
-    batch_size = shape[0]
-    height = shape[1]
-    width = shape[2]
-    channel = shape[3]
-    print(batch_size, height, width, channel)
-    '''
-
-    if asym:
-        right_pad = image[:,:,:padding+1]
-    else:
-        right_pad = image[:,:,:padding]
-
-    if padding != 0:
-        left_pad = image[:,:,-padding:]
-        partial_image = tf.concat([left_pad, image, right_pad], axis=2)
-    else:
-        partial_image = tf.concat([image, right_pad], axis=2)
-    #print(tf.shape(partial_image))
-
-    shape = tf.shape(partial_image)
-    #print(shape)
-    batch_size = shape[0]
-    height = shape[1]
-    width = shape[2]
-    channel = shape[3]
-    #print(batch_size, height, width, channel)
-
-    if asym:
-        bottom_pad = tf.zeros([batch_size,padding+1,width,channel], dtype=image.dtype)
-    else:
-        bottom_pad = tf.zeros([batch_size,padding,width,channel], dtype=image.dtype)
-    if padding != 0 :
-        top_pad = tf.zeros([batch_size,padding,width,channel], dtype=image.dtype)
-        padded_image = tf.concat([top_pad, partial_image, bottom_pad], axis=1)
-    else:
-        padded_image = tf.concat([partial_image, bottom_pad], axis=1)
-    #print("shape of padded image: ", padded_image.shape)
-    return padded_image
-
-#### LOAD DATA ####
+#### LOAD DATA AND POD ####
 Data = data_type
 plumetype = plumetype
 print('datatype:', Data)
@@ -342,6 +192,8 @@ elif Data == 'RB':
     data_set, time_vals = load_data_set_RB(input_path+'/data_4var_5000_48000.h5', variables, snapshots_load)
     print('shape of dataset', np.shape(data_set))
     dt = 2
+    data_set = data_set[...,1:2]
+    variables = ['w']
 
 elif Data == 'RB_plume':
     x = np.load(input_path+'/x.npy')
@@ -362,6 +214,7 @@ elif Data == 'RB_plume':
     print('shape of dataset', np.shape(data_set))
     dt = 2
     print('shape of plume_features', np.shape(plume_features))
+    variables = ['w']
 
 elif Data == 'RB_plume_binarypos':
     x = np.load(input_path+'/x.npy')
@@ -376,260 +229,209 @@ elif Data == 'RB_plume_binarypos':
     dt = 2
     print('shape of plume_features', np.shape(plume_features))
 
-reduce_data_set = reduce_domain = reduce_domain2 = False
-if reduce_data_set:
-    data_set = data_set[:, 32:96, :, :]
-    x = x[32:96]
+reduce_domain  = reduce_domain
+reduce_domain2 = reduce_domain2
+
+if reduce_domain:
+    data_set = data_set[200:392,60:80,:,:] # 408 so we have 13 batches 12 for training and 1 for 'validation'
+    x = x[60:80]
+    time_vals = time_vals[200:392]
     print('reduced domain shape', np.shape(data_set))
     print('reduced x domain', np.shape(x))
     print('reduced x domain', len(x))
     print(x[0], x[-1])
 
-U = data_set
+if reduce_domain2:
+    # data_set = data_set[:4650,128:160,:,:] # 10LTs washout, 200LTs train, 1000LTs test
+    # x = x[128:160]
+    # time_vals = time_vals[:4650]
+    # print('reduced domain shape', np.shape(data_set))
+    # print('reduced x domain', np.shape(x))
+    # print('reduced x domain', len(x))
+    # print(x[0], x[-1])
 
-# Load hyperparameters from a YAML file
-with open(CAE_hyperparam_file, 'r') as file:
-    hyperparameters = yaml.safe_load(file)
+    data_set = data_set[:,128:160,:,:] # 10LTs washout, 200LTs train, 1000LTs test
+    x = x[128:160]
+    time_vals = time_vals[:]
+    print('reduced domain shape', np.shape(data_set))
+    print('reduced x domain', np.shape(x))
+    print('reduced x domain', len(x))
+    print(x[0], x[-1])
 
-lat_dep = hyperparameters.get("lat_dep", {}).get("value")
-n_epochs = hyperparameters.get("n_epochs", {}).get("value")
-l_rate = hyperparameters.get("l_rate", {}).get("value")
-b_size = hyperparameters.get("b_size", {}).get("value")
-lrate_mult =  hyperparameters.get("lrate_mult", {}).get("value")
-N_lr = hyperparameters.get("N_lr", {}).get("value")
-N_parallel = hyperparameters.get("N_parallel", {}).get("value")
-N_layers =  hyperparameters.get("N_layers", {}).get("value")
-kernel_choice = hyperparameters.get("kernel_choice", {}).get("value")
-
-print(f"Building Model with learning_rate: {l_rate}, batch_size: {b_size}, N_parallel: {N_parallel}, latent_depth: {lat_dep}, kernel_choice: {kernel_choice}")
-
-#### LOAD DATA ###
-n_batches   = int((U.shape[0]/b_size) *0.7)  #number of batches #20
-val_batches = int((U.shape[0]/b_size) *0.2)    #int(n_batches*0.2) # validation set size is 0.2 the size of the training set #2
-test_batches = int((U.shape[0]/b_size) *0.1)
-skip        = 1
-print(n_batches, val_batches, test_batches)
-
-#print(b_size*n_batches*skip*dt*upsample)
-
-print('Train Data%  :',b_size*n_batches*skip/U.shape[0]) #how much of the data we are using for training
-print('Val   Data%  :',b_size*val_batches*skip/U.shape[0])
-print('Test   Data%  :',b_size*test_batches*skip/U.shape[0])
-
-# training data
-U_tt        = np.array(U[:b_size*n_batches*skip])            #to be used for random batches
-
-U_tt_reshape = U_tt.reshape(-1, U_tt.shape[-1])
+data_reshape = data_set.reshape(-1, data_set.shape[-1])
+print('shape of data reshaped', data_reshape)
 
 # fit the scaler
-scaler = StandardScaler()
-scaler.fit(U_tt_reshape)
-print('means', scaler.mean_)
+scaling = 'SS'
+if scaling == 'SS':
+    print('applying standard scaler')
+    scaler = StandardScaler()
+    scaler.fit(data_reshape)
+    print('means', scaler.mean_)
 
-#transform training, val and test sets
-U_tt_scaled = scaler.transform(U_tt_reshape)
-
-#reshape 
-U_tt_scaled = U_tt_scaled.reshape(U_tt.shape)
-
-U_train     = split_data(U_tt_scaled, b_size, n_batches).astype('float32') #to be used for randomly shuffled batches
-
-del U_tt, U_tt_scaled
-
-## scale all the data ##
-U_scaled = ss_transform(U, scaler)
-
-# LOAD THE MODEL
-# define the model
-# we do not have pooling and upsampling, instead we use stride=2
-#global lat_dep                 #latent space depth
-#global N_parallel                       #number of parallel CNNs for multiscale
-#global kernel_choice
-ker_size      = [(3,3), (5,5), (7,7)]      #kernel sizes
-if N_parallel == 1:
-    ker_size  = [ker_size[kernel_choice]]
-#global N_layers    #number of layers in every CNN
-if N_layers == 4:
-    n_fil         = [6,12,24,lat_dep]          #number of filters ecnoder
-    n_dec         = [24,12,6,3]                #number of filters decoder
-elif N_layers == 5:
-    n_fil         = [6,12,24,48,lat_dep]          #number of filters ecnoder
-    n_dec         = [48,24,12,6,3]                #number of filters decoder
-act           = 'tanh'                     #activation function
-
-pad_enc       = 'valid'         #no padding in the conv layer
-pad_dec       = 'valid'
-p_size        = [0,1,2]         #stride = 2 periodic padding size
-if N_parallel == 1:
-    p_size    = [p_size[kernel_choice]]
-p_fin         = [1,2,3]         #stride = 1 periodic padding size
-if N_parallel == 1:
-    p_fin     = [p_fin[kernel_choice]]
-p_dec         = 1               #padding in the first decoder layer
-p_crop        = U.shape[1], U.shape[2]      #crop size of the output equal to input size
-
-
-#initialize the encoders and decoders with different kernel sizes
-enc_mods      = [None]*(N_parallel)
-dec_mods      = [None]*(N_parallel)
-
-for i in range(N_parallel):
-    enc_mods[i] = tf.keras.Sequential(name='Enc_' + str(i))
-    dec_mods[i] = tf.keras.Sequential(name='Dec_' + str(i))
-
-#generate encoder layers
-for j in range(N_parallel):
-    for i in range(N_layers):
-
-        if i == N_layers-1:
-            #stride=2 padding and conv
-            enc_mods[j].add(PerPad2D(padding=p_size[j], asym=True,
-                                            name='Enc_' + str(j)+'_PerPad_'+str(i)))
-            enc_mods[j].add(tf.keras.layers.Conv2D(filters = n_fil[i], kernel_size=ker_size[j],
-                                        activation=act, padding=pad_enc, strides=4,
-                            name='Enc_' + str(j)+'_ConvLayer_'+str(i)))
-        else:
-            #stride=2 padding and conv
-            enc_mods[j].add(PerPad2D(padding=p_size[j], asym=True,
-                                            name='Enc_' + str(j)+'_PerPad_'+str(i)))
-            enc_mods[j].add(tf.keras.layers.Conv2D(filters = n_fil[i], kernel_size=ker_size[j],
-                                        activation=act, padding=pad_enc, strides=2,
-                            name='Enc_' + str(j)+'_ConvLayer_'+str(i)))
-        
-
-        #stride=1 padding and conv
-        if i<N_layers-1:
-            enc_mods[j].add(PerPad2D(padding=p_fin[j], asym=False,
-                                                        name='Enc_'+str(j)+'_Add_PerPad1_'+str(i)))
-            enc_mods[j].add(tf.keras.layers.Conv2D(filters=n_fil[i],
-                                                    kernel_size=ker_size[j],
-                                                activation=act,padding=pad_dec,strides=1,
-                                                    name='Enc_'+str(j)+'_Add_Layer1_'+str(i)))
-
-# Obtain the shape of the latent space
-output = enc_mods[-1](U_train[0])
-N_1 = output.shape
-print('shape of latent space', N_1)
-N_latent = N_1[-3] * N_1[-2] * N_1[-1]
-print("Latent space dimensions:", N_latent)
-
-
-#generate decoder layers            
-for j in range(N_parallel):
-
-    for i in range(N_layers):
-
-        #initial padding of latent space
-        if i==0: 
-            dec_mods[j].add(PerPad2D(padding=p_dec, asym=False,
-                                            name='Dec_' + str(j)+'_PerPad_'+str(i))) 
-            dec_mods[j].add(tf.keras.layers.Conv2DTranspose(filters = n_dec[i],
-                            output_padding=None,kernel_size=ker_size[j],
-                            activation=act, padding=pad_dec, strides=4,
-                name='Dec_' + str(j)+'_ConvLayer_'+str(i)))
-        else:
-            #Transpose convolution with stride = 2 
-            dec_mods[j].add(tf.keras.layers.Conv2DTranspose(filters = n_dec[i],
-                                        output_padding=None,kernel_size=ker_size[j],
-                                        activation=act, padding=pad_dec, strides=2,
-                                name='Dec_' + str(j)+'_ConvLayer_'+str(i)))
-        
-        #Convolution with stride=1
-        if  i<N_layers-1:       
-            dec_mods[j].add(tf.keras.layers.Conv2D(filters=n_dec[i],
-                                        kernel_size=ker_size[j], 
-                                        activation=act,padding=pad_dec,strides=1,
-                                        name='Dec_' + str(j)+'_ConvLayer1_'+str(i)))
-
-    #crop and final linear convolution with stride=1
-    dec_mods[j].add(tf.keras.layers.CenterCrop(p_crop[0] + 2*p_fin[j],
-                                                    p_crop[1]+ 2*p_fin[j],
-                            name='Dec_' + str(j)+'_Crop_'+str(i)))
-    dec_mods[j].add(tf.keras.layers.Conv2D(filters=U.shape[3],
-                                            kernel_size=ker_size[j], 
-                                            activation='linear',padding=pad_dec,strides=1,
-                                                name='Dec_' + str(j)+'_Final_Layer'))
-
-# run the model once to print summary
-enc0, dec0 = model(U_train[0], enc_mods, dec_mods)
-print('latent   space size:', N_latent)
-print('physical space size:', U[0].flatten().shape)
-print('')
-for j in range(N_parallel):
-    enc_mods[j].summary()
-for j in range(N_parallel):
-    dec_mods[j].summary()
-
-    
-    
-# Load best model
-# Restore the checkpoint (this will restore the optimizer, encoder, and decoder states)
-#how to load saved model
-models_dir = model_path
-a = [None]*N_parallel
-b = [None]*N_parallel
-for i in range(N_parallel):
-    a[i] = tf.keras.models.load_model(models_dir + '/enc_mod'+str(ker_size[i])+'_'+str(N_latent)+'.h5', 
-                                          custom_objects={"PerPad2D": PerPad2D})
-for i in range(N_parallel):
-    b[i] = tf.keras.models.load_model(models_dir + '/dec_mod'+str(ker_size[i])+'_'+str(N_latent)+'.h5',
-                                          custom_objects={"PerPad2D": PerPad2D})
-
-    
-##### Compute encoded time_series #####
-#set U to the standard scaler version
-if encoded_data:
-    with h5py.File(output_path+'/encoded_data'+str(N_latent)+'.h5', 'r') as df:
-        U_enc = np.array(df['U_enc'])
+    print('shape of data before scaling', np.shape(data_reshape))
+    data_scaled_reshape = scaler.transform(data_reshape)
+    #reshape 
+    data_scaled = data_scaled_reshape.reshape(data_set.shape)
 else:
-    U = U_scaled
-    train_leng = 0
-    N_pos = 2000
-    k     = (U.shape[0] - train_leng)//N_pos
+    print('no scaling')
+    data_scaled = data_set
 
-    U_enc = np.empty((k*N_pos, N_1[1], N_1[2], N_1[3]))
-    for i in range(k):
-            U_enc[i*N_pos:(i+1)*N_pos]= model(U[i*N_pos:(i+1)*N_pos], a, b)[0]
-
-    with h5py.File(output_path+'/encoded_data'+str(N_latent)+'.h5', 'w') as df:
-        df['U_enc'] = U_enc
-
-
-###### ESN #######
-upsample   = 1
-data_len   = 11200
-transient  = 0
-
-dt = dt*upsample
-n_components = N_latent
-
-act      = 'tanh'
-
-U        = np.array(U_enc[transient:transient+data_len:upsample])
-shape    = U.shape
-print(shape)
-
-U = U.reshape(shape[0], shape[1]*shape[2]*shape[3])
-
+if Data == 'RB':
+    snapshots_POD = 11200
+    data_scaled = data_scaled[:snapshots_POD]
+    data_scaled = data_scaled[:,:,32,0]
+    n_components = data_scaled.shape[1]
+elif Data == 'RB_plume':
+    snapshots_POD = 11200
+    data_scaled = data_scaled[:snapshots_POD]
+    plume_features = plume_features[:snapshots_POD]
+    data_scaled = data_scaled[:,:,32,0]
+    n_components = data_scaled.shape[1]
 if Data == 'RB_plume':
-    plume_features = plume_features[:data_len]
-    U = np.concatenate([U, plume_features], axis=1)  # shape (time, 68)
+    data_scaled = data_scaled[..., 1:2]
+    U = np.concatenate([data_scaled, plume_features], axis=1)  # shape (time, 68)
 else:
-    U = U 
+    U = data_scaled
+
+centre_of_energy = False
+if centre_of_energy:
+
+    plot_rbf = True
+    def compute_center_of_energy(w_slice, x_coords=None):
+        """
+        Computes the center of energy in x-direction for each time step.
+        
+        Parameters:
+        - w_slice: np.ndarray of shape (T, X), the vertical velocity at a single z level across time.
+        - x_coords: Optional 1D array of x positions (length X). Defaults to 0 to X-1.
+        
+        Returns:
+        - center: np.ndarray of shape (T,), the energy-weighted center position at each time.
+        """
+        T, X = w_slice.shape
+        if x_coords is None:
+            x_coords = np.arange(X)
+
+        energy = np.abs(w_slice)**2  # energy at each x
+        weighted_sum = (energy * x_coords[None, :]).sum(axis=1)  # sum_x (x * |w|^2)
+        total_energy = energy.sum(axis=1) + 1e-8  # avoid division by zero
+        center = weighted_sum / total_energy
+        return center
+
+    def rbf_encode(center_positions, num_centers=10, domain_length=256, sigma=None):
+        """
+        Apply RBF encoding to the center positions.
+        
+        Parameters:
+        - center_positions: np.ndarray of shape (T,), the center positions of energy for each time step.
+        - num_centers: Number of RBF centers.
+        - domain_length: The length of the domain (e.g., the x-dimension size).
+        - sigma: The width (spread) of the RBFs. If None, it will be set to a default value.
+
+        Returns:
+        - np.ndarray of shape (T, num_centers) containing the RBF-encoded features for each time step.
+        """
+        T = center_positions.shape[0]
+        centers = np.linspace(0, domain_length - 1, num_centers)  # Evenly spaced centers in the domain
+        if sigma is None:
+            sigma = (domain_length / num_centers) / 2  # Default spread based on number of centers
+
+        # RBF encoding: exp(-((x - c)^2) / (2 * sigma^2))
+        rbf_features = np.exp(-((center_positions[:, None] - centers[None, :])**2) / (2 * sigma**2))
+        return rbf_features  # shape: (T, num_centers)
+
+    w_slice = data_scaled[:, :, 47, 1]
+    center_positions = compute_center_of_energy(w_slice, x)
+    
+    rbf_features = rbf_encode(center_positions, num_centers=10, domain_length=w_slice.shape[1], sigma=0.5)
+
+    U = np.hstack((data_reduced, rbf_features))
+
+    if plot_rbf:
+        time_step = 175
+        rbf_at_timestep = rbf_features[time_step,:]
+        # Generate x values for the plot (the RBF centers)
+        centers = np.linspace(x[0], x[-1], 10)  # Assuming domain length is 256
+        
+        # Plot the RBF features
+        fig, ax = plt.subplots(2, figsize=(8,6))
+        ax[0].plot(centers, rbf_at_timestep, marker='o', linestyle='-', color='b')
+        ax[0].set_xlabel('RBF Center Position (x)')
+        ax[0].set_ylabel('RBF Response')
+
+        ax[1].contourf(x, z, data_scaled[time_step, :, :, 1].T)
+        ax[1].set_xlabel('x')
+        ax[1].set_ylabel('z')
+        fig.suptitle(time_vals[time_step])
+        fig.savefig(output_path+'/rbf_features.png')
+        
+if w_threshold:
+    def detect_multiple_regions(w_slice, threshold=0.5, num_regions=3):
+        """
+        Detect multiple plumes by dividing the domain into regions and finding all regions with plumes.
+        
+        Parameters:
+        - w_slice: np.ndarray of shape (T, X), vertical velocity across time and space.
+        - threshold: Minimum height to consider a region as containing a plume.
+        - num_regions: Number of regions to divide the domain into.
+        
+        Returns:
+        - region_encoding: np.ndarray of shape (T, num_regions), encoding for the presence of plumes in each region.
+        """
+        T, X = w_slice.shape
+        region_encoding = np.zeros((T, num_regions))
+        
+        # Define the boundaries of the regions
+        region_width = X // num_regions
+        
+        for t in range(T):
+            # Detect the indices where vertical velocity exceeds the threshold
+            plume_region = np.where(np.abs(w_slice[t, :]) > threshold)[0]
+            
+            for region_idx in range(num_regions):
+                # Define the start and end indices of the current region
+                region_start = region_idx * region_width
+                region_end = (region_idx + 1) * region_width
+                
+                # If any plume points are within this region, mark it as 1
+                if np.any((plume_region >= region_start) & (plume_region < region_end)):
+                    region_encoding[t, region_idx] = 1
+        
+        return region_encoding
+    
+    w_slice = data_scaled[:,:,47,1]
+    threshold_w = np.percentile(w_slice, 99)
+    region_encoding = detect_multiple_regions(w_slice, threshold=threshold_w, num_regions=8)
+
+    fig, ax = plt.subplots(2, figsize=(8,6))
+    ax[0].pcolormesh(time_vals[:750], x[::32], region_encoding[:750].T, cmap='Reds', shading='auto')
+    ax[1].contourf(time_vals[:750], x, w_slice[:750].T)
+    fig.savefig(output_path+'/regions.png')
+    
+    time_step = 175
+    fig, ax =plt.subplots(2, figsize=(8,6))
+    #ax[0].pcolormesh(x[::32], [0,1], region_encoding[time_step].T)
+    ax[0].plot(x[::32], region_encoding[time_step])
+    ax[1].plot(x, w_slice[time_step])
+    fig.savefig(output_path+'/region_timestep.png')
+
+    U = np.hstack((data_reduced, region_encoding))
+
 
 print('shape of data for ESN', np.shape(U))
-dim      = U.shape[1]
 
 # number of time steps for washout, train, validation, test
 t_lyap    = t_lyap
 dt        = dt
 N_lyap    = int(t_lyap//dt)
 print('N_lyap', N_lyap)
-N_washout = washout_len*N_lyap #75
+N_washout = int(washout_len*N_lyap) #75
 N_washout_val = int(washout_len_val*N_lyap)
 N_train   = train_len*N_lyap #600
 N_val     = val_len*N_lyap #45
 N_test    = test_len*N_lyap #45
+dim       = U.shape[1]
 
 train_data = data_set[:int(N_washout+N_train)]
 global_stds = [np.std(train_data[..., c]) for c in range(train_data.shape[-1])]
@@ -662,6 +464,7 @@ if Data == 'RB_plume':
     M_feats               = U_data[:,n_components:].max(axis=0)
     norm_feats            = M_feats - m_feats
 else:
+    n_feat = 1
     mean_feats = np.zeros(n_feat)
     std_feats  = np.ones(n_feat)
     norm_feats = np.ones(n_feat)
@@ -684,7 +487,7 @@ Y_tv  = U[N_washout+1:N_washout+N_train].copy() #data to match at next timestep
 if Data == 'ToyData':
     indexes_to_plot = np.array([1, 2, 3, 4] ) -1
 else:
-    indexes_to_plot = np.array([1, 2, 8, 16, 32, 64] ) -1
+    indexes_to_plot = np.array([1, 2, 10, 32, 64] ) -1
 indexes_to_plot = indexes_to_plot[indexes_to_plot <= (n_components-1)]
 
 # adding noise to training set inputs with sigma_n the noise of the data
@@ -750,25 +553,52 @@ elif normalisation == 'range_plusfeatures_doubled':
     print('shape of u_feats', np.shape(u_feats))
     u_combined = np.hstack((u_pods, u_feats))
     bias_in = np.array([np.mean(np.abs(u_combined))])            
+
+elif normalisation == 'modeweight':
+    bias_in   = np.array([np.mean(np.abs(U_data))])
+
+    explained_variance_ratio = pca_.explained_variance_ratio_
+
+    power = 0.9
+    weights_raw = explained_variance_ratio ** power
+    weights = weights_raw / np.max(weights_raw)
+
+    min_weight = 0.1
+    weights = np.maximum(weights, min_weight)
+elif normalisation == 'modeweight_pluson':
+    bias_in   = np.array([np.mean(np.abs((U_data-u_mean)/norm))])
+
+    explained_variance_ratio = pca_.explained_variance_ratio_
+
+    power = 0.9
+    weights_raw = explained_variance_ratio ** power
+    weights = weights_raw / np.max(weights_raw)
+
+    min_weight = 0.1
+    weights = np.maximum(weights, min_weight)
 elif normalisation == 'across_range':
     bias_in   = np.array([np.mean(np.abs((U_data-u_min_all)/u_norm_all))]) #input bias (average absolute value of the inputs)
 
 bias_out  = np.array([1.]) #output bias
 
 N_units      = Nr #neurons
-connectivity = 3   
-sparseness   = 1 - connectivity/(N_units-1) 
+connectivity = 3
+sparseness   = 1 - connectivity/(N_units-1)
 
-tikh = np.array([1e-1,1e-3,1e-6,1e-9])  # Tikhonov factor (optimize among the values in this list)
+tikh = np.array([1e-1,1e-3,1e-6,1e-9]) #np.array([1e-3,1e-6,1e-9,1e-12])  # Tikhonov factor (optimize among the values in this list)
 
-#### hyperparamter search ####
+print('tikh:', tikh)
+print('N_r:', N_units, 'sparsity:', sparseness)
+print('bias_in:', bias_in, 'bias_out:', bias_out)
+
+#### Grid Search and BO #####
 threshold_ph = threshold_ph
 n_in  = 0           #Number of Initial random points
 
-spec_in     = spec_in_val #0.1    #range for hyperparameters (spectral radius and input scaling)
-spec_end    = spec_end_val #1.0
-in_scal_in  = np.log10(in_scal_in_val) #np.log10(0.1)
-in_scal_end = np.log10(in_scal_end_val) #np.log10(5)
+spec_in     = 0.1    #range for hyperparameters (spectral radius and input scaling)
+spec_end    = 1.0 
+in_scal_in  = np.log10(0.1)
+in_scal_end = np.log10(5.0)
 
 # In case we want to start from a grid_search, the first n_grid_x*n_grid_y points are from grid search
 n_grid_x = grid_x
@@ -794,6 +624,7 @@ search_space = [Real(spec_in, spec_end, name='spectral_radius'),
 kernell = ConstantKernel(constant_value=1.0, constant_value_bounds=(1e-1, 3e0))*\
                   Matern(length_scale=[0.2,0.2], nu=2.5, length_scale_bounds=(5e-2, 1e1)) 
 
+print('initial grid', x1)
 
 #Hyperparameter Optimization using Grid Search plus Bayesian Optimization
 def g(val):
@@ -819,6 +650,7 @@ def g(val):
                            )   
     return res
 
+print(search_space)
 
 #Number of Networks in the ensemble
 ensemble = ens
@@ -841,7 +673,7 @@ if not os.path.exists(output_path):
 val      = eval(val)
 alpha = alpha
 N_fw     = n_forward*N_lyap
-#N_fo     = (N_train-N_val-N_washout)//N_fw + 1 
+#N_fo     = (N_train-N_val-N_washout_val)//N_fw + 1 
 N_fo     = 50                     # number of validation intervals
 N_in     = N_washout                 # timesteps before the first validation interval (can't be 0 due to implementation)
 #N_fw     = (N_train-N_val-N_washout)//(N_fo-1) # how many steps forward the validation interval is shifted (in this way they are evenly spaced)
@@ -885,12 +717,20 @@ for i in range(ensemble):
     seed= i+1
     rnd = np.random.RandomState(seed)
 
-    #sparse syntax for the input and state matrices
     if Win_method == 'LM':
         #sparse syntax for the input and state matrices
         Win  = lil_matrix((N_units,dim+1))
         for j in range(N_units):
             Win[j,rnd.randint(0, dim+1)] = rnd.uniform(-1, 1) #only one element different from zero
+        Win = Win.tocsr()
+    elif Win_method == 'KN':
+        Win = lil_matrix((N_units, dim + 1))
+        for j in range(N_units):
+            # bias toward connecting to earlier modes
+            prob = np.exp(-np.arange(dim + 1))  # bias toward low indices
+            prob /= prob.sum()
+            idx = np.random.choice(np.arange(dim + 1), p=prob)
+            Win[j, idx] = np.random.uniform(-1, 1)
         Win = Win.tocsr()
     elif Win_method == 'denser':
         connections_per_row = 5  # or try 3, 10, etc.
@@ -901,8 +741,6 @@ for i in range(ensemble):
             for idx, v in zip(indices, values):
                 Win[j, idx] = v
         Win = Win.tocsr()
-    elif Win_method == 'dense':
-        Win = np.random.uniform(-1, 1, size=(N_units, dim + 1))
 
     W = csr_matrix( #on average only connectivity elements different from zero
         rnd.uniform(-1, 1, (N_units, N_units)) * (rnd.rand(N_units, N_units) < (1-sparseness)))
@@ -939,38 +777,39 @@ for i in range(ensemble):
     #Plotting Optimization Convergence for each network
     print('Best Results: x', minimum[i,0], 10**minimum[i,1], minimum[i,2],
           'f', -minimum[i,-1])
-    
     # Full path for saving the file
     hyp_file = '_ESN_hyperparams_ens%i.json' % i
 
     output_path_hyp = os.path.join(hyperparams_path, hyp_file)
 
     hyps = {
-    "test": int(i),
-    "no. modes": int(n_components),
-    "spec rad": float(minimum[i,0]),
-    "input scaling": float(10**minimum[i,1]),
-    "tikh": float(minimum[i,2]),
-    "min f": float(minimum[i,-1]),
+    "test": i,
+    "no. positions": n_components,
+    "spec rad": minimum[i,0],
+    "input scaling": 10**minimum[i,1],
+    "tikh": minimum[i,2],
+    "min f": minimum[i,-1],
     }
 
     with open(output_path_hyp, "w") as file:
         json.dump(hyps, file, indent=4)
-
+    
     fig, ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
     plot_convergence(res)
     fig.savefig(hyperparams_path+'/convergence_realisation%i.png' % i)
     plt.close()
-    
+
 ##### visualise grid search #####
 # Plot Gaussian Process reconstruction for each network in the ensemble after n_tot evaluations
 # The GP reconstruction is based on the n_tot function evaluations decided in the search
+
 # points to evaluate the GP at
 n_length    = 100
 xx, yy      = np.meshgrid(np.linspace(spec_in, spec_end,n_length), np.linspace(in_scal_in, in_scal_end,n_length))
 x_x         = np.column_stack((xx.flatten(),yy.flatten()))
 x_gp        = res.space.transform(x_x.tolist())     ##gp prediction needs this normalized format
 y_pred      = np.zeros((ensemble,n_length,n_length))
+
 
 for i in range(ensemble):
     # retrieve the gp reconstruction
@@ -1038,7 +877,7 @@ if validation_interval:
     else:
         N_tstart = N_washout                    #where the first test interval starts
     N_intt   = test_len*N_lyap            #length of each test set interval
-    N_gap    = int(3*N_lyap)
+    N_gap    = N_intt
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
@@ -1053,7 +892,6 @@ if validation_interval:
     ens_ssim        = np.zeros((ensemble_test))
     ens_evr         = np.zeros((ensemble_test))
     ens_nrmse_plume = np.zeros((ensemble_test))
-    ens_PH_recons   = np.zeros((ensemble_test))
     ens_nrmse_ch    = np.zeros((ensemble_test))
     ens_nrmse_ch_pl = np.zeros((ensemble_test))
     ens_pl_acc      = np.zeros((ensemble_test))
@@ -1064,7 +902,9 @@ if validation_interval:
         print('made directory')
 
     for j in range(ensemble_test):
+
         print('Realization    :',j+1)
+
         #load matrices and hyperparameters
         Wout     = Woutt[j].copy()
         Win      = Winn[j] #csr_matrix(Winn[j])
@@ -1094,6 +934,12 @@ if validation_interval:
             U_wash    = U[N_tstart - N_washout_val +i*N_intt : N_tstart + i*N_intt].copy()
             Y_t       = U[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt].copy()
 
+            if reduce_domain:
+                fig,ax = plt.subplots(1, figsize=(12,3))
+                c1=ax.contourf(time_vals[N_tstart + i*N_intt : N_tstart + i*N_intt + N_intt], x, data_reconstructed[N_tstart + i*N_intt : N_tstart + i*N_intt + N_intt,:,32,0].T)
+                fig.colorbar(c1, ax=ax)
+                fig.savefig(output_path+'/validation_slice_w.png')
+
             #washout for each interval
             Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
             Uh_wash = np.dot(Xa1, Wout)
@@ -1117,37 +963,28 @@ if validation_interval:
             else:
                 ens_PH_modes[i,j] = ens_PH[i,j]
 
-            ##### reconstructions ####
             if Data == 'RB_plume':
-                plume_features_truth         = Y_t[:,N_latent:]
-                plume_features_predictions   = Yh_t[:,N_latent:]
-
-                # 1. reshape for decoder
-                Y_t_reshaped = Y_t[:,:N_latent].reshape(Y_t.shape[0], N_1[1], N_1[2], N_1[3])
-                Yh_t_reshaped = Yh_t[:,:N_latent].reshape(Yh_t.shape[0], N_1[1], N_1[2], N_1[3])
-                # 2. put through decoder
-                reconstructed_truth = Decoder(Y_t_reshaped,b).numpy()
-                reconstructed_predictions = Decoder(Yh_t_reshaped,b).numpy()
-                # 3. scale back
-                reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
-                reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
-
+                reconstructed_truth       = Y_t[:,:n_components]
+                reconstructed_predictions = Yh_t[:,:n_components]
+                reconstructed_truth       = reconstructed_truth[..., np.newaxis, np.newaxis]
+                reconstructed_predictions = reconstructed_predictions[..., np.newaxis, np.newaxis]
+                plume_features_truth         = Y_t[:,n_components:]
+                plume_features_predictions   = Yh_t[:,n_components:]
             else:
-                # 1. reshape for decoder
-                Y_t_reshaped = Y_t.reshape(Y_t.shape[0], N_1[1], N_1[2], N_1[3])
-                Yh_t_reshaped = Yh_t.reshape(Yh_t.shape[0], N_1[1], N_1[2], N_1[3])
-                # 2. put through decoder
-                reconstructed_truth = Decoder(Y_t_reshaped,b).numpy()
-                reconstructed_predictions = Decoder(Yh_t_reshaped,b).numpy()
-                # 3. scale back
-                reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
-                reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
+                reconstructed_truth       = Y_t
+                reconstructed_predictions = Yh_t
+                reconstructed_truth       = reconstructed_truth[..., np.newaxis, np.newaxis]
+                reconstructed_predictions = reconstructed_predictions[..., np.newaxis, np.newaxis]      
+
+            # rescale
+            reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
+            reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
 
             # metrics
             nrmse = NRMSE(reconstructed_truth, reconstructed_predictions)
             mse   = MSE(reconstructed_truth, reconstructed_predictions)
             evr   = EVR_recon(reconstructed_truth, reconstructed_predictions)
-            SSIM  = compute_ssim_for_4d(reconstructed_truth, reconstructed_predictions)
+            SSIM  = 0 #compute_ssim_for_4d(reconstructed_truth, reconstructed_predictions)
             nrmse_ch = NRMSE_per_channel(reconstructed_truth, reconstructed_predictions)
 
             if len(variables) == 4:
@@ -1165,6 +1002,7 @@ if validation_interval:
 
                     mask_original     = mask[..., 0]
                     nrmse_sep_plume   = NRMSE_per_channel_masked(reconstructed_truth, reconstructed_predictions, mask_original, global_stds) 
+
                 else:
                     print("Mask is empty, no plumes detected.")
                     nrmse_plume = 0  # Simply add 0 to maintain shape
@@ -1174,45 +1012,44 @@ if validation_interval:
                 nrmse_sep_plume = np.inf
 
             if Data == 'RB_plume':
-                pred_counts_rounded = np.round(plume_features_predictions[:, 0]).astype(int)
-                true_counts = plume_features_truth[:, 0].astype(int)
+                if plumetype == 'features':
+                    pred_counts_rounded = np.round(plume_features_predictions[:, 0]).astype(int)
+                    true_counts = plume_features_truth[:, 0].astype(int)
 
-                if len(true_counts) > 0:
-                    exact_match = (pred_counts_rounded == true_counts).sum()
-                    plume_count_accuracy = exact_match / len(true_counts)
+                    if len(true_counts) > 0:
+                        exact_match = (pred_counts_rounded == true_counts).sum()
+                        plume_count_accuracy = exact_match / len(true_counts)
+                    else:
+                        plume_count_accuracy = 0.0  # or -1 if you want to flag it
                 else:
-                    plume_count_accuracy = 0.0  # or -1 if you want to flag it
+                    plume_count_accuracy = 0.0
             else:
                 plume_count_accuracy = 0.0
-
-            nrmse_recons = compute_nrmse_per_timestep_variable(reconstructed_truth, reconstructed_predictions, normalize_by="std")
-            horizons_recons = find_prediction_horizon(nrmse_recons, 0.2)/N_lyap
 
             print('NRMSE', nrmse)
             print('MSE', mse)
             print('EVR_recon', evr)
             print('SSIM', SSIM)
             print('NRMSE plume', nrmse_plume)
-            print('horizons recons', horizons_recons)
+            print('no plume accuracy', plume_count_accuracy)
 
             # Full path for saving the file
-            output_file = 'ESN_validation_metrics_ens%i_test%i.json' % (j,i)
+            output_file = 'ESN_test_metrics_ens%i_test%i.json' % (j,i)
 
             output_path_met = os.path.join(metrics_val_path, output_file)
 
             metrics = {
-            "test": int(i),
-            "no. modes": int(n_components),
-            "EVR": float(evr),
-            "MSE": float(mse),
-            "NRMSE": float(nrmse),
-            "SSIM": float(SSIM),
-            "NRMSE plume": float(nrmse_plume),
-            "PH": float(PH[i]),
-            "PH recons": float(horizons_recons),
-            "NRMSE per channel": float(nrmse_ch),
-            "NRMSE per channel in plume": float(nrmse_sep_plume),
-            "plume_count_accuracy": float(plume_count_accuracy),
+            "test": i,
+            "no. positions": n_components,
+            "EVR": evr,
+            "MSE": mse,
+            "NRMSE": nrmse,
+            "SSIM": SSIM,
+            "NRMSE plume": nrmse_plume,
+            "PH": PH[i],
+            "NRMSE per channel": nrmse_ch,
+            "NRMSE per channel in plume": nrmse_sep_plume,
+            "plume_count_accuracy": plume_count_accuracy,
             }
 
             with open(output_path_met, "w") as file:
@@ -1223,28 +1060,30 @@ if validation_interval:
             ens_nrmse_plume[j] += nrmse_plume
             ens_evr[j]         += evr
             ens_PH2[j]         += PH[i]
-            ens_PH_recons[j]   += horizons_recons
             ens_nrmse_ch[j]    += nrmse_ch
             nrmse_sep_plume     = np.nan_to_num(nrmse_sep_plume, nan=0.0)  # replace NaNs with zero
             ens_nrmse_ch_pl[j] += nrmse_sep_plume
             ens_pl_acc[j]      += plume_count_accuracy
 
             if plot:
+                #left column has the washout (open-loop) and right column the prediction (closed-loop)
+                # only first n_plot test set intervals are plotted
+
                 images_val_path = output_path+'/validation_images/'
                 if not os.path.exists(images_val_path):
                     os.makedirs(images_val_path)
                     print('made directory')
 
                 if i<n_plot:
-                    if j % 5 == 0:
+                    if j % 1 == 0:
                         
                         print('indexes_to_plot', indexes_to_plot)
                         print(np.shape(U_wash))
                         xx = np.arange(U_wash[:,0].shape[0])/N_lyap
-                        plot_modes_washout(U_wash, Uh_wash, xx, i, j, indexes_to_plot, images_val_path+'/washout_validation', Modes=False)
+                        plot_modes_washout(U_wash, Uh_wash, xx, i, j, indexes_to_plot, images_val_path+'/washout_validation', Modes=True)
 
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                        plot_modes_prediction(Y_t, Yh_t, xx, i, j, indexes_to_plot, images_val_path+'/prediction_validation', Modes=False)
+                        plot_modes_prediction(Y_t, Yh_t, xx, i, j, indexes_to_plot, images_val_path+'/prediction_validation', Modes=True)
                         plot_PH(Y_err, threshold_ph, xx, i, j, images_val_path+'/PH_validation')
                         
                         plot_reservoir_states_norm(Xa1, Xa2, time_vals, N_tstart, N_washout_val, i, j, N_gap, N_intt, N_units, images_val_path+'/resnorm_validation')
@@ -1252,7 +1091,7 @@ if validation_interval:
 
                         # reconstruction after scaling
                         print('reconstruction and error plot')
-                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, x, z, xx, names, images_val_path+'/ESN_validation_ens%i_test%i' %(j,i))
+                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 0, 1*N_lyap, x, z[32:33], xx, names, images_val_path+'/ESN_validation_ens%i_test%i' %(j,i))
 
                         if len(variables) == 4:
                             plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_val_path+'/active_plumes_validation')
@@ -1260,8 +1099,6 @@ if validation_interval:
                         if Data == 'RB_plume':
                             if plumetype == 'features':
                                 plotting_number_of_plumes(true_counts, pred_counts_rounded, xx, i, j, images_val_path+f"/number_of_plumes")
-                                hovmoller_plus_plumes(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j, images_val_path+f"/hovmol_plumes")
-
 
         # accumulation for each ensemble member
         ens_nrmse[j]       = ens_nrmse[j] / N_test
@@ -1269,7 +1106,6 @@ if validation_interval:
         ens_ssim[j]        = ens_ssim[j] / N_test
         ens_evr[j]         = ens_evr[j] / N_test
         ens_PH2[j]         = ens_PH2[j] / N_test  
-        ens_PH_recons[j]   = ens_PH_recons[j] / N_test
         ens_nrmse_ch[j]    = ens_nrmse_ch[j] / N_test
         ens_nrmse_ch_pl[j] = ens_nrmse_ch_pl[j] / N_test
         ens_pl_acc[j]      = ens_pl_acc[j] / N_test
@@ -1292,7 +1128,6 @@ if validation_interval:
     "mean NRMSE plume": np.mean(ens_nrmse_plume),
     "mean EVR": np.mean(ens_evr),
     "mean ssim": np.mean(ens_ssim),
-    "mean PH recons": np.mean(ens_PH_recons),
     "mean NRMSE per channel": np.mean(ens_nrmse_ch),
     "mean NRMSE per channel in plume": np.nanmean(ens_nrmse_ch_pl),
     "ens_pl_acc": np.mean(ens_pl_acc),
@@ -1311,14 +1146,14 @@ if test_interval:
     print('TESTING')
     N_test   = n_tests                    #number of intervals in the test set
     if reduce_domain:
-        N_tstart = N_train + N_washout
+        N_tstart = N_train + N_washout_val
     elif reduce_domain2:
-        N_tstart = N_train + N_washout
+        N_tstart = N_train + N_washout_val
     else:
-        N_tstart = N_train + N_washout #850    #where the first test interval starts
+        N_tstart = N_train + N_washout_val #850    #where the first test interval starts
     N_intt   = test_len*N_lyap             #length of each test set interval
-    N_gap    = int(3*N_lyap)
-
+    N_gap    = N_intt
+    
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
 
@@ -1370,6 +1205,12 @@ if test_interval:
             U_wash    = U[N_tstart - N_washout_val +i*N_intt : N_tstart + i*N_intt].copy()
             Y_t       = U[N_tstart + i*N_intt            : N_tstart + i*N_intt + N_intt].copy()
 
+            if reduce_domain:
+                fig,ax = plt.subplots(1, figsize=(12,3))
+                c1=ax.contourf(time_vals[N_tstart + i*N_intt : N_tstart + i*N_intt + N_intt], x, data_reconstructed[N_tstart + i*N_intt : N_tstart + i*N_intt + N_intt,:,0,0].T)
+                fig.colorbar(c1, ax=ax)
+                fig.savefig(output_path+'/test_slice_w.png')
+
             #washout for each interval
             Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
             Uh_wash = np.dot(Xa1, Wout)
@@ -1386,13 +1227,17 @@ if test_interval:
             nrmse_error[i, :] = Y_err
 
             ##### reconstructions ####
-            # 1. reshape for decoder
-            Y_t_reshaped = Y_t.reshape(Y_t.shape[0], N_1[1], N_1[2], N_1[3])
-            Yh_t_reshaped = Yh_t.reshape(Yh_t.shape[0], N_1[1], N_1[2], N_1[3])
-            # 2. put through decoder
-            reconstructed_truth = Decoder(Y_t_reshaped,b).numpy()
-            reconstructed_predictions = Decoder(Yh_t_reshaped,b).numpy()
-            # 3. scale back
+            if w_threshold:
+                _, reconstructed_truth       = inverse_POD(Y_t[:,:n_components], pca_)
+                _, reconstructed_predictions = inverse_POD(Yh_t[:,:n_components], pca_)
+                region_encoding_truth        = Y_t[:,n_components:]
+                region_encoding_predictions  = Yh_t[:,n_components:]
+            else:
+                _, reconstructed_truth       = inverse_POD(Y_t, pca_)
+                _, reconstructed_predictions = inverse_POD(Yh_t, pca_)
+
+
+            # rescale
             reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
             reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
 
@@ -1400,7 +1245,7 @@ if test_interval:
             nrmse = NRMSE(reconstructed_truth, reconstructed_predictions)
             mse   = MSE(reconstructed_truth, reconstructed_predictions)
             evr   = EVR_recon(reconstructed_truth, reconstructed_predictions)
-            SSIM  = compute_ssim_for_4d(reconstructed_truth, reconstructed_predictions)
+            SSIM  = 0 #compute_ssim_for_4d(reconstructed_truth, reconstructed_predictions)
 
             if len(variables) == 4:
                 active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(reconstructed_truth, reconstructed_predictions, z)
@@ -1432,14 +1277,14 @@ if test_interval:
             output_path_met = os.path.join(metrics_test_path, output_file)
 
             metrics = {
-            "test": int(i),
-            "no. modes": int(n_components),
-            "EVR": float(evr),
-            "MSE": float(mse),
-            "NRMSE": float(nrmse),
-            "SSIM": float(SSIM),
-            "NRMSE plume": float(nrmse_plume),
-            "PH": float(PH[i]),
+            "test": i,
+            "no. modes": n_components,
+            "EVR": evr,
+            "MSE": mse,
+            "NRMSE": nrmse,
+            "SSIM": SSIM,
+            "NRMSE plume": nrmse_plume,
+            "PH": PH[i],
             }
 
             with open(output_path_met, "w") as file:
@@ -1459,9 +1304,9 @@ if test_interval:
                 if not os.path.exists(images_test_path):
                     os.makedirs(images_test_path)
                     print('made directory')
-
+                
                 if i<n_plot:
-                    if j % 2 == 0:
+                    if j % 1 == 0:
                         
                         print('indexes_to_plot', indexes_to_plot)
                         print(np.shape(U_wash))
@@ -1470,15 +1315,15 @@ if test_interval:
 
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
                         plot_modes_prediction(Y_t, Yh_t, xx, i, j, indexes_to_plot, images_test_path+'/prediction_test', Modes=False)
-                        plot_PH(Y_err, threshold_ph, xx, i, j, images_test_path+'/PH_test')
+                        plot_PH(Y_err, threshold_ph, xx, i, j, images_val_path+'/PH_validation')
                         
                         plot_reservoir_states_norm(Xa1, Xa2, time_vals, N_tstart, N_washout_val, i, j, N_gap, N_intt, N_units, images_test_path+'/resnorm_test')
                         plot_input_states_norm(U_wash, Y_t, time_vals, N_tstart, N_washout_val, i, j, N_gap, N_intt, images_test_path+'/inputnorm_test')
 
                         # reconstruction after scaling
                         print('reconstruction and error plot')
-                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, 1*N_lyap, x, z, xx, names, images_test_path+'/ESN_test_ens%i_test%i' %(j,i))
-                        
+                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 0, 1*N_lyap, x, z[32:33], xx, names, images_test_path+'/ESN_validation_ens%i_test%i' %(j,i))
+
                         if len(variables) == 4:
                             plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_test_path+'/active_plumes_test')
 
