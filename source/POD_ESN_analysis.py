@@ -339,6 +339,15 @@ print('norm', norm)
 print('u_mean', u_mean)
 print('norm_std', norm_std)
 
+# find max mins for active array calcs
+_, _, RH, w, b_anom = active_array_truth(data_set[:N_washout+N_train], z)
+RH_min     = RH.min()
+RH_max     = RH.max()
+w_max      = w.max()
+w_min      = w.min()
+b_anom_min = b_anom.min()
+b_anom_max = b_anom.max()
+
 # washout
 U_washout = U[:N_washout].copy()
 # data to be used for training + validation
@@ -475,11 +484,11 @@ print('norm:', norm)
 print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
-test_interval = True
+test_interval = False
 validation_interval = False
 statistics_interval = False
 initiation_interval = False
-initiation_interval2 = False
+initiation_interval2 = True
 
 train_data = data_set[:int(N_washout+N_train)]
 global_stds = [np.std(train_data[..., c]) for c in range(train_data.shape[-1])]
@@ -493,6 +502,7 @@ if validation_interval:
         N_tstart = int(N_washout)                 #where the first test interval starts
     N_intt   = test_len*N_lyap            #length of each test set interval
     N_gap    = int(3*N_lyap)
+    val_indexes = []
 
     # #prediction horizon normalization factor and threshold
     sigma_ph       = np.sqrt(np.mean(np.var(U,axis=1)))
@@ -550,6 +560,8 @@ if validation_interval:
         #run different test intervals
         for i in range(N_test):
             print(N_tstart + i*N_gap)
+            #if j == 0:
+                #val_indexes.append(N_tstart + i*N_gap)
             print('start time of test', time_vals[N_tstart + i*N_gap])
             # data for washout and target in each interval
             U_wash    = U[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap].copy()
@@ -717,7 +729,7 @@ if validation_interval:
         ens_nrmse_ch[j]    = ens_nrmse_ch[j] / N_test
         ens_nrmse_ch_pl[j] = ens_nrmse_ch_pl[j] / N_test
         ens_pl_acc[j]      = ens_pl_acc[j] / N_test
-             
+            
     # Full path for saving the file
     output_file_ALL = 'ESN_validation_metrics_all.json' 
 
@@ -748,6 +760,8 @@ if validation_interval:
 
     with open(output_path_met_ALL, "w") as file:
         json.dump(metrics_ens_ALL, file, indent=4)
+
+    np.save('Ra2e8/POD_ESN/val_indexes.npy', val_indexes)
     print('finished validations')
 
 if test_interval:
@@ -761,6 +775,7 @@ if test_interval:
     N_intt   = 3*N_lyap             #length of each test set interval
     N_gap    = int(1*N_lyap)
     #N_washout_val = 4*N_lyap
+    test_indexes = []
 
     # #prediction horizon normalization factor and threshold
     sigma_ph       = np.sqrt(np.mean(np.var(U,axis=1)))
@@ -818,7 +833,7 @@ if test_interval:
         plot = True
         Plotting = True
         if plot:
-            n_plot = 20
+            n_plot = 40
             plt.rcParams["figure.figsize"] = (15,3*n_plot)
             plt.figure()
             plt.tight_layout()
@@ -826,6 +841,8 @@ if test_interval:
         #run different test intervals
         for i in range(N_test):
             print(N_tstart + i*N_gap)
+            #if j == 0:
+                #test_indexes.append(N_tstart + i*N_gap)
             print('start time of test', time_vals[N_tstart + i*N_gap])
             # data for washout and target in each interval
             U_wash    = U[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap].copy()
@@ -1028,8 +1045,8 @@ if test_interval:
         ens_nrmse_ch_pl[j] = ens_nrmse_ch_pl[j] / N_test 
         ens_pl_acc[j]      = ens_pl_acc[j] / N_test
         ens_nrmse_inPHregion[j] = ens_nrmse_inPHregion[j] / N_test
-    
-             
+
+                
     # Full path for saving the file
     output_file_ALL = 'ESN_test_metrics_all.json' 
 
@@ -1061,6 +1078,8 @@ if test_interval:
 
     with open(output_path_met_ALL, "w") as file:
         json.dump(metrics_ens_ALL, file, indent=4)
+
+    np.save('Ra2e8/POD_ESN/test_indexes.npy', test_indexes)
     print('finished testing')
 
 
@@ -1359,17 +1378,37 @@ if initiation_interval:
 
 if initiation_interval2:
     #### INITIATION ####
-    init_path = output_path + '/initation/test18/'
+    plume_score_threshold = 0.75
+    testval = 0
+    test_nos = [4,7,15,18,26]
+    test_no  = test_nos[testval]
+    init_path = output_path + f"/initation/test{test_no}/"
     if not os.path.exists(init_path):
         os.makedirs(init_path)
         print('made directory')
 
-    test_indexes = [210, 420, 555]
-    N_test   = 10                    #number of intervals in the test set
-    N_tstart = 10800 #int(N_washout + N_train)   #where the first test interval starts
-    N_intt   = 3*N_lyap             #length of each test set interval
+    test_indexes = [10605, 10650, 10770, 10815, 10935]
+    init_indexes = [10605+30,10650+8,10770+8,10815+3,10935+9]
+    test_index = init_indexes[testval] #10935 #10650 #- 2*N_lyap
+    N_test   = 9                    #number of intervals in the test set
+    N_tstart = int(test_index) #int(N_washout + N_train)   #where the first test interval starts
+    N_intt   = 3*N_lyap #3*N_lyap             #length of each test set interval
     N_washout = int(N_washout)
     N_gap = int(0.25*N_lyap)
+
+    fig, ax =plt.subplots(1, figsize=(12,3))
+    Y_t       = U[N_tstart :N_tstart + N_intt].copy()
+    #Y_t       = U[N_tstart + 2*N_lyap :N_tstart + 2*N_lyap + 3*N_intt].copy()
+    _, reconstructed_truth       = inverse_POD(Y_t, pca_)
+    ax.pcolormesh(reconstructed_truth[:,:,32,1].T)
+    fig.savefig(init_path+f"/testinit{test_no}_data.png")
+
+    data_set_Y_t = data_set[N_tstart :N_tstart + N_intt]
+    active_array, mask_expanded, _,_,_ = active_array_truth(data_set_Y_t, z)
+    fig, ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
+    c1 = ax.contourf(active_array[:, :, 32].T, cmap='Reds')
+    fig.colorbar(c1, ax=ax)
+    fig.savefig(init_path+f"/testinit{test_no}_data_active.png")
 
     print('N_tstart:', N_tstart)
     print('N_intt:', N_intt)
@@ -1377,17 +1416,12 @@ if initiation_interval2:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.2
+    threshold_ph = threshold_ph
 
     ensemble_test = 1
 
     ens_pred        = np.zeros((N_intt, dim, ensemble_test))
     ens_PH          = np.zeros((N_test, ensemble_test))
-    ens_PH2         = np.zeros((ensemble_test))
-    ens_nrmse       = np.zeros((ensemble_test))
-    ens_ssim        = np.zeros((ensemble_test))
-    ens_evr         = np.zeros((ensemble_test))
-    ens_nrmse_plume = np.zeros((ensemble_test))
 
     images_test_path = init_path+'/test_images/'
     if not os.path.exists(images_test_path):
@@ -1431,6 +1465,7 @@ if initiation_interval2:
             # data for washout and target in each interval
             U_wash    = U[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap].copy()
             Y_t       = U[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt].copy()
+            data_set_Y_t =  data_set[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt]
 
             #washout for each interval
             Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
@@ -1439,13 +1474,10 @@ if initiation_interval2:
             # Prediction Horizon
             Yh_t,_,Xa2        = closed_loop(N_intt-1, Xa1[-1], Wout, sigma_in, rho)
             print(np.shape(Yh_t))
-            if i == 0:
-                ens_pred[:, :, j] = Yh_t
             Y_err       = np.sqrt(np.mean((Y_t-Yh_t)**2,axis=1))/sigma_ph
             PH[i]       = np.argmax(Y_err>threshold_ph)/N_lyap
             if PH[i] == 0 and Y_err[0]<threshold_ph: PH[i] = N_intt/N_lyap #(in case PH is larger than interval)
             ens_PH[i,j] = PH[i]
-            nrmse_error[i, :] = Y_err
 
             ##### reconstructions ####
             _, reconstructed_truth       = inverse_POD(Y_t, pca_)
@@ -1454,6 +1486,10 @@ if initiation_interval2:
             # rescale
             reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
             reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
+
+            active_array, mask_expanded, _,_,_ = active_array_truth(data_set_Y_t, z)
+            active_array_POD_score, active_array_reconstructed_score, mask_score, mask_reconstructed_score = active_array_calc_prob(reconstructed_truth, reconstructed_predictions, z, RH_min, RH_max, w_min, w_max, b_anom_min, b_anom_max, plume_score_threshold)
+
 
             if plot:
                 #left column has the washout (open-loop) and right column the prediction (closed-loop)
@@ -1476,6 +1512,23 @@ if initiation_interval2:
                         # reconstruction after scaling
                         print('reconstruction and error plot')
                         plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, int(0.5*N_lyap), x, z, xx, names, images_test_path+'/ESN_validation_ens%i_test%i' %(j,i))
+
+
+                        fig, ax = plt.subplots(3, figsize=(12,12), tight_layout=True)
+                        c1 = ax[0].contourf(xx, x, active_array[:, :, 32].T, cmap='Reds')
+                        fig.colorbar(c1, ax=ax[0])
+                        ax[0].set_title('True Active Points')
+                        c2 = ax[1].contourf(xx, x, active_array_POD_score[:,:, 32].T, cmap='Reds')
+                        fig.colorbar(c2, ax=ax[1])
+                        ax[1].set_title('POD Reconstruction Scored Points')
+                        c3 = ax[2].contourf(xx, x, active_array_reconstructed_score[:,:, 32].T, cmap='Reds')
+                        fig.colorbar(c3, ax=ax[2])
+                        ax[2].set_title('ESN Reconstruction Scored Points')
+                        for v in range(3):
+                            ax[v].set_xlabel('time')
+                            ax[v].set_ylabel('x')
+                        fig.savefig(output_path+f"/active_plumes_truevscore{plume_score_threshold}_ens{j}_test{i}.png")
+                        plt.close()
 
                         #plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_test_path+'/active_plumes_test')
                         

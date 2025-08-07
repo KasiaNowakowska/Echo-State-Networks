@@ -504,13 +504,34 @@ def find_prediction_horizon(nrmse, threshold):
             return t
     return T  # if no exceedance, return full horizon
 
+def active_array_truth(original_data, z):
+    beta = 1.201
+    alpha = 3.0
+    T = original_data[:,:,:,3] - beta*z
+    q_s = np.exp(alpha*T)
+    rh = original_data[:,:,:,0]/q_s
+    mean_b = np.mean(original_data[:,:,:,3], axis=1, keepdims=True)
+    b_anom = original_data[:,:,:,3] - mean_b
+    w = original_data[:,:,:,1]
+    
+    mask = (rh[:, :, :] >= 1) & (w[:, :, :] > 0) & (b_anom[:, :, :] > 0)
+
+    active_array = np.zeros((original_data.shape[0], original_data.shape[1], len(z)))
+    active_array[mask] = 1
+    
+    # Expand the mask to cover all features (optional, depending on use case)
+    mask_expanded       =  np.repeat(mask[:, :, :, np.newaxis], 4, axis=-1)  # Shape: (256, 64, 1)
+    
+    return active_array, mask_expanded, rh, w, b_anom
+
+
 def active_array_calc(original_data, reconstructed_data, z):
     beta = 1.201
     alpha = 3.0
     T = original_data[:,:,:,3] - beta*z
     T_reconstructed = reconstructed_data[:,:,:,3] - beta*z
     q_s = np.exp(alpha*T)
-    q_s_reconstructed = np.exp(alpha*T)
+    q_s_reconstructed = np.exp(alpha*T_reconstructed)
     rh = original_data[:,:,:,0]/q_s
     rh_reconstructed = reconstructed_data[:,:,:,0]/q_s_reconstructed
     mean_b = np.mean(original_data[:,:,:,3], axis=1, keepdims=True)
@@ -532,6 +553,82 @@ def active_array_calc(original_data, reconstructed_data, z):
     mask_expanded       =  np.repeat(mask[:, :, :, np.newaxis], 4, axis=-1)  # Shape: (256, 64, 1)
     mask_expanded_recon =  np.repeat(mask_reconstructed[:, :, :, np.newaxis], 4, axis=-1) # Shape: (256, 64, 1)
     
+    return active_array, active_array_reconstructed, mask_expanded, mask_expanded_recon
+
+def active_array_calc_prob(original_data, reconstructed_data, z, rh_min, rh_max, w_min, w_max, b_anom_min, b_anom_max, plume_score_threshold):
+    beta = 1.201
+    alpha = 3.0
+    T = original_data[:,:,:,3] - beta*z
+    T_reconstructed = reconstructed_data[:,:,:,3] - beta*z
+    q_s = np.exp(alpha*T)
+    q_s_reconstructed = np.exp(alpha*T_reconstructed)
+    rh = original_data[:,:,:,0]/q_s
+    rh_reconstructed = reconstructed_data[:,:,:,0]/q_s_reconstructed
+    mean_b = np.mean(original_data[:,:,:,3], axis=1, keepdims=True)
+    mean_b_reconstructed= np.mean(reconstructed_data[:,:,:,3], axis=1, keepdims=True)
+    b_anom = original_data[:,:,:,3] - mean_b
+    b_anom_reconstructed = reconstructed_data[:,:,:,3] - mean_b_reconstructed
+    w = original_data[:,:,:,1]
+    w_reconstructed = reconstructed_data[:,:,:,1]
+
+    del T, T_reconstructed
+    
+    RH_scaled = (rh - rh_min)/(rh_max - rh_min)
+    w_scaled  = (w - w_min)/(w_max - w_min)
+    b_scaled  = (b_anom - b_anom_min)/(b_anom_max - b_anom_min)
+
+    RH_scaled_reconstructed = (rh_reconstructed - rh_min)/(rh_max - rh_min)
+    w_scaled_reconstructed  = (w_reconstructed - w_min)/(w_max - w_min)
+    b_scaled_reconstructed  = (b_anom_reconstructed - b_anom_min)/(b_anom_max - b_anom_min)
+
+    RH_threshold = 0.9
+    RH_threshold_scaled = (RH_threshold - rh_min)/(rh_max - rh_min)
+    print(f"RH min: {rh_min}, max: {rh_max}")
+    print(f"RH threshold scaled: {RH_threshold_scaled}")
+
+    RH_clip = np.clip(RH_scaled - RH_threshold_scaled, 0, None)
+    w_clip = np.clip(w_scaled, 0, None)  # set negative w to 0
+    b_clip = np.clip(b_scaled, 0, None)  # set negative b to 0
+
+    RH_clip_reconstructed = np.clip(RH_scaled_reconstructed - RH_threshold_scaled, 0, None)
+    w_clip_reconstructed = np.clip(w_scaled_reconstructed, 0, None)  # set negative w to 0
+    b_clip_reconstructed = np.clip(b_scaled_reconstructed, 0, None)  # set negative b to 0
+
+    plume_score = RH_clip + w_clip + b_clip
+    plume_score_reconstructed = RH_clip_reconstructed + w_clip_reconstructed + b_clip_reconstructed
+
+    mask = plume_score > plume_score_threshold
+    mask_reconstructed = plume_score_reconstructed > plume_score_threshold #0.6 way too much masked
+
+    active_array = np.zeros((original_data.shape[0], original_data.shape[1], len(z)))
+    active_array[mask] = 1
+    active_array_reconstructed = np.zeros((original_data.shape[0], original_data.shape[1], len(z)))
+    active_array_reconstructed[mask_reconstructed] = 1
+    
+    # Expand the mask to cover all features (optional, depending on use case)
+    mask_expanded       =  np.repeat(mask[:, :, :, np.newaxis], 4, axis=-1)  # Shape: (256, 64, 1)
+    mask_expanded_recon =  np.repeat(mask_reconstructed[:, :, :, np.newaxis], 4, axis=-1) # Shape: (256, 64, 1)
+    
+    print(f"Plume score min/max original: {plume_score.min()}, {plume_score.max()}")
+    print(f"Plume score min/max reconstructed: {plume_score_reconstructed.min()}, {plume_score_reconstructed.max()}")
+
+    # Flatten the plume score array (use the original or reconstructed version)
+    flat_scores = plume_score_reconstructed.flatten()
+
+    # Sort the values
+    sorted_scores = np.sort(flat_scores)
+
+    # Compute cumulative count
+    cumulative = np.arange(1, len(sorted_scores)+1) / len(sorted_scores)
+
+    # Plot
+    fig, ax =plt.subplots(1, figsize=(8,6), tight_layout=True)
+    ax.plot(sorted_scores, cumulative, label='Cumulative Distribution')
+    ax.set_xlabel('Plume Score')
+    ax.set_ylabel('Cumulative Fraction')
+    ax.grid(True)
+    fig.savefig('Ra2e8/POD/Thesis/scaler/snapshots11200/modes64/plume_score_dist.png')
+
     return active_array, active_array_reconstructed, mask_expanded, mask_expanded_recon
 
 def ss_transform(data, scaler):
