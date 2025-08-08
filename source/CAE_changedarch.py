@@ -141,8 +141,29 @@ def load_data_set_RB(file, names, snapshots):
 
     return data, time_vals
 
+def load_data_set_RB_act(file, names, snapshots):
+    with h5py.File(file, 'r') as hf:
+        print(hf.keys())
+        time_vals = np.array(hf['total_time_all'][:snapshots])
+        
+        data = np.zeros((len(time_vals), len(x), len(z), len(names)))
+        
+        index=0
+        for name in names:
+            print(name)
+            print(hf[name])
+            Var = np.array(hf[name])
+            print(np.shape(Var))
+            if index == 4:
+                data[:,:,:,index] = Var[:snapshots,:,:]
+            else:
+                data[:,:,:,index] = Var[:snapshots,:,0,:]
+            index+=1
+
+    return data, time_vals
+
 #### LOAD DATA AND POD ####
-Data = 'RB'
+Data = 'RBplusActive'
 if Data == 'ToyData':
     name = names = variables = ['combined']
     n_components = 3
@@ -160,6 +181,16 @@ elif Data == 'RB':
     z = np.load(input_path+'/z.npy')
     snapshots_load = 16000
     data_set, time_vals = load_data_set_RB(input_path+'/data_4var_5000_48000.h5', variables, snapshots_load)
+    print('shape of dataset', np.shape(data_set))
+    dt = 2
+
+elif Data =='RBplusActive':
+    variables = ['q_all', 'w_all', 'u_all', 'b_all', 'active_array']
+    names = ['q', 'w', 'u', 'b', 'active']
+    x = np.load(input_path+'/x.npy')
+    z = np.load(input_path+'/z.npy')
+    snapshots_load = 16000
+    data_set, time_vals = load_data_set_RB_act(input_path+'/data_4var_5000_48000_act.h5', variables, snapshots_load)
     print('shape of dataset', np.shape(data_set))
     dt = 2
 

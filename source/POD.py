@@ -25,6 +25,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
 import json
+import gc
 from Eval_Functions import *
 from Plotting_Functions import *
 from POD_functions import *
@@ -294,46 +295,47 @@ if POD_type == 'together':
             plt.close()
 
             thresholds = [0.6, 0.65, 0.68, 0.7, 0.75, 0.8]
-            for Q in range(6):
-                plume_score_threshold = thresholds[Q]
-                print(f"plume threshold = {plume_score_threshold}")
-                active_array_score, active_array_reconstructed_score, mask_score, mask_reconstructed_score = active_array_calc_prob(data_set[:1000], data_reconstructed[:1000], z, RH_min, RH_max, w_min, w_max, b_anom_min, b_anom_max, plume_score_threshold)
-                fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
-                c1 = ax[0].contourf(time_vals[:1000], x, active_array_score[:,:, 32].T, cmap='Reds')
-                fig.colorbar(c1, ax=ax[0])
-                ax[0].set_title('true')
-                c2 = ax[1].contourf(time_vals[:1000], x, active_array_reconstructed_score[:,:, 32].T, cmap='Reds')
-                fig.colorbar(c1, ax=ax[1])
-                ax[1].set_title('reconstruction')
-                for v in range(2):
-                    ax[v].set_xlabel('time')
-                    ax[v].set_ylabel('x')
-                fig.savefig(output_path+f"/active_plumes_score{plume_score_threshold}_{c_names[index]}.png")
-                plt.close()
+            chunk_size = 2500
+            time_steps = 5000 #active_array.shape[0]
 
-                fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
-                c1 = ax[0].contourf(time_vals[:1000], x, active_array[:1000,:, 32].T, cmap='Reds')
-                fig.colorbar(c1, ax=ax[0])
-                ax[0].set_title('True Active Points')
-                c2 = ax[1].contourf(time_vals[:1000], x, active_array_reconstructed_score[:,:, 32].T, cmap='Reds')
-                fig.colorbar(c1, ax=ax[1])
-                ax[1].set_title('Reconstruction Scored Points')
-                for v in range(2):
-                    ax[v].set_xlabel('time')
-                    ax[v].set_ylabel('x')
-                fig.savefig(output_path+f"/active_plumes_truevscore{plume_score_threshold}_{c_names[index]}.png")
-                plt.close()
+            for plume_score_threshold in thresholds:
+                print(f"Processing plume_score_threshold = {plume_score_threshold}")
 
-                flatten_true_active_array        = active_array[:1000].flatten().astype(int)
-                flatten_recon_active_array_score = active_array_reconstructed_score.flatten().astype(int)
+                precision_vals = []
+                recall_vals = []
+                f1_vals = []
+                accuracy_vals = []
 
-                precision = precision_score(flatten_true_active_array, flatten_recon_active_array_score)
-                recall    = recall_score(flatten_true_active_array, flatten_recon_active_array_score)
-                f1        = f1_score(flatten_true_active_array, flatten_recon_active_array_score)
-                acc_sco   = accuracy_score(flatten_true_active_array, flatten_recon_active_array_score)
+                for start in range(0, time_steps, chunk_size):
+                    end = min(start + chunk_size, time_steps)
 
-                print(f"for threshold score: {plume_score_threshold}; precision: {precision}, recall: {recall}, f1: {f1}, accuracy: {acc_sco}")
+                    data_chunk = data_set[start:end, :, :, :]
+                    reconstructed_chunk = data_reconstructed[start:end, :, :, :]
 
+                    # Calculate active arrays for this chunk
+                    active_array_score, active_array_reconstructed_score, mask_score, mask_reconstructed_score = active_array_calc_prob(
+                        data_chunk, reconstructed_chunk, z, RH_min, RH_max, w_min, w_max, b_anom_min, b_anom_max, plume_score_threshold)
+
+                    # Flatten the relevant chunks of true and reconstructed active arrays
+                    flatten_true = active_array[start:end].flatten().astype(int)
+                    flatten_recon = active_array_reconstructed_score.flatten().astype(int)
+
+                    # Compute metrics for this chunk
+                    precision_vals.append(precision_score(flatten_true, flatten_recon))
+                    recall_vals.append(recall_score(flatten_true, flatten_recon))
+                    f1_vals.append(f1_score(flatten_true, flatten_recon))
+                    accuracy_vals.append(accuracy_score(flatten_true, flatten_recon))
+
+                    # Free memory
+                    del active_array_score, active_array_reconstructed_score, mask_score, mask_reconstructed_score
+                    gc.collect()
+
+                # After all chunks for this threshold, average metrics
+                print(f"Threshold: {plume_score_threshold:.2f} | "
+                    f"Precision: {np.mean(precision_vals):.3f} | "
+                    f"Recall: {np.mean(recall_vals):.3f} | "
+                    f"F1: {np.mean(f1_vals):.3f} | "
+                    f"Accuracy: {np.mean(accuracy_vals):.3f}\n")
         else:
             nrmse_plume = np.inf
             nrmse_sep_plume = np.inf
