@@ -583,11 +583,13 @@ def active_array_calc_prob(original_data, reconstructed_data, z, rh_min, rh_max,
 
     RH_threshold = 0.9
     RH_threshold_scaled = (RH_threshold - rh_min)/(rh_max - rh_min)
+    w_threshold = -0.001
+    w_threshold_scaled = (w_threshold - w_min) / (w_max - w_min)
     print(f"RH min: {rh_min}, max: {rh_max}")
     print(f"RH threshold scaled: {RH_threshold_scaled}")
 
     RH_clip = np.clip(RH_scaled - RH_threshold_scaled, 0, None)
-    w_clip = np.clip(w_scaled, 0, None)  # set negative w to 0
+    w_clip = np.clip(w_scaled - w_threshold_scaled, 0, None) #w_clip = np.clip(w_scaled, 0, None)  # set negative w to 0
     b_clip = np.clip(b_scaled, 0, None)  # set negative b to 0
 
     RH_clip_reconstructed = np.clip(RH_scaled_reconstructed - RH_threshold_scaled, 0, None)

@@ -738,6 +738,9 @@ for i in range(ensemble):
             for idx, v in zip(indices, values):
                 Win[j, idx] = v
         Win = Win.tocsr()
+    elif Win_method == 'dense':
+        Win = np.random.uniform(-1, 1, size=(N_units, dim + 1))
+
 
     W = csr_matrix( #on average only connectivity elements different from zero
         rnd.uniform(-1, 1, (N_units, N_units)) * (rnd.rand(N_units, N_units) < (1-sparseness)))
@@ -1115,6 +1118,8 @@ if validation_interval:
     output_file_ALL = 'ESN_validation_metrics_all.json' 
 
     output_path_met_ALL = os.path.join(output_path, output_file_ALL)
+
+    np.save(output_path+'/ens_PH_all_validation.npy', ens_PH)
 
     flatten_PH       = ens_PH.flatten()
     flatten_PH_modes = ens_PH_modes.flatten()

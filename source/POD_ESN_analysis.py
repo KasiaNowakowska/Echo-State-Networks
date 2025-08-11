@@ -485,11 +485,11 @@ print('norm:', norm)
 print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
-test_interval = False
+test_interval = True
 validation_interval = False
 statistics_interval = False
 initiation_interval = False
-initiation_interval2 = True
+initiation_interval2 = False
 
 train_data = data_set[:int(N_washout+N_train)]
 global_stds = [np.std(train_data[..., c]) for c in range(train_data.shape[-1])]
@@ -1053,6 +1053,8 @@ if test_interval:
 
     output_path_met_ALL = os.path.join(output_path, output_file_ALL)
 
+    np.save(output_path+'/ens_PH_all.npy', ens_PH)
+
     flatten_PH       = ens_PH.flatten()
     flatten_PH_modes = ens_PH_modes.flatten()
     print('flat PH', flatten_PH)
@@ -1379,7 +1381,7 @@ if initiation_interval:
 
 if initiation_interval2:
     #### INITIATION ####
-    plume_score_threshold = 0.70
+    plume_score_threshold = 0.75
     testval = 0
     test_nos = [4,7,15,18,26]
     for tindex, tval in enumerate(test_nos):
@@ -1589,7 +1591,7 @@ if initiation_interval2:
             ax.set_xlabel(x_label, fontsize=16)
             ax.set_ylabel(r"$\overline{\mathrm{PH}}$", fontsize=16)
             ax.tick_params(labelsize=12)
-            ax.set_ylim(0,3)
+            ax.set_ylim(0,1)
 
         fig, axes = plt.subplots(2,2, figsize=(12,8), tight_layout=True)
         axes = axes.flatten()

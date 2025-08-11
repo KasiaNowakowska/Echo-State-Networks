@@ -326,6 +326,20 @@ if POD_type == 'together':
                     f1_vals.append(f1_score(flatten_true, flatten_recon))
                     accuracy_vals.append(accuracy_score(flatten_true, flatten_recon))
 
+                    if start == 0:
+                        fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
+                        c1 = ax[0].contourf(time_vals[:1000], x, active_array[:1000,:, 32].T, cmap='Reds')
+                        fig.colorbar(c1, ax=ax[0])
+                        ax[0].set_title('True Active Points')
+                        c2 = ax[1].contourf(time_vals[:1000], x, active_array_reconstructed_score[:1000,:, 32].T, cmap='Reds')
+                        fig.colorbar(c1, ax=ax[1])
+                        ax[1].set_title('Reconstruction Scored Points')
+                        for v in range(2):
+                            ax[v].set_xlabel('time')
+                            ax[v].set_ylabel('x')
+                        fig.savefig(output_path+f"/active_plumes_truevscorewchange{plume_score_threshold}_{c_names[index]}.png")
+                        plt.close()
+
                     # Free memory
                     del active_array_score, active_array_reconstructed_score, mask_score, mask_reconstructed_score
                     gc.collect()
