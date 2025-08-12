@@ -294,9 +294,43 @@ if POD_type == 'together':
             fig.savefig(output_path+f"/active_plumes_1000_{c_names[index]}.png")
             plt.close()
 
-            thresholds = [0.6, 0.65, 0.68, 0.7, 0.75, 0.8]
+            # Extract values in POD in true plume regions
+            _, _, RH_recon, w_recon, b_anom_recon = active_array_truth(data_reconstructed, z)
+            RH_in_true_plumes     = RH_recon[mask_original]
+            w_in_true_plumes      = w_recon[mask_original]
+            b_anom_in_true_plumes = b_anom_recon[mask_original]
+
+            # Print quick stats
+            def describe(name, arr):
+                print(f"{name} in true plume regions:")
+                print(f"  mean: {np.mean(arr):.3f}")
+                print(f"  median: {np.median(arr):.3f}")
+                print(f"  min/max: {np.min(arr):.3f} / {np.max(arr):.3f}")
+                print(f"  25th/75th pct: {np.percentile(arr, 25):.3f} / {np.percentile(arr, 75):.3f}")
+                print()
+
+            describe("RH", RH_in_true_plumes)
+            describe("w", w_in_true_plumes)
+            describe("b_anom", b_anom_in_true_plumes)
+
+            fig, ax = plt.subplots(1, 3, figsize=(12,3), tight_layout=True)
+            ax[0].hist(RH_in_true_plumes, bins=50)
+            ax[0].set_xlabel('RH')
+            ax[1].hist(w_in_true_plumes, bins=50)
+            ax[1].set_xlabel('w')
+            ax[2].hist(b_anom_in_true_plumes, bins=50)
+            ax[2].set_xlabel("b'")
+            fig.savefig(output_path+'/stats.png')
+
+            #thresholds = [0.6, 0.65, 0.68, 0.7, 0.75, 0.8]
+            thresholds = [0.2,0.3,0.4]
             chunk_size = 2500
             time_steps = 5000 #active_array.shape[0]
+
+            precision_all = []
+            recall_all    = []
+            f1_all        = []
+            accuracy_all  = []
 
             for plume_score_threshold in thresholds:
                 print(f"Processing plume_score_threshold = {plume_score_threshold}")
@@ -337,7 +371,7 @@ if POD_type == 'together':
                         for v in range(2):
                             ax[v].set_xlabel('time')
                             ax[v].set_ylabel('x')
-                        fig.savefig(output_path+f"/active_plumes_truevscorewchange{plume_score_threshold}_{c_names[index]}.png")
+                        fig.savefig(output_path+f"/active_plumes_true_choicevals{plume_score_threshold}_{c_names[index]}.png")
                         plt.close()
 
                     # Free memory
@@ -350,276 +384,296 @@ if POD_type == 'together':
                     f"Recall: {np.mean(recall_vals):.3f} | "
                     f"F1: {np.mean(f1_vals):.3f} | "
                     f"Accuracy: {np.mean(accuracy_vals):.3f}\n")
+                
+                precision_all.append(np.mean(precision_vals))
+                recall_all.append(np.mean(recall_vals))
+                f1_all.append(np.mean(f1_vals))
+                accuracy_all.append(np.mean(accuracy_vals))
+
+            fig, ax = plt.subplots(1,4,figsize=(12,3), tight_layout=True)
+            ax[0].plot(thresholds, precision_all, marker='x')
+            ax[0].set_ylabel('Precision')
+            ax[1].plot(thresholds, recall_all, marker='x')
+            ax[1].set_ylabel('Recall')
+            ax[2].plot(thresholds, f1_all, marker='x')
+            ax[2].set_ylabel('F1')
+            ax[3].plot(thresholds, accuracy_all,  marker='x')
+            ax[3].set_ylabel('Accuracy')
+            for v in range(4):
+                ax[v].set_xlabel('Threshold')
+                ax[v].grid()
+            fig.savefig(output_path+'/metric_scores_usingminms.png')
+
         else:
             nrmse_plume = np.inf
             nrmse_sep_plume = np.inf
 
-        ### plt part of domain ###
-        if reduce_data_set:
-             plot_reconstruction_and_error(data_set[:500], data_reconstructed[:500], 32, 100, x, z, time_vals[:500], names, output_path+c_names[index]+'_500')
-        else:
-            plot_reconstruction_and_error(data_set[:500], data_reconstructed[:500], 32, 75, x, z, time_vals[:500], names, output_path+c_names[index]+'_500')
-        np.save(output_path+'/POD_reconstructed.npy', data_reconstructed[:500])
-        np.save(output_path+'/TrueData.npy', data_set[:500])
+#         ### plt part of domain ###
+#         if reduce_data_set:
+#              plot_reconstruction_and_error(data_set[:500], data_reconstructed[:500], 32, 100, x, z, time_vals[:500], names, output_path+c_names[index]+'_500')
+#         else:
+#             plot_reconstruction_and_error(data_set[:500], data_reconstructed[:500], 32, 75, x, z, time_vals[:500], names, output_path+c_names[index]+'_500')
+#         np.save(output_path+'/POD_reconstructed.npy', data_reconstructed[:500])
+#         np.save(output_path+'/TrueData.npy', data_set[:500])
 
-        print('NRMSE', nrmse)
-        print('MSE', mse)
-        print('EVR_recon', evr)
-        print('SSIM', SSIM)
-        print('NRMSE plume', nrmse_plume)
-        print('NRMSE per channel', nrmse_sep)
+#         print('NRMSE', nrmse)
+#         print('MSE', mse)
+#         print('EVR_recon', evr)
+#         print('SSIM', SSIM)
+#         print('NRMSE plume', nrmse_plume)
+#         print('NRMSE per channel', nrmse_sep)
 
-        # Full path for saving the file
-        output_file = c_names[index] + '_metrics.json' 
+#         # Full path for saving the file
+#         output_file = c_names[index] + '_metrics.json' 
 
-        output_path_met = os.path.join(output_path, output_file)
+#         output_path_met = os.path.join(output_path, output_file)
 
-        metrics = {
-        "no. modes": n_modes,
-        "EVR": evr,
-        "MSE": mse,
-        "NRMSE": nrmse,
-        "SSIM": SSIM,
-        "cumEV from POD": cev,
-        "NRMSE plume": nrmse_plume,
-        "NRMSE per channel": nrmse_sep,
-        "NRMSE plume per channel": nrmse_sep_plume,
-        }
+#         metrics = {
+#         "no. modes": n_modes,
+#         "EVR": evr,
+#         "MSE": mse,
+#         "NRMSE": nrmse,
+#         "SSIM": SSIM,
+#         "cumEV from POD": cev,
+#         "NRMSE plume": nrmse_plume,
+#         "NRMSE per channel": nrmse_sep,
+#         "NRMSE plume per channel": nrmse_sep_plume,
+#         }
 
-        with open(output_path_met, "w") as file:
-            json.dump(metrics, file, indent=4)
+#         with open(output_path_met, "w") as file:
+#             json.dump(metrics, file, indent=4)
 
-        nrmse_list.append(nrmse)
-        ssim_list.append(SSIM)
-        evr_list.append(evr)
-        cumEV_list.append(cev)
-        nrmse_plume_list.append(nrmse_plume)
-        nrmse_sep_list.append(nrmse_sep)
-        nrmse_sep_plume_list.append(nrmse_sep_plume)
+#         nrmse_list.append(nrmse)
+#         ssim_list.append(SSIM)
+#         evr_list.append(evr)
+#         cumEV_list.append(cev)
+#         nrmse_plume_list.append(nrmse_plume)
+#         nrmse_sep_list.append(nrmse_sep)
+#         nrmse_sep_plume_list.append(nrmse_sep_plume)
 
-        if projection:
-            proj_path = output_path+f"/proj{n_modes}/"
-            print(proj_path)
-            if not os.path.exists(proj_path):
-                os.makedirs(proj_path)
-                print('made directory')
+#         if projection:
+#             proj_path = output_path+f"/proj{n_modes}/"
+#             print(proj_path)
+#             if not os.path.exists(proj_path):
+#                 os.makedirs(proj_path)
+#                 print('made directory')
 
 
-            print('starting projection')
-            data_scaled_proj           = ss_transform(data_proj, scaler)
-            data_reduced_proj          = transform_POD(data_scaled_proj, pca_)
-            _, data_reconstructed_proj = inverse_POD(data_reduced_proj, x, z, variables, pca_)
-            if scaling == 'SS':
-                data_reconstructed_proj     = ss_inverse_transform(data_reconstructed_proj, scaler)
+#             print('starting projection')
+#             data_scaled_proj           = ss_transform(data_proj, scaler)
+#             data_reduced_proj          = transform_POD(data_scaled_proj, pca_)
+#             _, data_reconstructed_proj = inverse_POD(data_reduced_proj, x, z, variables, pca_)
+#             if scaling == 'SS':
+#                 data_reconstructed_proj     = ss_inverse_transform(data_reconstructed_proj, scaler)
 
-            plot_reconstruction_and_error(data_proj, data_reconstructed_proj, 32, 20, x, z, time_vals_proj, names, proj_path+'proj_'+c_names[index])
-            nrmse_proj     = NRMSE(data_proj, data_reconstructed_proj)
-            mse_proj       = MSE(data_proj, data_reconstructed_proj)
-            evr_proj       = EVR_recon(data_proj, data_reconstructed_proj)
-            SSIM_proj      = compute_ssim_for_4d(data_proj, data_reconstructed_proj)
-            nrmse_sep_proj = NRMSE_per_channel(data_proj, data_reconstructed_proj)
+#             plot_reconstruction_and_error(data_proj, data_reconstructed_proj, 32, 20, x, z, time_vals_proj, names, proj_path+'proj_'+c_names[index])
+#             nrmse_proj     = NRMSE(data_proj, data_reconstructed_proj)
+#             mse_proj       = MSE(data_proj, data_reconstructed_proj)
+#             evr_proj       = EVR_recon(data_proj, data_reconstructed_proj)
+#             SSIM_proj      = compute_ssim_for_4d(data_proj, data_reconstructed_proj)
+#             nrmse_sep_proj = NRMSE_per_channel(data_proj, data_reconstructed_proj)
 
-            if len(variables) == 4:
-                active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(data_proj, data_reconstructed_proj, z)
-                print(np.shape(active_array))
-                print(np.shape(mask))
-                nrmse_plume_proj             = NRMSE(data_proj[:,:,:,:][mask], data_reconstructed_proj[:,:,:,:][mask])
+#             if len(variables) == 4:
+#                 active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(data_proj, data_reconstructed_proj, z)
+#                 print(np.shape(active_array))
+#                 print(np.shape(mask))
+#                 nrmse_plume_proj             = NRMSE(data_proj[:,:,:,:][mask], data_reconstructed_proj[:,:,:,:][mask])
                 
-                mask_original          = mask[..., 0]
-                nrmse_sep_plume_proj   = NRMSE_per_channel_masked(data_proj, data_reconstructed_proj, mask_original, global_stds) 
+#                 mask_original          = mask[..., 0]
+#                 nrmse_sep_plume_proj   = NRMSE_per_channel_masked(data_proj, data_reconstructed_proj, mask_original, global_stds) 
 
 
-                fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
-                c1 = ax[0].contourf(time_vals_proj, x, active_array[:,:, 32].T, cmap='Reds')
-                fig.colorbar(c1, ax=ax[0])
-                ax[0].set_title('true')
-                c2 = ax[1].contourf(time_vals_proj, x, active_array_reconstructed[:,:, 32].T, cmap='Reds')
-                fig.colorbar(c1, ax=ax[1])
-                ax[1].set_title('reconstruction')
-                for v in range(2):
-                    ax[v].set_xlabel('time')
-                    ax[v].set_ylabel('x')
-                fig.savefig(proj_path+f"/proj_active_plumes_{c_names[index]}.png")
-                plt.close()
-            else:
-                nrmse_plume_proj = np.inf
-                rmse_sep_plume_proj = np.inf
+#                 fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
+#                 c1 = ax[0].contourf(time_vals_proj, x, active_array[:,:, 32].T, cmap='Reds')
+#                 fig.colorbar(c1, ax=ax[0])
+#                 ax[0].set_title('true')
+#                 c2 = ax[1].contourf(time_vals_proj, x, active_array_reconstructed[:,:, 32].T, cmap='Reds')
+#                 fig.colorbar(c1, ax=ax[1])
+#                 ax[1].set_title('reconstruction')
+#                 for v in range(2):
+#                     ax[v].set_xlabel('time')
+#                     ax[v].set_ylabel('x')
+#                 fig.savefig(proj_path+f"/proj_active_plumes_{c_names[index]}.png")
+#                 plt.close()
+#             else:
+#                 nrmse_plume_proj = np.inf
+#                 rmse_sep_plume_proj = np.inf
 
-            # Full path for saving the file
-            output_file = c_names[index] + '_proj_metrics.json' 
+#             # Full path for saving the file
+#             output_file = c_names[index] + '_proj_metrics.json' 
 
-            output_path_met = os.path.join(proj_path, output_file)
+#             output_path_met = os.path.join(proj_path, output_file)
 
-            metrics = {
-            "no. modes": n_modes,
-            "start time of projection": time_vals_proj[0], 
-            "end time of projection": time_vals_proj[1],
-            "EVR": evr_proj,
-            "MSE": mse_proj,
-            "NRMSE": nrmse_proj,
-            "SSIM": SSIM_proj,
-            "NRMSE plume": nrmse_plume_proj,
-            "NRMSE per channel": nrmse_sep_proj,
-            "NRMSE plume per channel": nrmse_sep_plume_proj,
-            }
+#             metrics = {
+#             "no. modes": n_modes,
+#             "start time of projection": time_vals_proj[0], 
+#             "end time of projection": time_vals_proj[1],
+#             "EVR": evr_proj,
+#             "MSE": mse_proj,
+#             "NRMSE": nrmse_proj,
+#             "SSIM": SSIM_proj,
+#             "NRMSE plume": nrmse_plume_proj,
+#             "NRMSE per channel": nrmse_sep_proj,
+#             "NRMSE plume per channel": nrmse_sep_plume_proj,
+#             }
 
-            with open(output_path_met, "w") as file:
-                json.dump(metrics, file, indent=4)
+#             with open(output_path_met, "w") as file:
+#                 json.dump(metrics, file, indent=4)
 
-            pnrmse_list.append(nrmse_proj)
-            pssim_list.append(SSIM_proj)
-            pevr_list.append(evr_proj)
-            pnrmse_plume_list.append(nrmse_plume_proj)
-            pnrmse_sep_list.append(nrmse_sep_proj)
-            pnrmse_sep_plume_list.append(nrmse_sep_plume_proj)
+#             pnrmse_list.append(nrmse_proj)
+#             pssim_list.append(SSIM_proj)
+#             pevr_list.append(evr_proj)
+#             pnrmse_plume_list.append(nrmse_plume_proj)
+#             pnrmse_sep_list.append(nrmse_sep_proj)
+#             pnrmse_sep_plume_list.append(nrmse_sep_plume_proj)
 
-        index +=1
+#         index +=1
 
-if POD_type == 'seperate':
-    for n_modes in n_modes_list:
+# if POD_type == 'seperate':
+#     for n_modes in n_modes_list:
     
-        output_path = output_path+f"/modes{n_modes}/"
-        print(output_path)
-        if not os.path.exists(output_path):
-            os.makedirs(output_path)
-            print('made directory')
+#         output_path = output_path+f"/modes{n_modes}/"
+#         print(output_path)
+#         if not os.path.exists(output_path):
+#             os.makedirs(output_path)
+#             print('made directory')
 
-        recon_per_variable = []
-        data_true_per_variable = []
+#         recon_per_variable = []
+#         data_true_per_variable = []
 
-        for V in range(len(variables)):
-            data_scaled_sep = data_scaled[:, :, :, V:V+1]
-            print('data scaled seperate shape', np.shape(data_scaled_sep))
+#         for V in range(len(variables)):
+#             data_scaled_sep = data_scaled[:, :, :, V:V+1]
+#             print('data scaled seperate shape', np.shape(data_scaled_sep))
 
-            data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_, cev = POD(data_scaled_sep, n_modes, x, z, variables, output_path+c_names[index], Plotting=True)
-            print('shape of data_reconstructed from POD', np.shape(data_reconstructed))
-            #plot_reconstruction(data_set, data_reconstructed, 32, 20, 'Ra2e7')
-            recon_per_variable.append(data_reconstructed)
+#             data_reduced, data_reconstructed_reshaped, data_reconstructed, pca_, cev = POD(data_scaled_sep, n_modes, x, z, variables, output_path+c_names[index], Plotting=True)
+#             print('shape of data_reconstructed from POD', np.shape(data_reconstructed))
+#             #plot_reconstruction(data_set, data_reconstructed, 32, 20, 'Ra2e7')
+#             recon_per_variable.append(data_reconstructed)
             
             
-        data_reconstructed = np.concatenate(recon_per_variable, axis=-1)
-        print('shape of data reconstructed after stiching varibales together', np.shape(data_reconstructed))
-        if scaling == 'SS':
-            print('applying inverse scaling')
-            data_reconstructed = ss_inverse_transform(data_reconstructed, scaler)
+#         data_reconstructed = np.concatenate(recon_per_variable, axis=-1)
+#         print('shape of data reconstructed after stiching varibales together', np.shape(data_reconstructed))
+#         if scaling == 'SS':
+#             print('applying inverse scaling')
+#             data_reconstructed = ss_inverse_transform(data_reconstructed, scaler)
         
-        plot_reconstruction_and_error(data_set, data_reconstructed, 32, 20, x, z, time_vals, names, output_path+c_names[index])
-        nrmse = NRMSE(data_set, data_reconstructed)
-        mse   = MSE(data_set, data_reconstructed)
-        evr   = EVR_recon(data_set, data_reconstructed)
-        SSIM  = compute_ssim_for_4d(data_set, data_reconstructed)
-        nrmse_sep = NRMSE_per_channel(data_set, data_reconstructed)
+#         plot_reconstruction_and_error(data_set, data_reconstructed, 32, 20, x, z, time_vals, names, output_path+c_names[index])
+#         nrmse = NRMSE(data_set, data_reconstructed)
+#         mse   = MSE(data_set, data_reconstructed)
+#         evr   = EVR_recon(data_set, data_reconstructed)
+#         SSIM  = compute_ssim_for_4d(data_set, data_reconstructed)
+#         nrmse_sep = NRMSE_per_channel(data_set, data_reconstructed)
 
-        if len(variables) == 4:
-            active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(data_set, data_reconstructed, z)
-            print(np.shape(active_array))
-            print(np.shape(mask))
-            nrmse_plume             = NRMSE(data_set[:,:,:,:][mask], data_reconstructed[:,:,:,:][mask])
+#         if len(variables) == 4:
+#             active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(data_set, data_reconstructed, z)
+#             print(np.shape(active_array))
+#             print(np.shape(mask))
+#             nrmse_plume             = NRMSE(data_set[:,:,:,:][mask], data_reconstructed[:,:,:,:][mask])
             
-            mask_original     = mask[..., 0]
-            nrmse_sep_plume   = NRMSE_per_channel_masked(data_set, data_reconstructed, mask_original, global_stds) 
+#             mask_original     = mask[..., 0]
+#             nrmse_sep_plume   = NRMSE_per_channel_masked(data_set, data_reconstructed, mask_original, global_stds) 
 
-            fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
-            c1 = ax[0].contourf(time_vals, x, active_array[:,:, 32].T, cmap='Reds')
-            fig.colorbar(c1, ax=ax[0])
-            ax[0].set_title('true')
-            c2 = ax[1].contourf(time_vals, x, active_array_reconstructed[:,:, 32].T, cmap='Reds')
-            fig.colorbar(c1, ax=ax[1])
-            ax[1].set_title('reconstruction')
-            for v in range(2):
-                ax[v].set_xlabel('time')
-                ax[v].set_ylabel('x')
-            fig.savefig(output_path+f"/active_plumes_{c_names[index]}.png")
-            plt.close()
-        else:
-            nrmse_plume = np.inf
+#             fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
+#             c1 = ax[0].contourf(time_vals, x, active_array[:,:, 32].T, cmap='Reds')
+#             fig.colorbar(c1, ax=ax[0])
+#             ax[0].set_title('true')
+#             c2 = ax[1].contourf(time_vals, x, active_array_reconstructed[:,:, 32].T, cmap='Reds')
+#             fig.colorbar(c1, ax=ax[1])
+#             ax[1].set_title('reconstruction')
+#             for v in range(2):
+#                 ax[v].set_xlabel('time')
+#                 ax[v].set_ylabel('x')
+#             fig.savefig(output_path+f"/active_plumes_{c_names[index]}.png")
+#             plt.close()
+#         else:
+#             nrmse_plume = np.inf
 
-        if projection:
-            print('starting projection')
+#         if projection:
+#             print('starting projection')
 
-            proj_path = output_path+f"/proj{n_modes}/"
-            print(proj_path)
-            if not os.path.exists(proj_path):
-                os.makedirs(proj_path)
-                print('made directory')
+#             proj_path = output_path+f"/proj{n_modes}/"
+#             print(proj_path)
+#             if not os.path.exists(proj_path):
+#                 os.makedirs(proj_path)
+#                 print('made directory')
 
-            data_reduced_proj          = transform_POD(data_proj, pca_)
-            _, data_reconstructed_proj = inverse_POD(data_reduced_proj, pca_)
-            if scaling == 'SS':
-                data_reconstructed_proj     = ss_inverse_transform(data_reconstructed_proj, scaler)
+#             data_reduced_proj          = transform_POD(data_proj, pca_)
+#             _, data_reconstructed_proj = inverse_POD(data_reduced_proj, pca_)
+#             if scaling == 'SS':
+#                 data_reconstructed_proj     = ss_inverse_transform(data_reconstructed_proj, scaler)
 
-            plot_reconstruction_and_error(data_proj[:1000], data_reconstructed_proj[:1000], 32, 20, x, z, time_vals_proj, names, proj_path+'proj_partial_'+c_names[index])
-            nrmse_proj = NRMSE(data_proj, data_reconstructed_proj)
-            mse_proj   = MSE(data_proj, data_reconstructed_proj)
-            evr_proj   = EVR_recon(data_proj, data_reconstructed_proj)
-            SSIM_proj  = compute_ssim_for_4d(data_proj, data_reconstructed_proj)
-            nrmse_sep_proj = NRMSE_per_channel(data_set, data_reconstructed)
+#             plot_reconstruction_and_error(data_proj[:1000], data_reconstructed_proj[:1000], 32, 20, x, z, time_vals_proj, names, proj_path+'proj_partial_'+c_names[index])
+#             nrmse_proj = NRMSE(data_proj, data_reconstructed_proj)
+#             mse_proj   = MSE(data_proj, data_reconstructed_proj)
+#             evr_proj   = EVR_recon(data_proj, data_reconstructed_proj)
+#             SSIM_proj  = compute_ssim_for_4d(data_proj, data_reconstructed_proj)
+#             nrmse_sep_proj = NRMSE_per_channel(data_set, data_reconstructed)
 
-            if len(variables) == 4:
-                active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(data_proj, data_reconstructed_proj, z)
-                print(np.shape(active_array))
-                print(np.shape(mask))
-                nrmse_plume_proj             = NRMSE(data_proj[:,:,:,:][mask], data_reconstructed_proj[:,:,:,:][mask])
+#             if len(variables) == 4:
+#                 active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(data_proj, data_reconstructed_proj, z)
+#                 print(np.shape(active_array))
+#                 print(np.shape(mask))
+#                 nrmse_plume_proj             = NRMSE(data_proj[:,:,:,:][mask], data_reconstructed_proj[:,:,:,:][mask])
 
-                mask_original     = mask[..., 0]
-                nrmse_sep_plume   = NRMSE_per_channel_masked(data_proj, data_reconstructed_proj, mask_original, global_stds) 
+#                 mask_original     = mask[..., 0]
+#                 nrmse_sep_plume   = NRMSE_per_channel_masked(data_proj, data_reconstructed_proj, mask_original, global_stds) 
 
-                fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
-                c1 = ax[0].contourf(time_vals_proj, x, active_array[:,:, 32].T, cmap='Reds')
-                fig.colorbar(c1, ax=ax[0])
-                ax[0].set_title('true')
-                c2 = ax[1].contourf(time_vals_proj, x, active_array_reconstructed[:,:, 32].T, cmap='Reds')
-                fig.colorbar(c1, ax=ax[1])
-                ax[1].set_title('reconstruction')
-                for v in range(2):
-                    ax[v].set_xlabel('time')
-                    ax[v].set_ylabel('x')
+#                 fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
+#                 c1 = ax[0].contourf(time_vals_proj, x, active_array[:,:, 32].T, cmap='Reds')
+#                 fig.colorbar(c1, ax=ax[0])
+#                 ax[0].set_title('true')
+#                 c2 = ax[1].contourf(time_vals_proj, x, active_array_reconstructed[:,:, 32].T, cmap='Reds')
+#                 fig.colorbar(c1, ax=ax[1])
+#                 ax[1].set_title('reconstruction')
+#                 for v in range(2):
+#                     ax[v].set_xlabel('time')
+#                     ax[v].set_ylabel('x')
 
-                fig.savefig(proj_path+f"/proj_active_plumes_{c_names[index]}.png")
-                plt.close()
-            else:
-                nrmse_plume_proj = np.inf
-
-
-
-        print('NRMSE', nrmse)
-        print('MSE', mse)
-        print('EVR_recon', evr)
-        print('SSIM', SSIM)
-        print('NRMSE plume', nrmse_plume)
-
-        # Full path for saving the file
-        output_file = c_names[index] + '_metrics.json' 
-
-        output_path_met = os.path.join(output_path, output_file)
-
-        metrics = {
-        "no. modes": n_modes,
-        "EVR": evr,
-        "MSE": mse,
-        "NRMSE": nrmse,
-        "SSIM": SSIM,
-        "cumEV from POD": cev,
-        "NRMSE plume": nrmse_plume,
-        "NRMSE per channel": nrmse_sep,
-        "NRMSE plume per channel": nrmse_sep_plume,
-        }
-
-        with open(output_path_met, "w") as file:
-            json.dump(metrics, file, indent=4)
-
-        nrmse_list.append(nrmse)
-        ssim_list.append(SSIM)
-        evr_list.append(evr)
-        cumEV_list.append(cev)
-        nrmse_plume_list.append(nrmse_plume)
+#                 fig.savefig(proj_path+f"/proj_active_plumes_{c_names[index]}.png")
+#                 plt.close()
+#             else:
+#                 nrmse_plume_proj = np.inf
 
 
-np.save(output_path+'/ssim_list.npy', ssim_list)
-np.save(output_path+'/evr_list.npy', evr_list)
-np.save(output_path+'/nrmse_list.npy', nrmse_list)
-np.save(output_path+'/cumEV_list.npy', cumEV_list)
-np.save(output_path+'/nrmse_plume_list.npy', nrmse_plume_list)
+
+#         print('NRMSE', nrmse)
+#         print('MSE', mse)
+#         print('EVR_recon', evr)
+#         print('SSIM', SSIM)
+#         print('NRMSE plume', nrmse_plume)
+
+#         # Full path for saving the file
+#         output_file = c_names[index] + '_metrics.json' 
+
+#         output_path_met = os.path.join(output_path, output_file)
+
+#         metrics = {
+#         "no. modes": n_modes,
+#         "EVR": evr,
+#         "MSE": mse,
+#         "NRMSE": nrmse,
+#         "SSIM": SSIM,
+#         "cumEV from POD": cev,
+#         "NRMSE plume": nrmse_plume,
+#         "NRMSE per channel": nrmse_sep,
+#         "NRMSE plume per channel": nrmse_sep_plume,
+#         }
+
+#         with open(output_path_met, "w") as file:
+#             json.dump(metrics, file, indent=4)
+
+#         nrmse_list.append(nrmse)
+#         ssim_list.append(SSIM)
+#         evr_list.append(evr)
+#         cumEV_list.append(cev)
+#         nrmse_plume_list.append(nrmse_plume)
+
+
+# np.save(output_path+'/ssim_list.npy', ssim_list)
+# np.save(output_path+'/evr_list.npy', evr_list)
+# np.save(output_path+'/nrmse_list.npy', nrmse_list)
+# np.save(output_path+'/cumEV_list.npy', cumEV_list)
+# np.save(output_path+'/nrmse_plume_list.npy', nrmse_plume_list)
 
 '''
 fig, ax =plt.subplots(1, figsize=(8,6), tight_layout=True)

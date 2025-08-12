@@ -485,10 +485,10 @@ print('norm:', norm)
 print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
-test_interval = True
+test_interval = False
 validation_interval = False
 statistics_interval = False
-initiation_interval = False
+initiation_interval = True
 initiation_interval2 = False
 
 train_data = data_set[:int(N_washout+N_train)]
@@ -1272,17 +1272,16 @@ if initiation_interval:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.2
+    threshold_ph = threshold_ph
 
-    ensemble_test = 1
+    ensemble_test = 5
 
     ens_pred        = np.zeros((N_intt, dim, ensemble_test))
     ens_PH          = np.zeros((N_test, ensemble_test))
-    ens_PH2         = np.zeros((ensemble_test))
-    ens_nrmse       = np.zeros((ensemble_test))
-    ens_ssim        = np.zeros((ensemble_test))
-    ens_evr         = np.zeros((ensemble_test))
-    ens_nrmse_plume = np.zeros((ensemble_test))
+    ens_prec        = np.zeros((N_test, ensemble_test))
+    ens_recall      = np.zeros((N_test, ensemble_test))
+    ens_f1          = np.zeros((N_test, ensemble_test))
+    ens_acc         = np.zeros((N_test, ensemble_test))
 
     images_test_path = init_path+'/test_images/'
     if not os.path.exists(images_test_path):
@@ -1326,6 +1325,7 @@ if initiation_interval:
             # data for washout and target in each interval
             U_wash    = U[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap].copy()
             Y_t       = U[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt].copy()
+            data_set_Y_t =  data_set[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt]
 
             #washout for each interval
             Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
@@ -1334,13 +1334,10 @@ if initiation_interval:
             # Prediction Horizon
             Yh_t,_,Xa2        = closed_loop(N_intt-1, Xa1[-1], Wout, sigma_in, rho)
             print(np.shape(Yh_t))
-            if i == 0:
-                ens_pred[:, :, j] = Yh_t
             Y_err       = np.sqrt(np.mean((Y_t-Yh_t)**2,axis=1))/sigma_ph
             PH[i]       = np.argmax(Y_err>threshold_ph)/N_lyap
             if PH[i] == 0 and Y_err[0]<threshold_ph: PH[i] = N_intt/N_lyap #(in case PH is larger than interval)
             ens_PH[i,j] = PH[i]
-            nrmse_error[i, :] = Y_err
 
             ##### reconstructions ####
             _, reconstructed_truth       = inverse_POD(Y_t, pca_)
@@ -1350,32 +1347,146 @@ if initiation_interval:
             reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
             reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
 
+            ### active points
+            plume_score_threshold = 0.7
+            active_array, mask_expanded, _,_,_ = active_array_truth(data_set_Y_t, z)
+            active_array_POD, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(reconstructed_truth, reconstructed_predictions, z)
+            active_array_POD_score, active_array_reconstructed_score, mask_score, mask_reconstructed_score = active_array_calc_prob(reconstructed_truth, reconstructed_predictions, z, RH_min, RH_max, w_min, w_max, b_anom_min, b_anom_max, plume_score_threshold)
+
+            flatten_POD_active_array         = active_array_POD.flatten().astype(int)
+            flatten_recon_active_array       = active_array_reconstructed.flatten().astype(int)
+            flatten_POD_active_array_score   = active_array_POD_score.flatten().astype(int)
+            flatten_recon_active_array_score = active_array_reconstructed_score.flatten().astype(int)
+
+            precision = precision_score(flatten_POD_active_array_score, flatten_recon_active_array_score)
+            recall    = recall_score(flatten_POD_active_array_score, flatten_recon_active_array_score)
+            f1        = f1_score(flatten_POD_active_array_score, flatten_recon_active_array_score)
+            acc_sco   = accuracy_score(flatten_POD_active_array_score, flatten_recon_active_array_score)
+
+            print(f"for threshold score: {plume_score_threshold}; precision: {precision}, recall: {recall}, f1: {f1}, accuracy: {acc_sco}")
+
+            ens_prec[i, j]   = precision
+            ens_recall[i, j] = recall
+            ens_f1[i, j]     = f1
+            ens_acc[i, j]    = acc_sco
+
             if plot:
                 #left column has the washout (open-loop) and right column the prediction (closed-loop)
                 # only first n_plot test set intervals are plotted
                  if i<n_plot:
                     if j % 5 == 0:
-                        
-                        print('indexes_to_plot', indexes_to_plot)
-                        print(np.shape(U_wash))
-                        xx = np.arange(U_wash[:,0].shape[0])/N_lyap
-                        #plot_modes_washout(U_wash, Uh_wash, xx, i, j, indexes_to_plot, images_test_path+'/washout_test', Modes=False)
-
-                        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-                        plot_modes_prediction(Y_t, Yh_t, xx, i, j, indexes_to_plot, images_test_path+'/prediction_test', Modes=False)
-                        plot_PH(Y_err, threshold_ph, xx, i, j, images_test_path+'/PH_test')
-                        
-                        #plot_reservoir_states_norm(Xa1, Xa2, time_vals, N_tstart, N_washout_val, i, j, N_gap, N_intt, N_units, images_test_path+'/resnorm_test')
-                        #plot_input_states_norm(U_wash, Y_t, time_vals, N_tstart, N_washout_val, i, j, N_gap,  N_intt, images_test_path+'/inputnorm_test')
-
                         # reconstruction after scaling
                         print('reconstruction and error plot')
-                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, int(0.5*N_lyap), x, z, xx, names, images_test_path+'/ESN_validation_ens%i_test%i' %(j,i))
+                        xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
+                        #plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, int(0.5*N_lyap), x, z, xx, names, images_test_path+'/ESN_validation_ens%i_test%i' %(j,i))
+                            
+                        fig, ax = plt.subplots(3, figsize=(12,12), tight_layout=True)
+                        c1 = ax[0].contourf(xx, x, active_array[:, :, 32].T, cmap='Reds')
+                        fig.colorbar(c1, ax=ax[0])
+                        ax[0].set_title('True Active Points')
+                        c2 = ax[1].contourf(xx, x, active_array_POD_score[:,:, 32].T, cmap='Reds')
+                        fig.colorbar(c2, ax=ax[1])
+                        ax[1].set_title('POD Reconstruction Scored Points')
+                        c3 = ax[2].contourf(xx, x, active_array_reconstructed_score[:,:, 32].T, cmap='Reds')
+                        fig.colorbar(c3, ax=ax[2])
+                        ax[2].set_title('ESN Reconstruction Scored Points')
+                        for v in range(3):
+                            ax[v].set_xlabel('time')
+                            ax[v].set_ylabel('x')
+                        fig.savefig(images_test_path+f"/active_plumes_truevscore{plume_score_threshold}_ens{j}_test{i}.png")
+                        plt.close()
+    
+    metrics = {
+        "precision": ens_prec,
+        "recall": ens_recall,
+        "f1": ens_f1,
+        "accuracy": ens_acc
+    }
 
-                        #plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_test_path+'/active_plumes_test')
-                        
-                        #plot_global_prediction_ts(PODtruth_global, predictions_global, xx, i, j, images_test_path+'/global_prediciton')
-                        #plot_global_prediction_ps(PODtruth_global, predictions_global, i, j, stats_path+'/global_prediciton')
+
+    ### per test
+    stats = {}
+    for name, arr in metrics.items():
+        mean   = np.mean(arr, axis=1)
+        median = np.median(arr, axis=1)
+        uq     = np.percentile(arr, 75, axis=1)
+        lq     = np.percentile(arr, 25, axis=1)
+        
+        stats[name] = {
+            "mean": mean,
+            "median": median,
+            "UQ": uq,
+            "LQ": lq,
+        }
+    
+    def plot_barchart_errors(tests, median, mean, lower, upper, x_label, bar_width, fig, ax, color1='tab:blue', color2='black', marker2='o'):
+        lower_error = median - lower
+        upper_error = upper - median
+        yerr = np.vstack([lower_error, upper_error])
+
+        ax.bar(tests, mean, width=bar_width, align='center', label='Mean', color=color1, capsize=5, zorder=1) #align='center'
+        ax.errorbar(tests, median, yerr=yerr, fmt='o', ecolor=color2, markerfacecolor=color2, markeredgecolor=color2, capsize=5, label='Median with Q1-Q3')
+
+        ax.grid()
+        ax.set_xlabel(x_label, fontsize=16)
+        ax.set_ylabel(r"$\overline{\mathrm{PH}}$", fontsize=16)
+        ax.tick_params(labelsize=12)
+        ax.set_ylim(0,1)
+
+    fig, axes = plt.subplots(4, figsize=(12,12), tight_layout=True)
+    axes = axes.flatten()
+    PTs = np.arange(1, 41, 1)
+    #PTs = ['0']
+    metrics_labels = ["precision", "recall", "f1", "accuracy"]
+    for index, element in enumerate(metrics_labels):
+        ax = axes[index]
+        plot_barchart_errors(PTs, stats[element]["median"], stats[element]["mean"], stats[element]["LQ"], stats[element]["UQ"], 'Tests', 0.5, fig, ax, color1='tab:blue', color2='black', marker2='o')
+        ax.set_ylabel(element)
+    fig.savefig(init_path+f"/metrics_per_test_{plume_score_threshold}.png")
+
+    ### per ensemble
+    stats_per_ens = {}
+    for name, arr in metrics.items():
+        mean   = np.mean(arr, axis=0)
+        median = np.median(arr, axis=0)
+        uq     = np.percentile(arr, 75, axis=0)
+        lq     = np.percentile(arr, 25, axis=0)
+    
+    stats_per_ens[name] = {
+        "mean": mean,
+        "median": median,
+        "UQ": uq,
+        "LQ": lq,
+    }
+
+    ## overall
+    stats_all = {}
+    for name, arr in metrics.items():
+        mean   = np.mean(active_array_calc)
+        median = np.median(arr)
+        uq     = np.percentile(arr, 75)
+        lq     = np.percentile(arr, 25)
+    
+    stats_all[name] = {
+        "mean": mean,
+        "median": median,
+        "UQ": uq,
+        "LQ": lq,
+    }
+
+    fig, axes = plt.subplots(4, figsize=(12,12), tight_layout=True)
+    axes = axes.flatten()
+    PTs = np.arange(1, 6, 1)
+    labels = ['Mem 1', 'Mem 2', 'Mem 3', 'Mem 4', 'Mem 5', 'Avg']
+    #PTs = ['0']
+    metrics = ["precision", "recall", "f1", "accuracy"]
+    for index, element in enumerate(metrics_labels):
+        ax = axes[index]
+        plot_barchart_errors(PTs, stats[element]["median"], stats[element]["mean"], stats[element]["LQ"], stats[element]["UQ"], 'Tests', 0.5, fig, ax, color1='tab:blue', color2='black', marker2='o')
+        ax.set_ylabel(element)
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels)
+    fig.savefig(init_path+f"/metrics_per_ens_{plume_score_threshold}.png")
 
     print('finished testing')
 

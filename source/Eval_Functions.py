@@ -581,10 +581,13 @@ def active_array_calc_prob(original_data, reconstructed_data, z, rh_min, rh_max,
     w_scaled_reconstructed  = (w_reconstructed - w_min)/(w_max - w_min)
     b_scaled_reconstructed  = (b_anom_reconstructed - b_anom_min)/(b_anom_max - b_anom_min)
 
-    RH_threshold = 0.9
+    RH_threshold = 0.85 # just below 25th %#0.389 # minm
     RH_threshold_scaled = (RH_threshold - rh_min)/(rh_max - rh_min)
-    w_threshold = -0.001
+    w_threshold = 0 #-0.036 #minm
     w_threshold_scaled = (w_threshold - w_min) / (w_max - w_min)
+    b_threshold = 0 #-0.014 #minm
+    b_threshold_scaled = (b_threshold - b_anom_min) / (b_anom_max - b_anom_min)
+    
     print(f"RH min: {rh_min}, max: {rh_max}")
     print(f"RH threshold scaled: {RH_threshold_scaled}")
 
@@ -598,6 +601,8 @@ def active_array_calc_prob(original_data, reconstructed_data, z, rh_min, rh_max,
 
     plume_score = RH_clip + w_clip + b_clip
     plume_score_reconstructed = RH_clip_reconstructed + w_clip_reconstructed + b_clip_reconstructed
+    plume_score /= 3
+    plume_score_reconstructed /= 3
 
     mask = plume_score > plume_score_threshold
     mask_reconstructed = plume_score_reconstructed > plume_score_threshold #0.6 way too much masked
