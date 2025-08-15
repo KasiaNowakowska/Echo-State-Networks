@@ -89,6 +89,27 @@ def load_data_set_RB(file, names, snapshots):
 
     return data, time_vals
 
+def load_data_set_RB_act(file, names, snapshots):
+    with h5py.File(file, 'r') as hf:
+        print(hf.keys())
+        time_vals = np.array(hf['total_time_all'][:snapshots])
+        
+        data = np.zeros((len(time_vals), len(x), len(z), len(names)))
+        
+        index=0
+        for name in names:
+            print(name)
+            print(hf[name])
+            Var = np.array(hf[name])
+            print(np.shape(Var))
+            if index == 4:
+                data[:,:,:,index] = Var[:snapshots,:,:]
+            else:
+                data[:,:,:,index] = Var[:snapshots,:,0,:]
+            index+=1
+
+    return data, time_vals
+
 def load_data_set_Ra2e7(file, names, snapshots):
     with h5py.File(file, 'r') as hf:
         print(hf.keys())
@@ -107,7 +128,7 @@ def load_data_set_Ra2e7(file, names, snapshots):
     return data, time_vals
 
 #### LOAD DATA AND POD ####
-Data = 'RB'
+Data = 'RBplusActive'
 if Data == 'ToyData':
     name = names = variables = ['combined']
     n_components = 3
@@ -124,6 +145,16 @@ elif Data == 'RB':
     z = np.load(input_path+'/z.npy')
     snapshots_load = 16000
     data_set, time_vals = load_data_set_RB(input_path+'/data_4var_5000_48000.h5', variables, snapshots_load)
+    print('shape of dataset', np.shape(data_set))
+    dt = 2
+
+elif Data =='RBplusActive':
+    variables = ['q_all', 'w_all', 'u_all', 'b_all', 'active_array']
+    names = ['q', 'w', 'u', 'b', 'active']
+    x = np.load(input_path+'/x.npy')
+    z = np.load(input_path+'/z.npy')
+    snapshots_load = 16000
+    data_set, time_vals = load_data_set_RB_act(input_path+'/data_4var_5000_48000_act.h5', variables, snapshots_load)
     print('shape of dataset', np.shape(data_set))
     dt = 2
 
@@ -266,13 +297,35 @@ if POD_type == 'together':
             data_reconstructed = ss_inverse_transform(data_reconstructed, scaler)
         #plot_reconstruction(data_set, data_reconstructed, 32, 20, 'Ra2e7')
         plot_reconstruction_and_error(data_set, data_reconstructed, 32, 75, x, z, time_vals, names, output_path+c_names[index])
-        nrmse     = NRMSE(data_set, data_reconstructed)
-        mse       = MSE(data_set, data_reconstructed)
-        evr       = EVR_recon(data_set, data_reconstructed)
-        SSIM      = compute_ssim_for_4d(data_set, data_reconstructed)
-        nrmse_sep = NRMSE_per_channel(data_set, data_reconstructed)
+        if Data == 'RBplusActive':
+            nrmse     = NRMSE(data_set[...,:4], data_reconstructed[...,:4])
+            mse       = MSE(data_set[...,:4], data_reconstructed[...,:4])
+            evr       = EVR_recon(data_set[...,:4], data_reconstructed[...,:4])
+            SSIM      = compute_ssim_for_4d(data_set[...,:4], data_reconstructed[...,:4])
+            nrmse_sep = NRMSE_per_channel(data_set[...,:4], data_reconstructed[...,:4])
+        else:
+            nrmse     = NRMSE(data_set, data_reconstructed)
+            mse       = MSE(data_set, data_reconstructed)
+            evr       = EVR_recon(data_set, data_reconstructed)
+            SSIM      = compute_ssim_for_4d(data_set, data_reconstructed)
+            nrmse_sep = NRMSE_per_channel(data_set, data_reconstructed)
 
-        if len(variables) == 4:
+        if Data == 'RBplusActive':
+            active_array               = data_set[...,4]
+            active_array_reconstructed = data_reconstructed[...,4]
+            mask                       = (active_array == 1)
+            mask_reconstructed         = (active_array_reconstructed == 1)
+
+            # Expand the mask to cover all features (optional, depending on use case)
+            mask               =  np.repeat(mask[:, :, :, np.newaxis], 4, axis=-1)  # Shape: (256, 64, 1)
+            mask_reconstructed =  np.repeat(mask_reconstructed[:, :, :, np.newaxis], 4, axis=-1) # Shape: (256, 64, 1)
+            
+            nrmse_plume            = NRMSE(data_set[:,:,:,:4][mask], data_reconstructed[:,:,:,:4][mask])
+
+            mask_original     = mask[..., 0]
+            nrmse_sep_plume   = NRMSE_per_channel_masked(data_set, data_reconstructed, mask_original, global_stds) 
+
+        elif Data == 'RB':
             active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(data_set, data_reconstructed, z)
             print(np.shape(active_array))
             print(np.shape(mask))
@@ -281,6 +334,7 @@ if POD_type == 'together':
             mask_original     = mask[..., 0]
             nrmse_sep_plume   = NRMSE_per_channel_masked(data_set, data_reconstructed, mask_original, global_stds) 
 
+        if Data in ('RB', 'RBplusActive'):
             fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
             c1 = ax[0].contourf(time_vals[:1000], x, active_array[:1000,:, 32].T, cmap='Reds')
             fig.colorbar(c1, ax=ax[0])
@@ -323,6 +377,7 @@ if POD_type == 'together':
             fig.savefig(output_path+'/stats.png')
 
             #thresholds = [0.6, 0.65, 0.68, 0.7, 0.75, 0.8]
+            #thresholds = [0.20,0.21,0.22,0.23,0.24,0.25,0.26,0.27,0.28,0.29,0.30]
             thresholds = [0.2,0.3,0.4]
             chunk_size = 2500
             time_steps = 5000 #active_array.shape[0]
@@ -402,54 +457,54 @@ if POD_type == 'together':
             for v in range(4):
                 ax[v].set_xlabel('Threshold')
                 ax[v].grid()
-            fig.savefig(output_path+'/metric_scores_usingminms.png')
+            fig.savefig(output_path+'/metric_scores_0203.png')
 
         else:
             nrmse_plume = np.inf
             nrmse_sep_plume = np.inf
 
-#         ### plt part of domain ###
-#         if reduce_data_set:
-#              plot_reconstruction_and_error(data_set[:500], data_reconstructed[:500], 32, 100, x, z, time_vals[:500], names, output_path+c_names[index]+'_500')
-#         else:
-#             plot_reconstruction_and_error(data_set[:500], data_reconstructed[:500], 32, 75, x, z, time_vals[:500], names, output_path+c_names[index]+'_500')
-#         np.save(output_path+'/POD_reconstructed.npy', data_reconstructed[:500])
-#         np.save(output_path+'/TrueData.npy', data_set[:500])
+        ### plt part of domain ###
+        if reduce_data_set:
+             plot_reconstruction_and_error(data_set[:500], data_reconstructed[:500], 32, 100, x, z, time_vals[:500], names, output_path+c_names[index]+'_500')
+        else:
+            plot_reconstruction_and_error(data_set[:500], data_reconstructed[:500], 32, 75, x, z, time_vals[:500], names, output_path+c_names[index]+'_500')
+        #np.save(output_path+'/POD_reconstructed.npy', data_reconstructed[:500])
+        #np.save(output_path+'/TrueData.npy', data_set[:500])
 
-#         print('NRMSE', nrmse)
-#         print('MSE', mse)
-#         print('EVR_recon', evr)
-#         print('SSIM', SSIM)
-#         print('NRMSE plume', nrmse_plume)
-#         print('NRMSE per channel', nrmse_sep)
+        print('NRMSE', nrmse)
+        print('MSE', mse)
+        print('EVR_recon', evr)
+        print('SSIM', SSIM)
+        print('NRMSE plume', nrmse_plume)
+        print('NRMSE per channel', nrmse_sep)
 
-#         # Full path for saving the file
-#         output_file = c_names[index] + '_metrics.json' 
+        # Full path for saving the file
+        output_file = c_names[index] + '_metrics.json' 
 
-#         output_path_met = os.path.join(output_path, output_file)
+        output_path_met = os.path.join(output_path, output_file)
 
-#         metrics = {
-#         "no. modes": n_modes,
-#         "EVR": evr,
-#         "MSE": mse,
-#         "NRMSE": nrmse,
-#         "SSIM": SSIM,
-#         "cumEV from POD": cev,
-#         "NRMSE plume": nrmse_plume,
-#         "NRMSE per channel": nrmse_sep,
-#         "NRMSE plume per channel": nrmse_sep_plume,
-#         }
+        metrics = {
+        "no. modes": n_modes,
+        "EVR": evr,
+        "MSE": mse,
+        "NRMSE": nrmse,
+        "SSIM": SSIM,
+        "cumEV from POD": cev,
+        "NRMSE plume": nrmse_plume,
+        "NRMSE per channel": nrmse_sep,
+        "NRMSE plume per channel": nrmse_sep_plume,
+        }
 
-#         with open(output_path_met, "w") as file:
-#             json.dump(metrics, file, indent=4)
+        with open(output_path_met, "w") as file:
+            json.dump(metrics, file, indent=4)
 
-#         nrmse_list.append(nrmse)
-#         ssim_list.append(SSIM)
-#         evr_list.append(evr)
-#         cumEV_list.append(cev)
-#         nrmse_plume_list.append(nrmse_plume)
-#         nrmse_sep_list.append(nrmse_sep)
-#         nrmse_sep_plume_list.append(nrmse_sep_plume)
+        nrmse_list.append(nrmse)
+        ssim_list.append(SSIM)
+        evr_list.append(evr)
+        cumEV_list.append(cev)
+        nrmse_plume_list.append(nrmse_plume)
+        nrmse_sep_list.append(nrmse_sep)
+        nrmse_sep_plume_list.append(nrmse_sep_plume)
 
 #         if projection:
 #             proj_path = output_path+f"/proj{n_modes}/"

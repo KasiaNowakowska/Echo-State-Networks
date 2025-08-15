@@ -132,8 +132,29 @@ def load_data_set_RB(file, names, snapshots):
 
     return data, time_vals
 
+def load_data_set_RB_act(file, names, snapshots):
+    with h5py.File(file, 'r') as hf:
+        print(hf.keys())
+        time_vals = np.array(hf['total_time_all'][:snapshots])
+        
+        data = np.zeros((len(time_vals), len(x), len(z), len(names)))
+        
+        index=0
+        for name in names:
+            print(name)
+            print(hf[name])
+            Var = np.array(hf[name])
+            print(np.shape(Var))
+            if index == 4:
+                data[:,:,:,index] = Var[:snapshots,:,:]
+            else:
+                data[:,:,:,index] = Var[:snapshots,:,0,:]
+            index+=1
+
+    return data, time_vals
+
 #### LOAD DATA ####
-Data = 'RB'
+Data = 'RBplusActive'
 if Data == 'ToyData':
     name = names = variables = ['combined']
     n_components = 3
@@ -150,6 +171,16 @@ elif Data == 'RB':
     z = np.load(input_path+'/z.npy')
     snapshots_load = 16000
     data_set, time_vals = load_data_set_RB(input_path+'/data_4var_5000_48000.h5', variables, snapshots_load)
+    print('shape of dataset', np.shape(data_set))
+    dt = 2
+
+elif Data =='RBplusActive':
+    variables = ['q_all', 'w_all', 'u_all', 'b_all', 'active_array']
+    names = ['q', 'w', 'u', 'b', 'active']
+    x = np.load(input_path+'/x.npy')
+    z = np.load(input_path+'/z.npy')
+    snapshots_load = 16000
+    data_set, time_vals = load_data_set_RB_act(input_path+'/data_4var_5000_48000_act.h5', variables, snapshots_load)
     print('shape of dataset', np.shape(data_set))
     dt = 2
 
@@ -550,13 +581,17 @@ for i in range(N_parallel):
 
 validation_data = True
 test_data = False
-all_data = False
+all_data = True
 visualisation = False
 encoded_data_investigation = False
 
 if validation_data:
+    output_path = output_path+'/valset/'
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
+        print('made directory')
     print('VALIDATION DATA')
-    truth = U_vv_scaled
+    truth = U_vv_scaled[:1001]
     decoded = model(truth,a,b)[1]
     print(np.shape(decoded), np.shape(truth))
 
@@ -571,11 +606,18 @@ if validation_data:
     print('shape of validation prediction', np.shape(decoded_unscaled))
     print('shape of validation truth', np.shape(truth_unscaled))
 
-    test_ssim = compute_ssim_for_4d(truth_unscaled, decoded_unscaled)
-    mse = MSE(truth_unscaled, decoded_unscaled)
-    nrmse = NRMSE(truth_unscaled, decoded_unscaled)
-    evr = EVR_recon(truth_unscaled, decoded_unscaled)
-    nrmse_sep = NRMSE_per_channel(truth_unscaled, decoded_unscaled)
+    if Data == 'RBplusActive':
+        test_ssim = compute_ssim_for_4d(truth_unscaled[...,:4], decoded_unscaled[...,:4])
+        mse = MSE(truth_unscaled[...,:4], decoded_unscaled[...,:4])
+        nrmse = NRMSE(truth_unscaled[...,:4], decoded_unscaled[...,:4])
+        evr = EVR_recon(truth_unscaled[...,:4], decoded_unscaled[...,:4])
+        nrmse_sep = NRMSE_per_channel(truth_unscaled[...,:4], decoded_unscaled[...,:4])
+    else:
+        test_ssim = compute_ssim_for_4d(truth_unscaled, decoded_unscaled)
+        mse = MSE(truth_unscaled, decoded_unscaled)
+        nrmse = NRMSE(truth_unscaled, decoded_unscaled)
+        evr = EVR_recon(truth_unscaled, decoded_unscaled)
+        nrmse_sep = NRMSE_per_channel(truth_unscaled, decoded_unscaled)
 
     print("nrmse:", nrmse)
     print("mse:", mse)
@@ -583,14 +625,30 @@ if validation_data:
     print("EVR:", evr)
 
     #Plume NRMSE
-    if len(variables) == 4:
-        active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(truth_unscaled, decoded_unscaled, z)
-        print(np.shape(active_array))
-        print(np.shape(mask))
-        nrmse_plume             = NRMSE(truth_unscaled[:,:,:,:][mask], decoded_unscaled[:,:,:,:][mask])
+    if Data == 'RBplusActive':
+        active_array               = truth_unscaled[...,4]
+        active_array_reconstructed = decoded_unscaled[...,4]
+        mask                       = (active_array == 1)
+        mask_reconstructed         = (active_array_reconstructed == 1)
+
+        # Expand the mask to cover all features (optional, depending on use case)
+        mask               =  np.repeat(mask[:, :, :, np.newaxis], 4, axis=-1)  # Shape: (256, 64, 1)
+        mask_reconstructed =  np.repeat(mask_reconstructed[:, :, :, np.newaxis], 4, axis=-1) # Shape: (256, 64, 1)
+        
+        nrmse_plume            = NRMSE(truth_unscaled[:,:,:,:4][mask], decoded_unscaled[:,:,:,:4][mask])
 
         mask_original     = mask[..., 0]
         nrmse_sep_plume   = NRMSE_per_channel_masked(truth_unscaled, decoded_unscaled, mask_original, global_stds) 
+
+    else:
+        if len(variables) == 4:
+            active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(truth_unscaled, decoded_unscaled, z)
+            print(np.shape(active_array))
+            print(np.shape(mask))
+            nrmse_plume             = NRMSE(truth_unscaled[:,:,:,:][mask], decoded_unscaled[:,:,:,:][mask])
+
+            mask_original     = mask[..., 0]
+            nrmse_sep_plume   = NRMSE_per_channel_masked(truth_unscaled, decoded_unscaled, mask_original, global_stds) 
 
 
     import json
@@ -616,11 +674,29 @@ if validation_data:
         truth_unscaled[:500],
         decoded_unscaled[:500],
         32, 10, x, z, time_vals[:500], variables,
-        output_path+f"/test_all"
+        output_path+f"/validation_all"
     )
+
+    fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
+    c1 = ax[0].contourf(time_vals[:1000], x, active_array[:1000,:, 32].T, cmap='Reds')
+    fig.colorbar(c1, ax=ax[0])
+    ax[0].set_title('True Active Points')
+    c2 = ax[1].contourf(time_vals[:1000], x, active_array_reconstructed[:1000,:, 32].T, cmap='Reds')
+    fig.colorbar(c1, ax=ax[1])
+    ax[1].set_title('Reconstruction Active Points')
+    for v in range(2):
+        ax[v].set_xlabel('time')
+        ax[v].set_ylabel('x')
+    fig.savefig(output_path+f"/active_plumes.png")
+    plt.close()
 
 #### TESTING UNSEEN DATA ####
 if test_data:
+    output_path = output_path+'/testset/'
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
+        print('made directory')
+
     print('TEST DATA')
     truth = U_tv_scaled
     print('shape of truth', np.shape(truth))
@@ -650,11 +726,18 @@ if test_data:
         # Compute metrics
         print('shape of decoded unscaled', np.shape(decoded_unscaled))
         print('shape of truth_unscaled', np.shape(truth_unscaled))
-        test_ssim = compute_ssim_for_4d(truth_unscaled, decoded_unscaled)
-        mse = MSE(truth_unscaled, decoded_unscaled)
-        nrmse = NRMSE(truth_unscaled, decoded_unscaled)
-        evr = EVR_recon(truth_unscaled, decoded_unscaled)
-        nrmse_sep = NRMSE_per_channel(truth_unscaled, decoded_unscaled)
+        if Data == 'RBplusActive':
+            test_ssim = compute_ssim_for_4d(truth_unscaled[...,:4], decoded_unscaled[...,:4])
+            mse = MSE(truth_unscaled[...,:4], decoded_unscaled[...,:4])
+            nrmse = NRMSE(truth_unscaled[...,:4], decoded_unscaled[...,:4])
+            evr = EVR_recon(truth_unscaled[...,:4], decoded_unscaled[...,:4])
+            nrmse_sep = NRMSE_per_channel(truth_unscaled[...,:4], decoded_unscaled[...,:4])
+        else:
+            test_ssim = compute_ssim_for_4d(truth_unscaled, decoded_unscaled)
+            mse = MSE(truth_unscaled, decoded_unscaled)
+            nrmse = NRMSE(truth_unscaled, decoded_unscaled)
+            evr = EVR_recon(truth_unscaled, decoded_unscaled)
+            nrmse_sep = NRMSE_per_channel(truth_unscaled, decoded_unscaled)
 
         chunk_metrics = {
             "chunk": chunk_idx,
@@ -666,19 +749,35 @@ if test_data:
         }
 
         # Optional plume NRMSE if variables == 4
-        if len(variables) == 4:
-            _, _, mask, _ = active_array_calc(truth_unscaled, decoded_unscaled, z)
-            print('shape of masked area', np.shape(truth_unscaled[mask]))
-            nrmse_plume = NRMSE(truth_unscaled[mask], decoded_unscaled[mask])
+        if Data == 'RBplusActive':
+            active_array               = truth_unscaled[...,4]
+            active_array_reconstructed = decoded_unscaled[...,4]
+            mask                       = (active_array == 1)
+            mask_reconstructed         = (active_array_reconstructed == 1)
 
-            mask_original     = mask[..., 0]
-            nrmse_sep_plume   = NRMSE_per_channel_masked(truth_unscaled, decoded_unscaled, mask_original, global_stds) 
+            # Expand the mask to cover all features (optional, depending on use case)
+            mask               =  np.repeat(mask[:, :, :, np.newaxis], 4, axis=-1)  # Shape: (256, 64, 1)
+            mask_reconstructed =  np.repeat(mask_reconstructed[:, :, :, np.newaxis], 4, axis=-1) # Shape: (256, 64, 1)
+            
+            chunk_metrics["plume NRMSE"]       = NRMSE(truth_unscaled[:,:,:,:4][mask], decoded_unscaled[:,:,:,:4][mask])
 
-            chunk_metrics["plume NRMSE"] = nrmse_plume
-            chunk_metrics["plume sep NRMSE"] = nrmse_sep_plume
+            mask_original                      = mask[..., 0]
+            chunk_metrics["plume sep NRMSE"]   = NRMSE_per_channel_masked(truth_unscaled, decoded_unscaled, mask_original, global_stds) 
+
         else:
-            chunk_metrics["plume NRMSE"] = 0
-            chunk_metrics["plume sep NRMSE"] = 0
+            if len(variables) == 4:
+                _, _, mask, _ = active_array_calc(truth_unscaled, decoded_unscaled, z)
+                print('shape of masked area', np.shape(truth_unscaled[mask]))
+                nrmse_plume = NRMSE(truth_unscaled[mask], decoded_unscaled[mask])
+
+                mask_original     = mask[..., 0]
+                nrmse_sep_plume   = NRMSE_per_channel_masked(truth_unscaled, decoded_unscaled, mask_original, global_stds) 
+
+                chunk_metrics["plume NRMSE"] = nrmse_plume
+                chunk_metrics["plume sep NRMSE"] = nrmse_sep_plume
+            else:
+                chunk_metrics["plume NRMSE"] = 0
+                chunk_metrics["plume sep NRMSE"] = 0
 
         # Save metrics per chunk
         metrics_list.append(chunk_metrics)
@@ -692,14 +791,27 @@ if test_data:
                 output_path+f"/test_all_chunk_{chunk_idx}"
             )
 
-            np.save(output_path+'/CAE_decoded.npy', decoded_unscaled)
-            np.save(output_path+'/true_data.npy', truth_unscaled)
+            #np.save(output_path+'/CAE_decoded.npy', decoded_unscaled)
+            #np.save(output_path+'/true_data.npy', truth_unscaled)
 
             fig, ax = plt.subplots(1)
             ax.plot(decoded_unscaled[0, :, 32, 0], label='dec')
             ax.plot(truth_unscaled[0, :, 32, 0], label='true')
             plt.legend()
             fig.savefig(os.path.join(output_path, f'lines_chunk_{chunk_idx}.png'))
+
+            fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
+            c1 = ax[0].contourf(time_vals[:1000], x, active_array[:1000,:, 32].T, cmap='Reds')
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('True Active Points')
+            c2 = ax[1].contourf(time_vals[:1000], x, active_array_reconstructed[:1000,:, 32].T, cmap='Reds')
+            fig.colorbar(c1, ax=ax[1])
+            ax[1].set_title('Reconstruction Active Points')
+            for v in range(2):
+                ax[v].set_xlabel('time')
+                ax[v].set_ylabel('x')
+            fig.savefig(output_path+f"/active_plumes.png")
+            plt.close()
 
     # Save all metrics to JSON after loop
     output_file = "test_metrics_testdata_data_chunked.json"
@@ -733,6 +845,11 @@ if test_data:
 
 
 if all_data:
+    output_path = output_path+'/allset/'
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
+        print('made directory')
+
     chunk_size = 1000
     timesteps = snapshots_load
     total_chunks = timesteps // chunk_size
@@ -754,11 +871,18 @@ if all_data:
         # Compute metrics
         print('shape of decoded unscaled', np.shape(decoded_unscaled))
         print('shape of truth_unscaled', np.shape(truth_unscaled))
-        test_ssim = compute_ssim_for_4d(truth_unscaled, decoded_unscaled)
-        mse = MSE(truth_unscaled, decoded_unscaled)
-        nrmse = NRMSE(truth_unscaled, decoded_unscaled)
-        evr = EVR_recon(truth_unscaled, decoded_unscaled)
-        nrmse_sep = NRMSE_per_channel(truth_unscaled, decoded_unscaled)
+        if Data == 'RBplusActive':
+            test_ssim = compute_ssim_for_4d(truth_unscaled[...,:4], decoded_unscaled[...,:4])
+            mse = MSE(truth_unscaled[...,:4], decoded_unscaled[...,:4])
+            nrmse = NRMSE(truth_unscaled[...,:4], decoded_unscaled[...,:4])
+            evr = EVR_recon(truth_unscaled[...,:4], decoded_unscaled[...,:4])
+            nrmse_sep = NRMSE_per_channel(truth_unscaled[...,:4], decoded_unscaled[...,:4])
+        else:
+            test_ssim = compute_ssim_for_4d(truth_unscaled, decoded_unscaled)
+            mse = MSE(truth_unscaled, decoded_unscaled)
+            nrmse = NRMSE(truth_unscaled, decoded_unscaled)
+            evr = EVR_recon(truth_unscaled, decoded_unscaled)
+            nrmse_sep = NRMSE_per_channel(truth_unscaled, decoded_unscaled)
 
         chunk_metrics = {
             "chunk": chunk_idx,
@@ -770,16 +894,35 @@ if all_data:
         }
 
         # Optional plume NRMSE if variables == 4
-        if len(variables) == 4:
-            _, _, mask, _ = active_array_calc(truth_unscaled, decoded_unscaled, z)
-            print('shape of masked area', np.shape(truth_unscaled[mask]))
-            nrmse_plume = NRMSE(truth_unscaled[mask], decoded_unscaled[mask])
+        if Data == 'RBplusActive':
+            active_array               = truth_unscaled[...,4]
+            active_array_reconstructed = decoded_unscaled[...,4]
+            mask                       = (active_array == 1)
+            mask_reconstructed         = (active_array_reconstructed == 1)
 
-            mask_original     = mask[..., 0]
-            nrmse_sep_plume   = NRMSE_per_channel_masked(truth_unscaled, decoded_unscaled, mask_original, global_stds) 
+            # Expand the mask to cover all features (optional, depending on use case)
+            mask               =  np.repeat(mask[:, :, :, np.newaxis], 4, axis=-1)  # Shape: (256, 64, 1)
+            mask_reconstructed =  np.repeat(mask_reconstructed[:, :, :, np.newaxis], 4, axis=-1) # Shape: (256, 64, 1)
+            
+            chunk_metrics["plume NRMSE"]       = NRMSE(truth_unscaled[:,:,:,:4][mask], decoded_unscaled[:,:,:,:4][mask])
 
-            chunk_metrics["plume NRMSE"] = nrmse_plume
-            chunk_metrics["plume sep NRMSE"] = nrmse_sep_plume
+            mask_original                      = mask[..., 0]
+            chunk_metrics["plume sep NRMSE"]   = NRMSE_per_channel_masked(truth_unscaled, decoded_unscaled, mask_original, global_stds) 
+
+        else:
+            if len(variables) == 4:
+                _, _, mask, _ = active_array_calc(truth_unscaled, decoded_unscaled, z)
+                print('shape of masked area', np.shape(truth_unscaled[mask]))
+                nrmse_plume = NRMSE(truth_unscaled[mask], decoded_unscaled[mask])
+
+                mask_original     = mask[..., 0]
+                nrmse_sep_plume   = NRMSE_per_channel_masked(truth_unscaled, decoded_unscaled, mask_original, global_stds) 
+
+                chunk_metrics["plume NRMSE"] = nrmse_plume
+                chunk_metrics["plume sep NRMSE"] = nrmse_sep_plume
+            else:
+                chunk_metrics["plume NRMSE"] = 0
+                chunk_metrics["plume sep NRMSE"] = 0
 
         # Save metrics per chunk
         metrics_list.append(chunk_metrics)
@@ -793,8 +936,21 @@ if all_data:
                 output_path+f"/test_all_chunk_{chunk_idx}"
             )
 
-            np.save(output_path+'/CAE_decoded.npy', decoded_unscaled)
-            np.save(output_path+'/true_data.npy', truth_unscaled)
+            fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
+            c1 = ax[0].contourf(time_vals[:1000], x, active_array[:1000,:, 32].T, cmap='Reds')
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('True Active Points')
+            c2 = ax[1].contourf(time_vals[:1000], x, active_array_reconstructed[:1000,:, 32].T, cmap='Reds')
+            fig.colorbar(c1, ax=ax[1])
+            ax[1].set_title('Reconstruction Active Points')
+            for v in range(2):
+                ax[v].set_xlabel('time')
+                ax[v].set_ylabel('x')
+            fig.savefig(output_path+f"/active_plumes.png")
+            plt.close()
+
+            #np.save(output_path+'/CAE_decoded.npy', decoded_unscaled)
+            #np.save(output_path+'/true_data.npy', truth_unscaled)
 
             fig, ax = plt.subplots(1)
             ax.plot(decoded_unscaled[0, :, 32, 0], label='dec')
