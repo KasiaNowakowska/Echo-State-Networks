@@ -269,3 +269,95 @@ def hovmoller_plus_plume_pos(truth_data, prediction_data, truth_features, predic
     
     fig.savefig(file_name+f"_ens{j}_test{i}.png")
     plt.close(fig)
+
+def hovmoller_plus_plume_sincospos(truth_data, prediction_data, truth_features, prediction_features, xx, x, variable, i, j, file_name, x_domain=(0,20)):
+    x_min, x_max = x_domain
+    
+    truth_data      = truth_data[..., variable]
+    prediction_data = prediction_data[..., variable]
+
+    z_value =32
+    
+    # Precompute max_strength across all plumes and truth/prediction
+    all_strength_truth = []
+    all_strength_pred = []
+
+    for v in range(3):
+        all_strength_truth.append(truth_features[:, v*3 + 2])
+        all_strength_pred.append(prediction_features[:, v*3 + 2])
+
+    all_strength_truth = np.concatenate(all_strength_truth)
+    all_strength_pred = np.concatenate(all_strength_pred)
+
+    max_strength = max(np.max(all_strength_truth), np.max(all_strength_pred))
+
+    fig, ax = plt.subplots(2, figsize=(12, 9), tight_layout=True)
+    
+    minm = min(np.min(truth_data[:, :, z_value]), np.min(prediction_data[:, :, z_value]))
+    maxm = max(np.max(truth_data[:, :, z_value]), np.max(prediction_data[:, :, z_value]))  
+
+    c1 = ax[0].pcolormesh(xx, x, truth_data[:, :, z_value].T, vmin=minm, vmax=maxm)
+    fig.colorbar(c1, ax=ax[0])
+    ax[0].set_title('True')
+    c2 = ax[1].pcolormesh(xx, x, prediction_data[:, :, z_value].T, vmin=minm, vmax=maxm)
+    fig.colorbar(c2, ax=ax[1])
+    ax[1].set_title('Reconstruction')
+
+    # Plot scatter overlays, keeping a reference to one mappable for KE colorbar
+    scatter_cmap = 'plasma'  # stands out from viridis background
+    sc_ref = None
+    
+    for v in range(3):
+        cos_vals_truth = truth_features[:, v*3]      # cos
+        sin_vals_truth = truth_features[:, v*3 + 1]  # sin
+        strength_truth = truth_features[:, v*3 + 2]  # KE
+
+        cos_vals_pred = prediction_features[:, v*3]      # cos
+        sin_vals_pred = prediction_features[:, v*3 + 1]  # sin
+        strength_pred = prediction_features[:, v*3 + 2]  # KE
+
+        # Recover downsampled x position
+        angles_truth = np.arctan2(sin_vals_truth, cos_vals_truth)  # [-π, π]
+        angles_truth[angles_truth < 0] += 2*np.pi  # wrap negative angles
+        x_vals_truth = x_min + (x_max - x_min) * angles_truth / (2*np.pi)
+
+        # Recover downsampled x position
+        angles_pred = np.arctan2(sin_vals_pred, cos_vals_pred)  # [-π, π]
+        angles_pred[angles_pred < 0] += 2*np.pi  # wrap negative angles
+        x_vals_pred = x_min + (x_max - x_min) * angles_pred / (2*np.pi)
+
+        valid_mask_truth = strength_truth > 0
+        valid_mask_pred  = strength_pred > 0
+
+        sc1 = ax[0].scatter(
+            xx[valid_mask_truth],
+            x_vals_truth[valid_mask_truth],
+            c=strength_truth[valid_mask_truth],
+            cmap=scatter_cmap,         # try 'plasma', 'coolwarm', etc.
+            vmin=0, vmax=max_strength,
+            marker='x'
+        )
+
+        sc2 = ax[1].scatter(
+            xx[valid_mask_pred],
+            x_vals_pred[valid_mask_pred],
+            c=strength_pred[valid_mask_pred],
+            cmap=scatter_cmap,
+            vmin=0, vmax=max_strength,
+            marker='x'
+        )
+
+        # Keep reference for single shared colorbar
+        if sc_ref is None:
+            sc_ref = sc1
+
+    # Single KE colorbar for scatter overlays
+    cbar = fig.colorbar(sc_ref, ax=ax, orientation='vertical', fraction=0.02, pad=0.02)
+    cbar.set_label('Plume Strength (KE)', fontsize=12)
+
+    for l in range(2):
+        ax[l].set_ylabel('x', fontsize=14)
+    ax[-1].set_xlabel('Time [Lyapunov Times]')
+
+    fig.savefig(file_name+f"_ens{j}_test{i}.png")
+    plt.close(fig)

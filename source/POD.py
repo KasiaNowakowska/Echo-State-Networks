@@ -128,7 +128,7 @@ def load_data_set_Ra2e7(file, names, snapshots):
     return data, time_vals
 
 #### LOAD DATA AND POD ####
-Data = 'RBplusActive'
+Data = 'RB'
 if Data == 'ToyData':
     name = names = variables = ['combined']
     n_components = 3
@@ -379,8 +379,8 @@ if POD_type == 'together':
             #thresholds = [0.6, 0.65, 0.68, 0.7, 0.75, 0.8]
             #thresholds = [0.20,0.21,0.22,0.23,0.24,0.25,0.26,0.27,0.28,0.29,0.30]
             thresholds = [0.2,0.3,0.4]
-            chunk_size = 2500
-            time_steps = 5000 #active_array.shape[0]
+            chunk_size = 500
+            time_steps = active_array.shape[0]
 
             precision_all = []
             recall_all    = []

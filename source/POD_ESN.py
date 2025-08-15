@@ -211,6 +211,12 @@ elif Data == 'RB_plume':
         names = ['q_all', 'w_all', 'u_all', 'b_all']
         names_plus_act = ['q', 'w', 'u', 'b', 'active']
         data_set, time_vals, plume_features = load_data_set_RB_act(input_path+'/data_4var_5000_48000_positions.h5', variables_plus_act, snapshots_load)
+    elif plumetype == 'sincospositions':
+        variables = ['q_all', 'w_all', 'u_all', 'b_all']
+        variables_plus_act = ['q_all', 'w_all', 'u_all', 'b_all', 'plume_positions']
+        names = ['q_all', 'w_all', 'u_all', 'b_all']
+        names_plus_act = ['q', 'w', 'u', 'b', 'active']
+        data_set, time_vals, plume_features = load_data_set_RB_act(input_path+'/data_4var_5000_48000_cossinpositions.h5', variables_plus_act, snapshots_load)
     print('shape of dataset', np.shape(data_set))
     dt = 2
     print('shape of plume_features', np.shape(plume_features))

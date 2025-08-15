@@ -202,6 +202,12 @@ elif Data == 'RB_plume':
         names = ['q_all', 'w_all', 'u_all', 'b_all']
         names_plus_act = ['q', 'w', 'u', 'b', 'active']
         data_set, time_vals, plume_features = load_data_set_RB_act(input_path+'/data_4var_5000_48000_positions.h5', variables_plus_act, snapshots_load)
+    elif plumetype == 'sincospositions':
+        variables = ['q_all', 'w_all', 'u_all', 'b_all']
+        variables_plus_act = ['q_all', 'w_all', 'u_all', 'b_all', 'plume_positions']
+        names = ['q_all', 'w_all', 'u_all', 'b_all']
+        names_plus_act = ['q', 'w', 'u', 'b', 'active']
+        data_set, time_vals, plume_features = load_data_set_RB_act(input_path+'/data_4var_5000_48000_cossinpositions.h5', variables_plus_act, snapshots_load)
     print('shape of dataset', np.shape(data_set))
     dt = 2
     print('shape of plume_features', np.shape(plume_features))
@@ -341,7 +347,7 @@ print('u_mean', u_mean)
 print('norm_std', norm_std)
 
 # find max mins for active array calcs
-_, _, RH, w, b_anom = active_array_truth(data_set[:N_washout+N_train], z)
+_, _, RH, w, b_anom = active_array_truth(data_set[:], z)
 RH_min     = RH.min()
 RH_max     = RH.max()
 w_max      = w.max()
@@ -1034,7 +1040,8 @@ if test_interval:
                                 hovmoller_plus_plumes(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j, images_test_path+f"/hovmol_plumes")
                             elif plumetype == 'positions':
                                 hovmoller_plus_plume_pos(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j, images_test_path+f"/hovmol_plume_positions")
-
+                            elif plumetype == 'sincospositions':
+                                hovmoller_plus_plume_sincospos(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j,  images_test_path+f"/hovmol_plume_sincospositions", x_domain=(0,20))
 
         # accumulation for each ensemble member
         ens_nrmse[j]       = ens_nrmse[j] / N_test
@@ -1275,13 +1282,20 @@ if initiation_interval:
     threshold_ph = threshold_ph
 
     ensemble_test = 5
+    n_bins        = 3
 
-    ens_pred        = np.zeros((N_intt, dim, ensemble_test))
-    ens_PH          = np.zeros((N_test, ensemble_test))
-    ens_prec        = np.zeros((N_test, ensemble_test))
-    ens_recall      = np.zeros((N_test, ensemble_test))
-    ens_f1          = np.zeros((N_test, ensemble_test))
-    ens_acc         = np.zeros((N_test, ensemble_test))
+    ens_pred             = np.zeros((N_intt, dim, ensemble_test))
+    ens_PH               = np.zeros((N_test, ensemble_test))
+    ens_prec             = np.zeros((N_test, ensemble_test))
+    ens_recall           = np.zeros((N_test, ensemble_test))
+    ens_f1               = np.zeros((N_test, ensemble_test))
+    ens_acc              = np.zeros((N_test, ensemble_test))
+    interval_true_counts = np.zeros((N_intt, N_test, ensemble_test))
+    interval_pred_counts = np.zeros((N_intt, N_test, ensemble_test))
+    # pre-allocate arrays for metrics: shape (N_test, ensemble_test, n_bins)
+    spatial_precision = np.zeros((N_test, ensemble_test, n_bins))
+    spatial_recall    = np.zeros((N_test, ensemble_test, n_bins))
+    spatial_f1        = np.zeros((N_test, ensemble_test, n_bins))
 
     images_test_path = init_path+'/test_images/'
     if not os.path.exists(images_test_path):
@@ -1340,15 +1354,21 @@ if initiation_interval:
             ens_PH[i,j] = PH[i]
 
             ##### reconstructions ####
-            _, reconstructed_truth       = inverse_POD(Y_t, pca_)
-            _, reconstructed_predictions = inverse_POD(Yh_t, pca_)
+            if Data == 'RB_plume':
+                _, reconstructed_truth       = inverse_POD(Y_t[:,:n_components], pca_)
+                _, reconstructed_predictions = inverse_POD(Yh_t[:,:n_components], pca_)
+                plume_features_truth         = Y_t[:,n_components:]
+                plume_features_predictions   = Yh_t[:,n_components:]
+            else:
+                _, reconstructed_truth       = inverse_POD(Y_t, pca_)
+                _, reconstructed_predictions = inverse_POD(Yh_t, pca_)
 
             # rescale
             reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
             reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
 
-            ### active points
-            plume_score_threshold = 0.7
+            ### active array based on score points
+            plume_score_threshold = 0.1
             active_array, mask_expanded, _,_,_ = active_array_truth(data_set_Y_t, z)
             active_array_POD, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(reconstructed_truth, reconstructed_predictions, z)
             active_array_POD_score, active_array_reconstructed_score, mask_score, mask_reconstructed_score = active_array_calc_prob(reconstructed_truth, reconstructed_predictions, z, RH_min, RH_max, w_min, w_max, b_anom_min, b_anom_max, plume_score_threshold)
@@ -1369,6 +1389,89 @@ if initiation_interval:
             ens_recall[i, j] = recall
             ens_f1[i, j]     = f1
             ens_acc[i, j]    = acc_sco
+
+            if Data == 'RB_plume':
+                if plumetype == 'sincospositions':
+                    ### timing only ###
+                    strength_threshold = 0
+                    true_counts = np.sum(plume_features_truth[:, 2::3] > strength_threshold, axis=1)
+                    pred_counts = np.sum(plume_features_predictions[:, 2::3] > strength_threshold, axis=1)
+                    
+                    interval_true_counts[:, i, j] = true_counts
+                    interval_pred_counts[:, i, j] = pred_counts
+
+                    ### timing and spatial ###
+                    x_min = 0
+                    x_max = 20
+                    delta_x = 1.0  # tolerance for a hit
+                    n_bins  = 3
+
+                    for v in range(3):
+                        cos_vals_truth = plume_features_truth[:, v*3]      # cos
+                        sin_vals_truth = plume_features_truth[:, v*3 + 1]  # sin
+                        strength_truth = plume_features_truth[:, v*3 + 2]  # KE
+
+                        cos_vals_pred = plume_features_predictions[:, v*3]      # cos
+                        sin_vals_pred = plume_features_predictions[:, v*3 + 1]  # sin
+                        strength_pred = plume_features_predictions[:, v*3 + 2]  # KE
+
+                        # Recover downsampled x position
+                        angles_truth = np.arctan2(sin_vals_truth, cos_vals_truth)  # [-π, π]
+                        angles_truth[angles_truth < 0] += 2*np.pi  # wrap negative angles
+                        x_vals_truth = x_min + (x_max - x_min) * angles_truth / (2*np.pi)
+
+                        # Recover downsampled x position
+                        angles_pred = np.arctan2(sin_vals_pred, cos_vals_pred)  # [-π, π]
+                        angles_pred[angles_pred < 0] += 2*np.pi  # wrap negative angles
+                        x_vals_pred = x_min + (x_max - x_min) * angles_pred / (2*np.pi)
+
+                        valid_mask_truth = strength_truth > 0
+                        valid_mask_pred  = strength_pred > 0
+
+                        # Apply mask to keep only plumes with strength > 0
+                        x_vals_truth = x_vals_truth[valid_mask_truth]
+                        x_vals_pred  = x_vals_pred[valid_mask_pred]
+
+                        strength_truth = strength_truth[valid_mask_truth]
+                        strength_pred  = strength_pred[valid_mask_pred]
+
+                        # split interval into bins
+                        bin_edges = np.linspace(0, N_intt, n_bins+1, dtype=int)
+
+                        for b in range(n_bins):
+                            start_idx = bin_edges[b]
+                            end_idx   = bin_edges[b+1]
+
+                            # positions in this sub-interval
+                            x_truth_bin = x_vals_truth[start_idx:end_idx]
+                            x_pred_bin  = x_vals_pred[start_idx:end_idx]
+
+                            hits = 0
+                            false_positives = 0
+
+                            # check hits: for each true plume, see if a predicted plume is within delta_x
+                            for xt in x_truth_bin:
+                                if np.any(np.abs(x_pred_bin - xt) <= delta_x):
+                                    hits += 1
+
+                            # check false positives: predicted plumes without nearby true plume
+                            for xp in x_pred_bin:
+                                if not np.any(np.abs(x_truth_bin - xp) <= delta_x):
+                                    false_positives += 1
+
+                            # compute precision, recall, F1
+                            tp = hits
+                            fp = false_positives
+                            fn = len(x_truth_bin) - hits
+
+                            precision = tp / (tp + fp) if (tp + fp) > 0 else 1.0
+                            recall    = tp / (tp + fn) if (tp + fn) > 0 else 1.0
+                            f1        = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+
+                            spatial_precision[i, j, b] = precision
+                            spatial_recall[i, j, b]    = recall
+                            spatial_f1[i, j, b]        = f1
+
 
             if plot:
                 #left column has the washout (open-loop) and right column the prediction (closed-loop)
@@ -1395,7 +1498,17 @@ if initiation_interval:
                             ax[v].set_ylabel('x')
                         fig.savefig(images_test_path+f"/active_plumes_truevscore{plume_score_threshold}_ens{j}_test{i}.png")
                         plt.close()
-    
+
+                        fig, ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
+                        ax.plot(xx, true_counts, label='True')
+                        ax.plot(xx, pred_counts, label='ESN')
+                        ax.set_xlabel('Time [LTs]')
+                        ax.set_ylabel('Number of plumes')
+                        ax.legend()
+                        ax.grid()
+                        fig.savefig(images_test_path+f"/number_of_plumes_ens{j}_test{i}.png")
+
+    ### active array based on score ###
     metrics = {
         "precision": ens_prec,
         "recall": ens_recall,
@@ -1445,48 +1558,150 @@ if initiation_interval:
     fig.savefig(init_path+f"/metrics_per_test_{plume_score_threshold}.png")
 
     ### per ensemble
+    metrics = {
+        "precision": ens_prec,
+        "recall": ens_recall,
+        "f1": ens_f1,
+        "accuracy": ens_acc
+    }
+
+    # Compute stats per ensemble
     stats_per_ens = {}
     for name, arr in metrics.items():
-        mean   = np.mean(arr, axis=0)
+        mean = np.mean(arr, axis=0)       # shape: (ensemble_test, n_bins)
         median = np.median(arr, axis=0)
-        uq     = np.percentile(arr, 75, axis=0)
-        lq     = np.percentile(arr, 25, axis=0)
-    
-    stats_per_ens[name] = {
-        "mean": mean,
-        "median": median,
-        "UQ": uq,
-        "LQ": lq,
-    }
+        uq = np.percentile(arr, 75, axis=0)
+        lq = np.percentile(arr, 25, axis=0)
+        
+        stats_per_ens[name] = {
+            "mean": mean,
+            "median": median,
+            "UQ": uq,
+            "LQ": lq,
+        }
 
-    ## overall
+    # Compute overall stats (average across all ensembles and tests)
     stats_all = {}
     for name, arr in metrics.items():
-        mean   = np.mean(active_array_calc)
+        mean = np.mean(arr)
         median = np.median(arr)
-        uq     = np.percentile(arr, 75)
-        lq     = np.percentile(arr, 25)
-    
-    stats_all[name] = {
-        "mean": mean,
-        "median": median,
-        "UQ": uq,
-        "LQ": lq,
-    }
+        uq = np.percentile(arr, 75)
+        lq = np.percentile(arr, 25)
+        
+        stats_all[name] = {
+            "mean": mean,
+            "median": median,
+            "UQ": uq,
+            "LQ": lq,
+        }
 
-    fig, axes = plt.subplots(4, figsize=(12,12), tight_layout=True)
-    axes = axes.flatten()
-    PTs = np.arange(1, 6, 1)
-    labels = ['Mem 1', 'Mem 2', 'Mem 3', 'Mem 4', 'Mem 5', 'Avg']
-    #PTs = ['0']
-    metrics = ["precision", "recall", "f1", "accuracy"]
-    for index, element in enumerate(metrics_labels):
-        ax = axes[index]
-        plot_barchart_errors(PTs, stats[element]["median"], stats[element]["mean"], stats[element]["LQ"], stats[element]["UQ"], 'Tests', 0.5, fig, ax, color1='tab:blue', color2='black', marker2='o')
-        ax.set_ylabel(element)
+    # Plotting
+    labels = [f"Mem {i+1}" for i in range(ensemble_test)] + ["Avg"]
+    x = np.arange(len(labels))
+
+    fig, axes = plt.subplots(3, 1, figsize=(10, 10), tight_layout=True)
+
+    for idx, metric in enumerate(["precision", "recall", "f1", "accuracy"]):
+        ax = axes[idx]
+        
+        # Ensemble members
+        ax.bar(x[:-1], stats_per_ens[metric]["mean"], yerr=[stats_per_ens[metric]["mean"] - stats_per_ens[metric]["LQ"],
+                                                            stats_per_ens[metric]["UQ"] - stats_per_ens[metric]["mean"]],
+            capsize=5, label="Ensemble Members")
+        
+        # Overall average
+        ax.bar(x[-1], stats_all[metric]["mean"], yerr=[[stats_all[metric]["mean"] - stats_all[metric]["LQ"]],
+                                                    [stats_all[metric]["UQ"] - stats_all[metric]["mean"]]],
+            color='black', label="Avg")
+        
         ax.set_xticks(x)
         ax.set_xticklabels(labels)
-    fig.savefig(init_path+f"/metrics_per_ens_{plume_score_threshold}.png")
+        ax.set_ylabel(metric)
+        ax.set_ylim(0, 1)
+        ax.legend()
+
+    ## cos sin positions plumes ##
+    # Flatten everything: timesteps × test intervals × ensembles → 1D arrays
+    true_flat = (interval_true_counts > 0).flatten().astype(int)   # consider a plume present if count > 0
+    pred_flat = (interval_pred_counts > 0).flatten().astype(int)
+
+    # Compute metrics
+    precision_cs = precision_score(true_flat, pred_flat)
+    recall_cs    = recall_score(true_flat, pred_flat)
+    f1_cs        = f1_score(true_flat, pred_flat)
+    accuracy_cs  = accuracy_score(true_flat, pred_flat)
+
+    # Full path for saving the file
+    output_file_ALL = 'ESN_init_metrics_all.json' 
+
+    output_path_met_ALL = os.path.join(init_path, output_file_ALL)
+
+    metrics_ens_ALL = {
+    "precision_cs": precision_cs,
+    "recall_cs": recall_cs,
+    "f1_cs": f1_cs,
+    "accuracy_cs": accuracy_cs,
+    }
+
+    with open(output_path_met_ALL, "w") as file:
+        json.dump(metrics_ens_ALL, file, indent=4)
+
+    ## cos sin spatial positions plumes ##
+    # spatial arrays shape: (N_test, ensemble_test, n_bins)
+    mean_precision_per_bin = spatial_precision.mean(axis=(0,1))  # shape (n_bins,)
+    mean_recall_per_bin    = spatial_recall.mean(axis=(0,1))
+    mean_f1_per_bin        = spatial_f1.mean(axis=(0,1))
+
+    print("Mean precision per bin:", mean_precision_per_bin)
+    print("Mean recall per bin   :", mean_recall_per_bin)
+    print("Mean F1 per bin       :", mean_f1_per_bin)
+
+    bins = np.arange(1, n_bins+1)
+
+    def plot_metric(ax, vals, label, color):
+        mean_vals = vals.mean(axis=0)        # mean across tests
+        median_vals = np.median(vals, axis=0)
+        LQ = np.percentile(vals, 25, axis=0)
+        UQ = np.percentile(vals, 75, axis=0)
+
+        ax.plot(bins, mean_vals, label=f'{label} mean', color=color, marker='o')
+        ax.fill_between(bins, LQ, UQ, color=color, alpha=0.2)
+        ax.plot(bins, median_vals, label=f'{label} median', color=color, linestyle='--')
+        ax.set_xlabel('Sub-Interval Bin')
+        ax.set_ylabel(label)
+        ax.set_ylim(0, 1.05)
+        ax.grid(True)
+        ax.legend()
+
+    for e in range(ensemble_test):
+        fig, axs = plt.subplots(3, 1, figsize=(8, 12), sharex=True)
+        fig.suptitle(f'Ensemble Member {e+1}: Metric statistics per bin')
+
+        precision_vals = spatial_precision[:, e, :]  # shape: (N_test, n_bins)
+        recall_vals    = spatial_recall[:, e, :]
+        f1_vals        = spatial_f1[:, e, :]
+
+        plot_metric(axs[0], precision_vals, 'Precision', 'C0')
+        plot_metric(axs[1], recall_vals, 'Recall', 'C1')
+        plot_metric(axs[2], f1_vals, 'F1', 'C2')
+
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+        fig.savefig(init_path+f"/metrics_spatial_ens{e}.png")
+
+    # ----- Average across all ensembles -----
+    fig, axs = plt.subplots(3, 1, figsize=(8, 12), sharex=True)
+    fig.suptitle('Average Across All Ensemble Members')
+
+    precision_vals_avg = spatial_precision.mean(axis=1)  # mean across ensembles
+    recall_vals_avg    = spatial_recall.mean(axis=1)
+    f1_vals_avg        = spatial_f1.mean(axis=1)
+
+    plot_metric(axs[0], precision_vals_avg, 'Precision', 'C0')
+    plot_metric(axs[1], recall_vals_avg, 'Recall', 'C1')
+    plot_metric(axs[2], f1_vals_avg, 'F1', 'C2')
+
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    fig.savefig(init_path+f"/metrics_spatial_allens.png")
 
     print('finished testing')
 

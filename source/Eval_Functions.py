@@ -747,3 +747,4 @@ def extract_plume_features(new_array, z_range=(5, 10)):
         features[t] = [num_plumes, mean_size, mean_x, x_spread]
 
     return features  # shape (time, 4)
+
