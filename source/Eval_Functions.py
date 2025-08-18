@@ -581,7 +581,7 @@ def active_array_calc_prob(original_data, reconstructed_data, z, rh_min, rh_max,
     w_scaled_reconstructed  = (w_reconstructed - w_min)/(w_max - w_min)
     b_scaled_reconstructed  = (b_anom_reconstructed - b_anom_min)/(b_anom_max - b_anom_min)
 
-    RH_threshold = 0.85 # just below 25th %#0.389 # minm
+    RH_threshold = 0.80 # just below 25th %#0.389 # minm
     RH_threshold_scaled = (RH_threshold - rh_min)/(rh_max - rh_min)
     w_threshold = 0 #-0.036 #minm
     w_threshold_scaled = (w_threshold - w_min) / (w_max - w_min)
@@ -748,3 +748,133 @@ def extract_plume_features(new_array, z_range=(5, 10)):
 
     return features  # shape (time, 4)
 
+def _as_plumes(feats, num_plumes=3):
+    """
+    feats: (T, 3*num_plumes) laid out as [cos, sin, KE, cos, sin, KE, ...]
+    returns: (T, num_plumes, 3) -> last axis = [cos, sin, KE]
+    """
+    cos = feats[:, 0::3]
+    sin = feats[:, 1::3]
+    ke  = feats[:, 2::3]
+    return np.stack([cos, sin, ke], axis=2)
+
+def plume_mse_per_plume(true_feats, pred_feats):
+    """
+    MSE per plume at each time.
+    returns: (T, 3)
+    """
+    t3 = _as_plumes(true_feats)   # (T,3,3)
+    p3 = _as_plumes(pred_feats)   # (T,3,3)
+    return np.mean((t3 - p3)**2, axis=2)
+
+def plume_mse_overall(true_feats, pred_feats):
+    """
+    Single scalar MSE averaged over time, plumes, and features.
+    """
+    t3 = _as_plumes(true_feats)
+    p3 = _as_plumes(pred_feats)
+    return np.mean((t3 - p3)**2)
+
+def angular_error_per_plume(true_feats, pred_feats):
+    """
+    Angular difference (radians) between true/predicted positions per plume/time.
+    returns: (T, 3)
+    """
+    t3 = _as_plumes(true_feats)
+    p3 = _as_plumes(pred_feats)
+    dot = t3[:,:,0]*p3[:,:,0] + t3[:,:,1]*p3[:,:,1]   # cos_t*cos_p + sin_t*sin_p
+    dot = np.clip(dot, -1.0, 1.0)
+    return np.arccos(dot)
+
+def to_xpos(feats, num_plumes=3, x_min=0, x_max=20):
+    """
+    feats: (T, 3*num_plumes) laid out as [cos, sin, KE, cos, sin, KE, ...]
+    returns: x positions (T, num_plumes), KE (T, num_plumes)
+    """
+    
+    plume_feats_pp = _as_plumes(feats, num_plumes=3) # (T, num_plumes, 3) -> last axis = [cos, sin, KE]
+    
+    cos = plume_feats_pp[:,:,0]
+    sin = plume_feats_pp[:,:,1]
+    ke  = plume_feats_pp[:,:,2]
+
+    angles = np.arctan2(sin, cos)  # [-π, π]
+    angles[angles < 0] += 2*np.pi   # wrap to [0, 2π]
+
+    xpos = x_min + (x_max - x_min) * angles / (2*np.pi)
+    return xpos, ke
+
+def bin_intervals(xpos, ke, N_int):
+    """
+    xpos, ke: (T, num_plumes)
+    returns: list of arrays, one per interval
+    """
+    T = xpos.shape[0]
+    n_bins = T // N_int
+    bins = []
+    for b in range(n_bins):
+        start, end = b*N_int, (b+1)*N_int
+        bins.append((xpos[start:end], ke[start:end]))
+    return bins
+
+def plume_metrics(true_feats, pred_feats, num_plumes=3, delta_x=1.0, 
+                         x_min=0, x_max=20, n_bins=10):
+    """
+    true_feats, pred_feats: (T, 3*num_plumes) arrays
+    returns:
+        precision: (n_bins,)
+        recall:    (n_bins,)
+        f1:        (n_bins,)
+    """
+
+    T         = true_feats.shape[0]
+    bin_edges = np.linspace(0, T, n_bins+1, dtype=int) 
+
+    t3 = _as_plumes(true_feats)
+    p3 = _as_plumes(pred_feats)
+
+    x_true, ke_true = to_xpos(t3)
+    x_pred, ke_pred = to_xpos(p3)
+
+    precisions, recalls, f1s = [], [], []
+
+    for b in range(n_bins):
+        start, end = bin_edges[b], bin_edges[b+1]
+        print(f"starting bin {b} from {start} to {end}")
+
+        # gather plumes across the interval
+        xt = x_true[start:end].reshape(-1)
+        xp = x_pred[start:end].reshape(-1)
+        kt = ke_true[start:end].reshape(-1)
+        kp = ke_pred[start:end].reshape(-1)
+
+        # keep only "active" plumes
+        xt = xt[kt > 0]
+        xp = xp[kp > 0]
+
+        hits = 0
+        false_pos = 0
+
+        # for each true plume, see if pred is nearby
+        for v in xt:
+            if np.any(np.abs(xp - v) <= delta_x):
+                hits += 1
+
+        # false positives = preds without nearby true
+        for v in xp:
+            if not np.any(np.abs(xt - v) <= delta_x):
+                false_pos += 1
+
+        tp = hits
+        fp = false_pos
+        fn = len(xt) - hits
+
+        prec = tp / (tp + fp) if (tp + fp) > 0 else 1.0
+        rec  = tp / (tp + fn) if (tp + fn) > 0 else 1.0
+        f1   = 2*prec*rec / (prec+rec) if (prec+rec) > 0 else 0.0
+
+        precisions.append(prec)
+        recalls.append(rec)
+        f1s.append(f1)
+
+    return np.array(precisions), np.array(recalls), np.array(f1s) # (n_bins, n_bins, n_bins)

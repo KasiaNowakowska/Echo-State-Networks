@@ -24,6 +24,8 @@ import h5py
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
+from scipy.stats import percentileofscore
+from matplotlib.colors import ListedColormap, BoundaryNorm
 import json
 import gc
 from Eval_Functions import *
@@ -355,31 +357,38 @@ if POD_type == 'together':
             b_anom_in_true_plumes = b_anom_recon[mask_original]
 
             # Print quick stats
-            def describe(name, arr):
+            def describe(name, arr, value=None):
                 print(f"{name} in true plume regions:")
                 print(f"  mean: {np.mean(arr):.3f}")
                 print(f"  median: {np.median(arr):.3f}")
                 print(f"  min/max: {np.min(arr):.3f} / {np.max(arr):.3f}")
                 print(f"  25th/75th pct: {np.percentile(arr, 25):.3f} / {np.percentile(arr, 75):.3f}")
+                
+                if value is not None:
+                    pct = percentileofscore(arr, value, kind="rank")
+                    print(f"  Value {value:.3f} is at the {pct:.1f}th percentile")
                 print()
 
-            describe("RH", RH_in_true_plumes)
-            describe("w", w_in_true_plumes)
-            describe("b_anom", b_anom_in_true_plumes)
+            describe("RH", RH_in_true_plumes, value=0.8)
+            describe("w", w_in_true_plumes, value=0)
+            describe("b_anom", b_anom_in_true_plumes, value=0)
 
             fig, ax = plt.subplots(1, 3, figsize=(12,3), tight_layout=True)
             ax[0].hist(RH_in_true_plumes, bins=50)
             ax[0].set_xlabel('RH')
+            ax[0].axvline(x=0.8, color='tab:red', linestyle='--')
             ax[1].hist(w_in_true_plumes, bins=50)
             ax[1].set_xlabel('w')
+            ax[1].axvline(x=0, color='tab:red', linestyle='--')
             ax[2].hist(b_anom_in_true_plumes, bins=50)
             ax[2].set_xlabel("b'")
+            ax[2].axvline(x=0, color='tab:red', linestyle='--')
             fig.savefig(output_path+'/stats.png')
 
             #thresholds = [0.6, 0.65, 0.68, 0.7, 0.75, 0.8]
-            #thresholds = [0.20,0.21,0.22,0.23,0.24,0.25,0.26,0.27,0.28,0.29,0.30]
-            thresholds = [0.2,0.3,0.4]
-            chunk_size = 500
+            thresholds = [0.20, 0.25, 0.30]
+            #thresholds = [0.2,0.4,0.6,0.8]
+            chunk_size = 1000
             time_steps = active_array.shape[0]
 
             precision_all = []
@@ -416,18 +425,40 @@ if POD_type == 'together':
                     accuracy_vals.append(accuracy_score(flatten_true, flatten_recon))
 
                     if start == 0:
+                        cmap_b = ListedColormap(['white', 'red'])
+                        bounds = [-0.5, 0.5, 1.5]
+                        norm = BoundaryNorm(bounds, cmap_b.N)
+
                         fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
-                        c1 = ax[0].contourf(time_vals[:1000], x, active_array[:1000,:, 32].T, cmap='Reds')
-                        fig.colorbar(c1, ax=ax[0])
+                        c1 = ax[0].pcolormesh(time_vals[:1000], x, active_array[:1000,:, 32].T, cmap='Reds')
+                        #fig.colorbar(c1, ax=ax[0])
                         ax[0].set_title('True Active Points')
-                        c2 = ax[1].contourf(time_vals[:1000], x, active_array_reconstructed_score[:1000,:, 32].T, cmap='Reds')
-                        fig.colorbar(c1, ax=ax[1])
+                        c2 = ax[1].pcolormesh(time_vals[:1000], x, active_array_reconstructed_score[:1000,:, 32].T, cmap='Reds')
+                        #fig.colorbar(c1, ax=ax[1])
                         ax[1].set_title('Reconstruction Scored Points')
                         for v in range(2):
                             ax[v].set_xlabel('time')
                             ax[v].set_ylabel('x')
-                        fig.savefig(output_path+f"/active_plumes_true_choicevals{plume_score_threshold}_{c_names[index]}.png")
+                        fig.savefig(output_path+f"/active_plumes_true_new11200_binary{plume_score_threshold}_{c_names[index]}.png")
                         plt.close()
+
+                        fig, ax = plt.subplots(3, figsize=(12,12), tight_layout=True)
+                        c1 = ax[0].pcolormesh(time_vals[:1000], x, active_array[:1000,:, 32].T, cmap='Reds')
+                        #fig.colorbar(c1, ax=ax[0])
+                        ax[0].set_title('True Active Points')
+                        c2 = ax[1].pcolormesh(time_vals[:1000], x, active_array_reconstructed[:1000,:, 32].T, cmap='Reds')
+                        #fig.colorbar(c1, ax=ax[1])
+                        ax[1].set_title('Reconstruction Points from Criteria')
+                        c3 = ax[2].pcolormesh(time_vals[:1000], x, active_array_reconstructed_score[:1000,:, 32].T, cmap='Reds')
+                        #fig.colorbar(c1, ax=ax[1])
+                        ax[2].set_title('Reconstruction Points from Plume Score')
+                        for v in range(3):
+                            ax[v].set_xlabel('time')
+                            ax[v].set_ylabel('x')
+                        fig.savefig(output_path+f"/active_plumes_true_new11200_binary_plusold{plume_score_threshold}_{c_names[index]}.png")
+                        plt.close()
+
+
 
                     # Free memory
                     del active_array_score, active_array_reconstructed_score, mask_score, mask_reconstructed_score
@@ -457,54 +488,54 @@ if POD_type == 'together':
             for v in range(4):
                 ax[v].set_xlabel('Threshold')
                 ax[v].grid()
-            fig.savefig(output_path+'/metric_scores_0203.png')
+            fig.savefig(output_path+'/metric_scores_new112000.png')
 
         else:
             nrmse_plume = np.inf
             nrmse_sep_plume = np.inf
 
-        ### plt part of domain ###
-        if reduce_data_set:
-             plot_reconstruction_and_error(data_set[:500], data_reconstructed[:500], 32, 100, x, z, time_vals[:500], names, output_path+c_names[index]+'_500')
-        else:
-            plot_reconstruction_and_error(data_set[:500], data_reconstructed[:500], 32, 75, x, z, time_vals[:500], names, output_path+c_names[index]+'_500')
-        #np.save(output_path+'/POD_reconstructed.npy', data_reconstructed[:500])
-        #np.save(output_path+'/TrueData.npy', data_set[:500])
+        # ### plt part of domain ###
+        # if reduce_data_set:
+        #      plot_reconstruction_and_error(data_set[:500], data_reconstructed[:500], 32, 100, x, z, time_vals[:500], names, output_path+c_names[index]+'_500')
+        # else:
+        #     plot_reconstruction_and_error(data_set[:500], data_reconstructed[:500], 32, 75, x, z, time_vals[:500], names, output_path+c_names[index]+'_500')
+        # #np.save(output_path+'/POD_reconstructed.npy', data_reconstructed[:500])
+        # #np.save(output_path+'/TrueData.npy', data_set[:500])
 
-        print('NRMSE', nrmse)
-        print('MSE', mse)
-        print('EVR_recon', evr)
-        print('SSIM', SSIM)
-        print('NRMSE plume', nrmse_plume)
-        print('NRMSE per channel', nrmse_sep)
+        # print('NRMSE', nrmse)
+        # print('MSE', mse)
+        # print('EVR_recon', evr)
+        # print('SSIM', SSIM)
+        # print('NRMSE plume', nrmse_plume)
+        # print('NRMSE per channel', nrmse_sep)
 
-        # Full path for saving the file
-        output_file = c_names[index] + '_metrics.json' 
+        # # Full path for saving the file
+        # output_file = c_names[index] + '_metrics.json' 
 
-        output_path_met = os.path.join(output_path, output_file)
+        # output_path_met = os.path.join(output_path, output_file)
 
-        metrics = {
-        "no. modes": n_modes,
-        "EVR": evr,
-        "MSE": mse,
-        "NRMSE": nrmse,
-        "SSIM": SSIM,
-        "cumEV from POD": cev,
-        "NRMSE plume": nrmse_plume,
-        "NRMSE per channel": nrmse_sep,
-        "NRMSE plume per channel": nrmse_sep_plume,
-        }
+        # metrics = {
+        # "no. modes": n_modes,
+        # "EVR": evr,
+        # "MSE": mse,
+        # "NRMSE": nrmse,
+        # "SSIM": SSIM,
+        # "cumEV from POD": cev,
+        # "NRMSE plume": nrmse_plume,
+        # "NRMSE per channel": nrmse_sep,
+        # "NRMSE plume per channel": nrmse_sep_plume,
+        # }
 
-        with open(output_path_met, "w") as file:
-            json.dump(metrics, file, indent=4)
+        # with open(output_path_met, "w") as file:
+        #     json.dump(metrics, file, indent=4)
 
-        nrmse_list.append(nrmse)
-        ssim_list.append(SSIM)
-        evr_list.append(evr)
-        cumEV_list.append(cev)
-        nrmse_plume_list.append(nrmse_plume)
-        nrmse_sep_list.append(nrmse_sep)
-        nrmse_sep_plume_list.append(nrmse_sep_plume)
+        # nrmse_list.append(nrmse)
+        # ssim_list.append(SSIM)
+        # evr_list.append(evr)
+        # cumEV_list.append(cev)
+        # nrmse_plume_list.append(nrmse_plume)
+        # nrmse_sep_list.append(nrmse_sep)
+        # nrmse_sep_plume_list.append(nrmse_sep_plume)
 
 #         if projection:
 #             proj_path = output_path+f"/proj{n_modes}/"

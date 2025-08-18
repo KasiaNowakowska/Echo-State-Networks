@@ -41,6 +41,7 @@ from sklearn.metrics import mean_squared_error
 from skimage.metrics import structural_similarity as ssim
 from scipy.stats import wasserstein_distance
 from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
+from matplotlib.colors import ListedColormap, BoundaryNorm
 from Eval_Functions import *
 from Plotting_Functions import *
 from POD_functions import *
@@ -1368,7 +1369,7 @@ if initiation_interval:
             reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
 
             ### active array based on score points
-            plume_score_threshold = 0.1
+            plume_score_threshold = 0.17
             active_array, mask_expanded, _,_,_ = active_array_truth(data_set_Y_t, z)
             active_array_POD, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(reconstructed_truth, reconstructed_predictions, z)
             active_array_POD_score, active_array_reconstructed_score, mask_score, mask_reconstructed_score = active_array_calc_prob(reconstructed_truth, reconstructed_predictions, z, RH_min, RH_max, w_min, w_max, b_anom_min, b_anom_max, plume_score_threshold)
@@ -1392,6 +1393,11 @@ if initiation_interval:
 
             if Data == 'RB_plume':
                 if plumetype == 'sincospositions':
+                    ### direct errror on plumes cos, sin, KE
+                    plume_MSE_pp = plume_mse_per_plume(plume_features_truth, plume_features_predictions) # (time, MSE1, MSE2, MSE3)
+                    plume_MSE    = plume_mse_overall(plume_features_truth, plume_features_predictions) # (MSE) over all each plume,feature and time
+                    ang_error_pp = angular_error_per_plume(plume_features_truth, plume_features_predictions) # (time, ang_1, ang_2, ang_3)
+
                     ### timing only ###
                     strength_threshold = 0
                     true_counts = np.sum(plume_features_truth[:, 2::3] > strength_threshold, axis=1)
@@ -1406,71 +1412,12 @@ if initiation_interval:
                     delta_x = 1.0  # tolerance for a hit
                     n_bins  = 3
 
-                    for v in range(3):
-                        cos_vals_truth = plume_features_truth[:, v*3]      # cos
-                        sin_vals_truth = plume_features_truth[:, v*3 + 1]  # sin
-                        strength_truth = plume_features_truth[:, v*3 + 2]  # KE
-
-                        cos_vals_pred = plume_features_predictions[:, v*3]      # cos
-                        sin_vals_pred = plume_features_predictions[:, v*3 + 1]  # sin
-                        strength_pred = plume_features_predictions[:, v*3 + 2]  # KE
-
-                        # Recover downsampled x position
-                        angles_truth = np.arctan2(sin_vals_truth, cos_vals_truth)  # [-π, π]
-                        angles_truth[angles_truth < 0] += 2*np.pi  # wrap negative angles
-                        x_vals_truth = x_min + (x_max - x_min) * angles_truth / (2*np.pi)
-
-                        # Recover downsampled x position
-                        angles_pred = np.arctan2(sin_vals_pred, cos_vals_pred)  # [-π, π]
-                        angles_pred[angles_pred < 0] += 2*np.pi  # wrap negative angles
-                        x_vals_pred = x_min + (x_max - x_min) * angles_pred / (2*np.pi)
-
-                        valid_mask_truth = strength_truth > 0
-                        valid_mask_pred  = strength_pred > 0
-
-                        # Apply mask to keep only plumes with strength > 0
-                        x_vals_truth = x_vals_truth[valid_mask_truth]
-                        x_vals_pred  = x_vals_pred[valid_mask_pred]
-
-                        strength_truth = strength_truth[valid_mask_truth]
-                        strength_pred  = strength_pred[valid_mask_pred]
-
-                        # split interval into bins
-                        bin_edges = np.linspace(0, N_intt, n_bins+1, dtype=int)
-
-                        for b in range(n_bins):
-                            start_idx = bin_edges[b]
-                            end_idx   = bin_edges[b+1]
-
-                            # positions in this sub-interval
-                            x_truth_bin = x_vals_truth[start_idx:end_idx]
-                            x_pred_bin  = x_vals_pred[start_idx:end_idx]
-
-                            hits = 0
-                            false_positives = 0
-
-                            # check hits: for each true plume, see if a predicted plume is within delta_x
-                            for xt in x_truth_bin:
-                                if np.any(np.abs(x_pred_bin - xt) <= delta_x):
-                                    hits += 1
-
-                            # check false positives: predicted plumes without nearby true plume
-                            for xp in x_pred_bin:
-                                if not np.any(np.abs(x_truth_bin - xp) <= delta_x):
-                                    false_positives += 1
-
-                            # compute precision, recall, F1
-                            tp = hits
-                            fp = false_positives
-                            fn = len(x_truth_bin) - hits
-
-                            precision = tp / (tp + fp) if (tp + fp) > 0 else 1.0
-                            recall    = tp / (tp + fn) if (tp + fn) > 0 else 1.0
-                            f1        = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
-
-                            spatial_precision[i, j, b] = precision
-                            spatial_recall[i, j, b]    = recall
-                            spatial_f1[i, j, b]        = f1
+                    p, r ,f = plume_metrics(plume_features_truth, plume_features_predictions, num_plumes=3, delta_x=1.0, 
+                         x_min=0, x_max=20, n_bins=3) 
+                    
+                    spatial_precision[i, j, :] = p
+                    spatial_recall[i, j, :]    = r
+                    spatial_f1[i, j, :]        = f
 
 
             if plot:
@@ -1482,40 +1429,112 @@ if initiation_interval:
                         print('reconstruction and error plot')
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
                         #plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, int(0.5*N_lyap), x, z, xx, names, images_test_path+'/ESN_validation_ens%i_test%i' %(j,i))
-                            
+                        
+                        cmap_b = ListedColormap(['white', 'red'])
+                        bounds_b = [-0.5, 0.5, 1.5]
+                        norm_b = BoundaryNorm(bounds_b, cmap_b.N)
+
                         fig, ax = plt.subplots(3, figsize=(12,12), tight_layout=True)
-                        c1 = ax[0].contourf(xx, x, active_array[:, :, 32].T, cmap='Reds')
+                        c1 = ax[0].pcolormesh(xx, x, active_array[:, :, 32].T, cmap=cmap_b, norm=norm_b)
                         fig.colorbar(c1, ax=ax[0])
                         ax[0].set_title('True Active Points')
-                        c2 = ax[1].contourf(xx, x, active_array_POD_score[:,:, 32].T, cmap='Reds')
+                        c2 = ax[1].pcolormesh(xx, x, active_array_POD_score[:,:, 32].T, cmap=cmap_b, norm=norm_b)
                         fig.colorbar(c2, ax=ax[1])
                         ax[1].set_title('POD Reconstruction Scored Points')
-                        c3 = ax[2].contourf(xx, x, active_array_reconstructed_score[:,:, 32].T, cmap='Reds')
+                        c3 = ax[2].pcolormesh(xx, x, active_array_reconstructed_score[:,:, 32].T, cmap=cmap_b, norm=norm_b)
                         fig.colorbar(c3, ax=ax[2])
                         ax[2].set_title('ESN Reconstruction Scored Points')
                         for v in range(3):
-                            ax[v].set_xlabel('time')
+                            ax[v].set_xlabel('Time [LTs]')
                             ax[v].set_ylabel('x')
-                        fig.savefig(images_test_path+f"/active_plumes_truevscore{plume_score_threshold}_ens{j}_test{i}.png")
+                        fig.savefig(images_test_path+f"/active_plumes_truevscorebinary{plume_score_threshold}_ens{j}_test{i}.png")
                         plt.close()
 
-                        fig, ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
-                        ax.plot(xx, true_counts, label='True')
-                        ax.plot(xx, pred_counts, label='ESN')
-                        ax.set_xlabel('Time [LTs]')
-                        ax.set_ylabel('Number of plumes')
-                        ax.legend()
-                        ax.grid()
-                        fig.savefig(images_test_path+f"/number_of_plumes_ens{j}_test{i}.png")
+                        if Data == 'RB_plume':
+                            if plumetype == 'sincospositions':
+                                fig, ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
+                                for v in range(3):
+                                    ax.plot(xx, plume_MSE_pp[:, v], label=f"Plume {v+1}")
+                                ax.set_xlabel('Time [LTs]')
+                                ax.set_ylabel('MSE')
+                                ax.legend()
+                                ax.grid()
+                                fig.savefig(images_test_path+f"/MSE_plume_features_ens_{j}_test{i}.png")
 
-    ### active array based on score ###
+                                fig, ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
+                                for v in range(3):
+                                    ax.plot(xx, ang_error_pp[:, v], label=f"Plume {v+1}")
+                                ax.set_xlabel('Time [LTs]')
+                                ax.set_ylabel('Angular Error')
+                                ax.legend()
+                                ax.grid()
+                                fig.savefig(images_test_path+f"/angerr_plume_features_ens_{j}_test{i}.png")
+
+
+                                fig, ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
+                                ax.plot(xx, true_counts, label='True')
+                                ax.plot(xx, pred_counts, label='ESN')
+                                ax.set_xlabel('Time [LTs]')
+                                ax.set_ylabel('Number of plumes')
+                                ax.legend()
+                                ax.grid()
+                                fig.savefig(images_test_path+f"/number_of_plumes_ens{j}_test{i}.png")
+
+                                fig, axs = plt.subplots(3, 1, figsize=(8, 12), sharex=True)
+                                fig.suptitle(f'Ensemble Member {j+1}: Metric statistics per bin')
+
+                                precision_vals = spatial_precision[i, j, :]  # shape: (N_test, n_bins)
+                                recall_vals    = spatial_recall[i, j, :]
+                                f1_vals        = spatial_f1[i, j, :]
+
+
+                                bar_width = 0.25
+                                bins = [1,2,3]
+                                axs[0].scatter(bins, precision_vals)
+                                axs[1].scatter(bins, recall_vals)
+                                axs[2].scatter(bins, f1_vals)
+
+                                plt.tight_layout(rect=[0, 0, 1, 0.96])
+                                axs[-1].set_xlabel('sub interval')
+                                fig.savefig(images_test_path+f"/metrics_spatial_ens{j}_test{i}.png")
+
+    def plot_barchart_errors(tests, median, mean, lower, upper, x_label, bar_width, fig, ax, color1='tab:blue', color2='black', marker2='o'):
+        lower_error = median - lower
+        upper_error = upper - median
+        yerr = np.vstack([lower_error, upper_error])
+
+        ax.bar(tests, mean, width=bar_width, align='center', label='Mean', color=color1, capsize=5, zorder=1) #align='center'
+        ax.errorbar(tests, median, yerr=yerr, fmt='o', ecolor=color2, markerfacecolor=color2, markeredgecolor=color2, capsize=5, label='Median with Q1-Q3')
+
+        ax.grid()
+        ax.set_xlabel(x_label, fontsize=16)
+        ax.set_ylabel(r"$\overline{\mathrm{PH}}$", fontsize=16)
+        ax.tick_params(labelsize=12)
+        ax.set_ylim(0,1)
+
+    def plot_metric(ax, vals, label, color):
+        mean_vals = vals.mean(axis=0)        # mean across tests
+        median_vals = np.median(vals, axis=0)
+        LQ = np.percentile(vals, 25, axis=0)
+        UQ = np.percentile(vals, 75, axis=0)
+
+        ax.plot(bins, mean_vals, label=f'{label} mean', color=color, marker='o')
+        ax.fill_between(bins, LQ, UQ, color=color, alpha=0.2)
+        ax.plot(bins, median_vals, label=f'{label} median', color=color, linestyle='--')
+        ax.set_xlabel('Sub-Interval Bin')
+        ax.set_ylabel(label)
+        ax.set_ylim(0, 1.05)
+        ax.grid(True)
+        ax.legend()
+
+
+    ### metrics from active array based on score ###
     metrics = {
         "precision": ens_prec,
         "recall": ens_recall,
         "f1": ens_f1,
         "accuracy": ens_acc
     }
-
 
     ### per test
     stats = {}
@@ -1531,20 +1550,6 @@ if initiation_interval:
             "UQ": uq,
             "LQ": lq,
         }
-    
-    def plot_barchart_errors(tests, median, mean, lower, upper, x_label, bar_width, fig, ax, color1='tab:blue', color2='black', marker2='o'):
-        lower_error = median - lower
-        upper_error = upper - median
-        yerr = np.vstack([lower_error, upper_error])
-
-        ax.bar(tests, mean, width=bar_width, align='center', label='Mean', color=color1, capsize=5, zorder=1) #align='center'
-        ax.errorbar(tests, median, yerr=yerr, fmt='o', ecolor=color2, markerfacecolor=color2, markeredgecolor=color2, capsize=5, label='Median with Q1-Q3')
-
-        ax.grid()
-        ax.set_xlabel(x_label, fontsize=16)
-        ax.set_ylabel(r"$\overline{\mathrm{PH}}$", fontsize=16)
-        ax.tick_params(labelsize=12)
-        ax.set_ylim(0,1)
 
     fig, axes = plt.subplots(4, figsize=(12,12), tight_layout=True)
     axes = axes.flatten()
@@ -1599,28 +1604,31 @@ if initiation_interval:
     labels = [f"Mem {i+1}" for i in range(ensemble_test)] + ["Avg"]
     x = np.arange(len(labels))
 
-    fig, axes = plt.subplots(3, 1, figsize=(10, 10), tight_layout=True)
+    fig, axes = plt.subplots(4, 1, figsize=(10, 10), tight_layout=True)
 
     for idx, metric in enumerate(["precision", "recall", "f1", "accuracy"]):
         ax = axes[idx]
         
         # Ensemble members
-        ax.bar(x[:-1], stats_per_ens[metric]["mean"], yerr=[stats_per_ens[metric]["mean"] - stats_per_ens[metric]["LQ"],
-                                                            stats_per_ens[metric]["UQ"] - stats_per_ens[metric]["mean"]],
+        ax.bar(x[:-1], stats_per_ens[metric]["median"], yerr=[stats_per_ens[metric]["median"] - stats_per_ens[metric]["LQ"],
+                                                            stats_per_ens[metric]["UQ"] - stats_per_ens[metric]["median"]],
             capsize=5, label="Ensemble Members")
+        ax.scatter(x[:-1], stats_per_ens[metric]["mean"])
         
         # Overall average
-        ax.bar(x[-1], stats_all[metric]["mean"], yerr=[[stats_all[metric]["mean"] - stats_all[metric]["LQ"]],
-                                                    [stats_all[metric]["UQ"] - stats_all[metric]["mean"]]],
+        ax.bar(x[-1], stats_all[metric]["median"], yerr=[[stats_all[metric]["median"] - stats_all[metric]["LQ"]],
+                                                    [stats_all[metric]["UQ"] - stats_all[metric]["median"]]],
             color='black', label="Avg")
+        ax.scatter(x[-1], stats_all[metric]["mean"])
         
         ax.set_xticks(x)
         ax.set_xticklabels(labels)
         ax.set_ylabel(metric)
         ax.set_ylim(0, 1)
         ax.legend()
+    fig.savefig(init_path+f"/metrics_per_ens_{plume_score_threshold}.png")
 
-    ## cos sin positions plumes ##
+    ## metrics from cos sin positions plumes ##
     # Flatten everything: timesteps × test intervals × ensembles → 1D arrays
     true_flat = (interval_true_counts > 0).flatten().astype(int)   # consider a plume present if count > 0
     pred_flat = (interval_pred_counts > 0).flatten().astype(int)
@@ -1637,6 +1645,7 @@ if initiation_interval:
     output_path_met_ALL = os.path.join(init_path, output_file_ALL)
 
     metrics_ens_ALL = {
+    "plume_MSE_features": plume_MSE,
     "precision_cs": precision_cs,
     "recall_cs": recall_cs,
     "f1_cs": f1_cs,
@@ -1658,20 +1667,7 @@ if initiation_interval:
 
     bins = np.arange(1, n_bins+1)
 
-    def plot_metric(ax, vals, label, color):
-        mean_vals = vals.mean(axis=0)        # mean across tests
-        median_vals = np.median(vals, axis=0)
-        LQ = np.percentile(vals, 25, axis=0)
-        UQ = np.percentile(vals, 75, axis=0)
-
-        ax.plot(bins, mean_vals, label=f'{label} mean', color=color, marker='o')
-        ax.fill_between(bins, LQ, UQ, color=color, alpha=0.2)
-        ax.plot(bins, median_vals, label=f'{label} median', color=color, linestyle='--')
-        ax.set_xlabel('Sub-Interval Bin')
-        ax.set_ylabel(label)
-        ax.set_ylim(0, 1.05)
-        ax.grid(True)
-        ax.legend()
+    #(vals, xlabel, bar_width, fig, ax, color1='tab:blue', color2='black', marker2='o'):
 
     for e in range(ensemble_test):
         fig, axs = plt.subplots(3, 1, figsize=(8, 12), sharex=True)
@@ -1681,11 +1677,15 @@ if initiation_interval:
         recall_vals    = spatial_recall[:, e, :]
         f1_vals        = spatial_f1[:, e, :]
 
-        plot_metric(axs[0], precision_vals, 'Precision', 'C0')
-        plot_metric(axs[1], recall_vals, 'Recall', 'C1')
-        plot_metric(axs[2], f1_vals, 'F1', 'C2')
+
+        bar_width = 0.25
+        print(len(bins), np.shape(precision_vals))
+        plot_barchart_errors2(bins, precision_vals, 'Precision', bar_width, fig, axs[0])
+        plot_barchart_errors2(bins, recall_vals, 'Recall', bar_width, fig, axs[1])
+        plot_barchart_errors2(bins, f1_vals, 'F1', bar_width, fig, axs[2])
 
         plt.tight_layout(rect=[0, 0, 1, 0.96])
+        axs[-1].set_xlabel('sub interval')
         fig.savefig(init_path+f"/metrics_spatial_ens{e}.png")
 
     # ----- Average across all ensembles -----
@@ -1696,11 +1696,13 @@ if initiation_interval:
     recall_vals_avg    = spatial_recall.mean(axis=1)
     f1_vals_avg        = spatial_f1.mean(axis=1)
 
-    plot_metric(axs[0], precision_vals_avg, 'Precision', 'C0')
-    plot_metric(axs[1], recall_vals_avg, 'Recall', 'C1')
-    plot_metric(axs[2], f1_vals_avg, 'F1', 'C2')
+    bar_width = 0.25
+    plot_barchart_errors2(bins, precision_vals_avg, 'Precision', bar_width, fig, axs[0])
+    plot_barchart_errors2(bins, recall_vals_avg, 'Recall', bar_width, fig, axs[1])
+    plot_barchart_errors2(bins, f1_vals_avg, 'F1', bar_width, fig, axs[2])
 
     plt.tight_layout(rect=[0, 0, 1, 0.96])
+    axs[-1].set_xlabel('sub interval')
     fig.savefig(init_path+f"/metrics_spatial_allens.png")
 
     print('finished testing')

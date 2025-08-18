@@ -176,6 +176,27 @@ def load_data_set_RB_act(file, names, snapshots):
 
     return data, time_vals, plume_features
 
+def load_data_set_RB_actadd(file, names, snapshots):
+    with h5py.File(file, 'r') as hf:
+        print(hf.keys())
+        time_vals = np.array(hf['total_time_all'][:snapshots])
+        
+        data = np.zeros((len(time_vals), len(x), len(z), len(names)))
+        
+        index=0
+        for name in names:
+            print(name)
+            print(hf[name])
+            Var = np.array(hf[name])
+            print(np.shape(Var))
+            if index == 4:
+                data[:,:,:,index] = Var[:snapshots,:,:]
+            else:
+                data[:,:,:,index] = Var[:snapshots,:,0,:]
+            index+=1
+
+    return data, time_vals
+
 #### AUTOENCODER ####
 def split_data(U, b_size, n_batches):
 
@@ -375,6 +396,16 @@ elif Data == 'RB_plume_binarypos':
     print('shape of dataset', np.shape(data_set))
     dt = 2
     print('shape of plume_features', np.shape(plume_features))
+
+elif Data =='RBplusActive':
+    variables = ['q_all', 'w_all', 'u_all', 'b_all', 'active_array']
+    names = ['q', 'w', 'u', 'b', 'active']
+    x = np.load(input_path+'/x.npy')
+    z = np.load(input_path+'/z.npy')
+    snapshots_load = 16000
+    data_set, time_vals = load_data_set_RB_actadd(input_path+'/data_4var_5000_48000_act.h5', variables, snapshots_load)
+    print('shape of dataset', np.shape(data_set))
+    dt = 2
 
 reduce_data_set = reduce_domain = reduce_domain2 = False
 if reduce_data_set:

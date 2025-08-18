@@ -361,3 +361,26 @@ def hovmoller_plus_plume_sincospos(truth_data, prediction_data, truth_features, 
 
     fig.savefig(file_name+f"_ens{j}_test{i}.png")
     plt.close(fig)
+
+def plot_barchart_errors2(bins, vals, x_label, bar_width, fig, ax, color1='tab:blue', color2='black', marker2='o'):
+    mean_vals = vals.mean(axis=0)        # mean across tests
+    median_vals = np.median(vals, axis=0)
+    LQ = np.percentile(vals, 25, axis=0)
+    UQ = np.percentile(vals, 75, axis=0)
+    yerr = np.vstack([LQ, UQ])
+
+
+    ax.bar(bins, mean_vals, width=bar_width, align='center', label='Mean', color=color1, capsize=5, zorder=1) #align='center'
+    ax.errorbar(bins, median_vals, yerr=yerr, fmt='o', ecolor=color2, markerfacecolor=color2, markeredgecolor=color2, capsize=5, label='Median with Q1-Q3')
+    #ax.set_xlabel('Sub-Interval Bin')
+    ax.set_ylabel(x_label, fontsize=16)
+    #ax.set_ylim(0, 1.05)
+    ax.grid(True)
+    ax.legend()
+
+def plot_barchart_errors1(bins, vals, x_label, bar_width, fig, ax, color1='tab:blue', color2='black', marker2='o'):
+    ax.bar(bins, vals, width=bar_width, align='center', color=color1, capsize=5, zorder=1) #align='center'
+    ax.set_ylabel(x_label, fontsize=16)
+    #ax.set_ylim(0, 1.05)
+    ax.grid(True)
+    #ax.legend()
