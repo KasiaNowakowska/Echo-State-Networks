@@ -380,6 +380,13 @@ elif Data == 'RB_plume':
         names = ['q_all', 'w_all', 'u_all', 'b_all']
         names_plus_act = ['q', 'w', 'u', 'b', 'active']
         data_set, time_vals, plume_features = load_data_set_RB_act(input_path+'/data_4var_5000_48000_positions.h5', variables_plus_act, snapshots_load)
+    elif plumetype == 'sincospositions':
+        variables = ['q_all', 'w_all', 'u_all', 'b_all']
+        variables_plus_act = ['q_all', 'w_all', 'u_all', 'b_all', 'plume_positions']
+        names = ['q_all', 'w_all', 'u_all', 'b_all']
+        names_plus_act = ['q', 'w', 'u', 'b', 'active']
+        data_set, time_vals, plume_features = load_data_set_RB_act(input_path+'/data_4var_5000_48000_cossinpositions.h5', variables_plus_act, snapshots_load)
+    
     print('shape of dataset', np.shape(data_set))
     dt = 2
     print('shape of plume_features', np.shape(plume_features))
@@ -1175,11 +1182,18 @@ if validation_interval:
                 reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
 
             # metrics
-            nrmse = NRMSE(reconstructed_truth, reconstructed_predictions)
-            mse   = MSE(reconstructed_truth, reconstructed_predictions)
-            evr   = EVR_recon(reconstructed_truth, reconstructed_predictions)
-            SSIM  = compute_ssim_for_4d(reconstructed_truth, reconstructed_predictions)
-            nrmse_ch = NRMSE_per_channel(reconstructed_truth, reconstructed_predictions)
+            if Data == 'RBplusActive':
+                mse = MSE(reconstructed_truth[...,:4], reconstructed_predictions[...,:4])
+                nrmse = NRMSE(reconstructed_truth[...,:4], reconstructed_predictions[...,:4])
+                evr = EVR_recon(reconstructed_truth[...,:4], reconstructed_predictions[...,:4])
+                SSIM = compute_ssim_for_4d(reconstructed_truth[...,:4], reconstructed_predictions[...,:4])
+                nrmse_ch = NRMSE_per_channel(reconstructed_truth[...,:4], reconstructed_predictions[...,:4])
+            else:
+                nrmse = NRMSE(reconstructed_truth, reconstructed_predictions)
+                mse   = MSE(reconstructed_truth, reconstructed_predictions)
+                evr   = EVR_recon(reconstructed_truth, reconstructed_predictions)
+                SSIM  = compute_ssim_for_4d(reconstructed_truth, reconstructed_predictions)
+                nrmse_ch = NRMSE_per_channel(reconstructed_truth, reconstructed_predictions)
 
             if len(variables) == 4:
                 active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(reconstructed_truth, reconstructed_predictions, z)
@@ -1193,6 +1207,25 @@ if validation_interval:
 
                     # Compute NRMSE only if mask is not empty
                     nrmse_plume = NRMSE(masked_truth, masked_pred)
+
+                    mask_original     = mask[..., 0]
+                    nrmse_sep_plume   = NRMSE_per_channel_masked(reconstructed_truth, reconstructed_predictions, mask_original, global_stds) 
+                
+                else:
+                    print("Mask is empty, no plumes detected.")
+                    nrmse_plume = 0  # Simply add 0 to maintain shape
+                    nrmse_sep_plume = 0
+            elif len(variables) == 5:
+                active_array               = reconstructed_truth[...,4]
+                active_array_reconstructed = reconstructed_predictions[...,4]
+                mask                       = (active_array == 1)
+                mask_reconstructed         = (active_array_reconstructed == 1)
+                if np.any(mask):
+                    # Expand the mask to cover all features (optional, depending on use case)
+                    mask               =  np.repeat(mask[:, :, :, np.newaxis], 4, axis=-1)  # Shape: (256, 64, 1)
+                    mask_reconstructed =  np.repeat(mask_reconstructed[:, :, :, np.newaxis], 4, axis=-1) # Shape: (256, 64, 1)
+                    
+                    nrmse_plume            = NRMSE(reconstructed_truth[:,:,:,:4][mask], reconstructed_predictions[:,:,:,:4][mask])
 
                     mask_original     = mask[..., 0]
                     nrmse_sep_plume   = NRMSE_per_channel_masked(reconstructed_truth, reconstructed_predictions, mask_original, global_stds) 

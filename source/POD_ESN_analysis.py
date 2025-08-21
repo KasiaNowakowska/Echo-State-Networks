@@ -492,10 +492,10 @@ print('norm:', norm)
 print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
-test_interval = False
+test_interval = True
 validation_interval = False
 statistics_interval = False
-initiation_interval = True
+initiation_interval = False
 initiation_interval2 = False
 
 train_data = data_set[:int(N_washout+N_train)]
@@ -1043,6 +1043,7 @@ if test_interval:
                                 hovmoller_plus_plume_pos(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j, images_test_path+f"/hovmol_plume_positions")
                             elif plumetype == 'sincospositions':
                                 hovmoller_plus_plume_sincospos(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j,  images_test_path+f"/hovmol_plume_sincospositions", x_domain=(0,20))
+                                hovmoller_plus_plume_sincospos(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j,  images_test_path+f"/hovmol_plume_sincospositions", x_domain=(0,20), threshold_predictions=True)
 
         # accumulation for each ensemble member
         ens_nrmse[j]       = ens_nrmse[j] / N_test

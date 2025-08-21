@@ -185,6 +185,27 @@ def load_data_set_RB_act(file, names, snapshots):
 
     return data, time_vals, plume_features
 
+def load_data_set_RB_actadd(file, names, snapshots):
+    with h5py.File(file, 'r') as hf:
+        print(hf.keys())
+        time_vals = np.array(hf['total_time_all'][:snapshots])
+        
+        data = np.zeros((len(time_vals), len(x), len(z), len(names)))
+        
+        index=0
+        for name in names:
+            print(name)
+            print(hf[name])
+            Var = np.array(hf[name])
+            print(np.shape(Var))
+            if index == 4:
+                data[:,:,:,index] = Var[:snapshots,:,:]
+            else:
+                data[:,:,:,index] = Var[:snapshots,:,0,:]
+            index+=1
+
+    return data, time_vals
+
 #### AUTOENCODER ####
 def split_data(U, b_size, n_batches):
 
@@ -383,6 +404,13 @@ elif Data == 'RB_plume':
         names = ['q_all', 'w_all', 'u_all', 'b_all']
         names_plus_act = ['q', 'w', 'u', 'b', 'active']
         data_set, time_vals, plume_features = load_data_set_RB_act(input_path+'/data_4var_5000_48000_positions.h5', variables_plus_act, snapshots_load)
+    elif plumetype == 'sincospositions':
+        variables = ['q_all', 'w_all', 'u_all', 'b_all']
+        variables_plus_act = ['q_all', 'w_all', 'u_all', 'b_all', 'plume_positions']
+        names = ['q_all', 'w_all', 'u_all', 'b_all']
+        names_plus_act = ['q', 'w', 'u', 'b', 'active']
+        data_set, time_vals, plume_features = load_data_set_RB_act(input_path+'/data_4var_5000_48000_cossinpositions.h5', variables_plus_act, snapshots_load)
+    
     print('shape of dataset', np.shape(data_set))
     dt = 2
     print('shape of plume_features', np.shape(plume_features))
@@ -399,6 +427,16 @@ elif Data == 'RB_plume_binarypos':
     print('shape of dataset', np.shape(data_set))
     dt = 2
     print('shape of plume_features', np.shape(plume_features))
+
+elif Data =='RBplusActive':
+    variables = ['q_all', 'w_all', 'u_all', 'b_all', 'active_array']
+    names = ['q', 'w', 'u', 'b', 'active']
+    x = np.load(input_path+'/x.npy')
+    z = np.load(input_path+'/z.npy')
+    snapshots_load = 16000
+    data_set, time_vals = load_data_set_RB_actadd(input_path+'/data_4var_5000_48000_act.h5', variables, snapshots_load)
+    print('shape of dataset', np.shape(data_set))
+    dt = 2
 
 reduce_data_set = reduce_domain = reduce_domain2 = False
 if reduce_data_set:
@@ -1055,6 +1093,8 @@ if validation_interval:
                             if plumetype == 'features':
                                 plotting_number_of_plumes(true_counts, pred_counts_rounded, xx, i, j, images_val_path+f"/number_of_plumes")
                                 hovmoller_plus_plumes(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j, images_val_path+f"/hovmol_plumes")
+                            elif plumetype == 'sincospositions':
+                                hovmoller_plus_plume_sincospos(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j,  images_val_path+f"/hovmol_plume_sincospositions", x_domain=(0,20))
 
 
         # accumulation for each ensemble member
@@ -1226,17 +1266,33 @@ if test_interval:
                 reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
 
             # metrics
-            nrmse = NRMSE(reconstructed_truth, reconstructed_predictions)
-            mse   = MSE(reconstructed_truth, reconstructed_predictions)
-            evr   = EVR_recon(reconstructed_truth, reconstructed_predictions)
-            SSIM  = compute_ssim_for_4d(reconstructed_truth, reconstructed_predictions)
-            nrmse_ch = NRMSE_per_channel(reconstructed_truth, reconstructed_predictions)
-            PH_index = int(PH[i]*N_lyap)
-            print('PH_index', PH_index)
-            if PH_index == 0:
-                nrmse_inPHreg = 0
+            if Data == 'RBplusActive':
+                mse = MSE(reconstructed_truth[...,:4], reconstructed_predictions[...,:4])
+                nrmse = NRMSE(reconstructed_truth[...,:4], reconstructed_predictions[...,:4])
+                evr = EVR_recon(reconstructed_truth[...,:4], reconstructed_predictions[...,:4])
+                SSIM = compute_ssim_for_4d(reconstructed_truth[...,:4], reconstructed_predictions[...,:4])
+                nrmse_ch = NRMSE_per_channel(reconstructed_truth[...,:4], reconstructed_predictions[...,:4])
+
+                PH_index = int(PH[i]*N_lyap)
+                print('PH_index', PH_index)
+                if PH_index == 0:
+                    nrmse_inPHreg = 0
+                else:
+                    nrmse_inPHreg = NRMSE_per_channel(reconstructed_truth[:PH_index, :4], reconstructed_predictions[:PH_index, :4])
+
             else:
-                nrmse_inPHreg = NRMSE_per_channel(reconstructed_truth[:PH_index], reconstructed_predictions[:PH_index])
+                nrmse = NRMSE(reconstructed_truth, reconstructed_predictions)
+                mse   = MSE(reconstructed_truth, reconstructed_predictions)
+                evr   = EVR_recon(reconstructed_truth, reconstructed_predictions)
+                SSIM  = compute_ssim_for_4d(reconstructed_truth, reconstructed_predictions)
+                nrmse_ch = NRMSE_per_channel(reconstructed_truth, reconstructed_predictions)
+
+                PH_index = int(PH[i]*N_lyap)
+                print('PH_index', PH_index)
+                if PH_index == 0:
+                    nrmse_inPHreg = 0
+                else:
+                    nrmse_inPHreg = NRMSE_per_channel(reconstructed_truth[:PH_index], reconstructed_predictions[:PH_index])
 
             if len(variables) == 4:
                 active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(reconstructed_truth, reconstructed_predictions, z)
@@ -1253,7 +1309,25 @@ if test_interval:
 
                     mask_original     = mask[..., 0]
                     nrmse_sep_plume   = NRMSE_per_channel_masked(reconstructed_truth, reconstructed_predictions, mask_original, global_stds) 
+                else:
+                    print("Mask is empty, no plumes detected.")
+                    nrmse_plume = 0  # Simply add 0 to maintain shape
+                    nrmse_sep_plume = 0
 
+            elif len(variables) == 5:
+                active_array               = reconstructed_truth[...,4]
+                active_array_reconstructed = reconstructed_predictions[...,4]
+                mask                       = (active_array == 1)
+                mask_reconstructed         = (active_array_reconstructed == 1)
+                if np.any(mask):
+                    # Expand the mask to cover all features (optional, depending on use case)
+                    mask               =  np.repeat(mask[:, :, :, np.newaxis], 4, axis=-1)  # Shape: (256, 64, 1)
+                    mask_reconstructed =  np.repeat(mask_reconstructed[:, :, :, np.newaxis], 4, axis=-1) # Shape: (256, 64, 1)
+                    
+                    nrmse_plume            = NRMSE(reconstructed_truth[:,:,:,:4][mask], reconstructed_predictions[:,:,:,:4][mask])
+
+                    mask_original     = mask[..., 0]
+                    nrmse_sep_plume   = NRMSE_per_channel_masked(reconstructed_truth, reconstructed_predictions, mask_original, global_stds) 
                 else:
                     print("Mask is empty, no plumes detected.")
                     nrmse_plume = 0  # Simply add 0 to maintain shape
@@ -1353,7 +1427,9 @@ if test_interval:
                                 hovmoller_plus_plumes(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j, images_test_path+f"/hovmol_plumes")
                             elif plumetype == 'positions':
                                 hovmoller_plus_plume_pos(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j, images_test_path+f"/hovmol_plume_positions")
-
+                            elif plumetype == 'sincospositions':
+                                hovmoller_plus_plume_sincospos(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j,  images_test_path+f"/hovmol_plume_sincospositions", x_domain=(0,20))
+                                hovmoller_plus_plume_sincospos(reconstructed_truth, reconstructed_predictions, plume_features_truth, plume_features_predictions, xx, x, 1, i, j,  images_test_path+f"/hovmol_plume_sincospositions", x_domain=(0,20), threshold_predictions=True)
         # accumulation for each ensemble member
         ens_nrmse[j]       = ens_nrmse[j] / N_test
         ens_nrmse_plume[j] = ens_nrmse_plume[j] / N_test

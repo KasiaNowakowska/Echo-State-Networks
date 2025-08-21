@@ -270,7 +270,30 @@ def hovmoller_plus_plume_pos(truth_data, prediction_data, truth_features, predic
     fig.savefig(file_name+f"_ens{j}_test{i}.png")
     plt.close(fig)
 
-def hovmoller_plus_plume_sincospos(truth_data, prediction_data, truth_features, prediction_features, xx, x, variable, i, j, file_name, x_domain=(0,20)):
+def clean_strengths(features, s_on=0.00005, s_off=0.00005):
+    """
+    Apply hysteresis thresholding to strength channels.
+    Keeps plumes 'on' until strength falls below s_off,
+    and only activates once above s_on.
+    """
+    cleaned = features.copy()
+    P = features.shape[1] // 3
+    for p in range(P):
+        active = False
+        for t in range(features.shape[0]):
+            s = features[t, 3*p+2]
+            if active:
+                if s < s_off:
+                    active = False
+                    cleaned[t, 3*p:3*p+3] = 0.0
+            else:
+                if s >= s_on:
+                    active = True
+                else:
+                    cleaned[t, 3*p:3*p+3] = 0.0
+    return cleaned
+
+def hovmoller_plus_plume_sincospos(truth_data, prediction_data, truth_features, prediction_features, xx, x, variable, i, j, file_name, x_domain=(0,20), threshold_predictions=False, s_on=0.00005, s_off=0.00005):
     x_min, x_max = x_domain
     
     truth_data      = truth_data[..., variable]
@@ -278,6 +301,10 @@ def hovmoller_plus_plume_sincospos(truth_data, prediction_data, truth_features, 
 
     z_value =32
     
+    # Only clean predictions if requested
+    if threshold_predictions:
+        prediction_features = clean_strengths(prediction_features, s_on, s_off)
+
     # Precompute max_strength across all plumes and truth/prediction
     all_strength_truth = []
     all_strength_pred = []
@@ -291,16 +318,18 @@ def hovmoller_plus_plume_sincospos(truth_data, prediction_data, truth_features, 
 
     max_strength = max(np.max(all_strength_truth), np.max(all_strength_pred))
 
-    fig, ax = plt.subplots(2, figsize=(12, 9), tight_layout=True)
+    fig, ax = plt.subplots(2, figsize=(12, 9), constrained_layout=True)
     
     minm = min(np.min(truth_data[:, :, z_value]), np.min(prediction_data[:, :, z_value]))
     maxm = max(np.max(truth_data[:, :, z_value]), np.max(prediction_data[:, :, z_value]))  
 
     c1 = ax[0].pcolormesh(xx, x, truth_data[:, :, z_value].T, vmin=minm, vmax=maxm)
-    fig.colorbar(c1, ax=ax[0])
+    cbar0 = fig.colorbar(c1, ax=ax[0], orientation='vertical')
+    cbar0.set_label('w', fontsize=12)
     ax[0].set_title('True')
     c2 = ax[1].pcolormesh(xx, x, prediction_data[:, :, z_value].T, vmin=minm, vmax=maxm)
-    fig.colorbar(c2, ax=ax[1])
+    cbar1 = fig.colorbar(c2, ax=ax[1], orientation='vertical')
+    cbar1.set_label('w', fontsize=12)
     ax[1].set_title('Reconstruction')
 
     # Plot scatter overlays, keeping a reference to one mappable for KE colorbar
@@ -352,14 +381,14 @@ def hovmoller_plus_plume_sincospos(truth_data, prediction_data, truth_features, 
             sc_ref = sc1
 
     # Single KE colorbar for scatter overlays
-    cbar = fig.colorbar(sc_ref, ax=ax, orientation='vertical', fraction=0.02, pad=0.02)
+    cbar = fig.colorbar(sc_ref, ax=ax, orientation='horizontal', fraction=0.1, pad=0.1)
     cbar.set_label('Plume Strength (KE)', fontsize=12)
-
+    
     for l in range(2):
         ax[l].set_ylabel('x', fontsize=14)
     ax[-1].set_xlabel('Time [Lyapunov Times]')
 
-    fig.savefig(file_name+f"_ens{j}_test{i}.png")
+    fig.savefig(file_name+f"_ens{j}_test{i}_cleaned{threshold_predictions}.png")
     plt.close(fig)
 
 def plot_barchart_errors2(bins, vals, x_label, bar_width, fig, ax, color1='tab:blue', color2='black', marker2='o'):
