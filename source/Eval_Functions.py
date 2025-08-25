@@ -878,3 +878,156 @@ def plume_metrics(true_feats, pred_feats, num_plumes=3, delta_x=1.0,
         f1s.append(f1)
 
     return np.array(precisions), np.array(recalls), np.array(f1s) # (n_bins, n_bins, n_bins)
+
+
+from Plotting_Functions import clean_strengths
+def extract_plume_positions(features, x_domain=(0,20), max_plumes=3, threshold_predictions=False, KE_threshold=0.00005):
+    """
+    Extract plume x-positions over a full interval.
+
+    Parameters
+    ----------
+    features : array, shape (timesteps, 3*P)
+        Features for one interval, (cos, sin, KE) triplets for P plume slots.
+    x_domain : tuple (x_min, x_max)
+        Domain of plume positions.
+    KE_threshold : float
+        Minimum KE to count as active plume.
+    max_plumes : int
+        Maximum number of plume slots to return per timestep.
+
+    Returns
+    -------
+    positions : array, shape (timesteps, max_plumes)
+        X-positions of active plumes. If fewer than max_plumes
+        plumes exist at a timestep, fill with NaN.
+    """
+    x_min, x_max = x_domain
+    T = features.shape[0]
+
+    x_positions = np.zeros((T, max_plumes))
+
+    # Only clean predictions if requested
+    if threshold_predictions:
+        features = clean_strengths(features, KE_threshold, KE_threshold)
+
+    for v in range(3):
+        cos_vals = features[:, v*3]      # cos
+        sin_vals = features[:, v*3 + 1]  # sin
+        strength = features[:, v*3 + 2]  # KE
+
+        # Recover downsampled x position
+        angles = np.arctan2(sin_vals, cos_vals)  # [-π, π]
+        angles[angles < 0] += 2*np.pi  # wrap negative angles
+        x_vals = x_min + (x_max - x_min) * angles / (2*np.pi)
+
+        valid_mask = strength > 0
+
+        x_positions[:,v] = x_vals[valid_mask]
+
+    return x_positions
+
+from typing import List, Sequence, Dict, Any
+def score_subinterval(
+    truths: Sequence[float],
+    preds: Sequence[float],
+    r1: float = 1.0,
+    r2: float = 3.0,
+) -> Dict[str, Any]:
+    """
+    Score a single 1LT sub-interval.
+
+    truths: x-positions of true plumes (len <= 3)
+    preds:  x-positions of predicted plumes (len <= 3)
+    r1: very-good spatial tolerance
+    r2: good spatial tolerance (r2 >= r1)
+
+    Returns dict with total score and breakdown counts.
+    """
+    truths = list(truths)
+    preds = list(preds)
+    assert r2 >= r1 >= 0
+
+    score = 0
+    breakdown = {
+        "very_good": 0,   # +3 each
+        "good": 0,        # +2 each
+        "off_but_present": 0,  # +1 each
+        "false_positive": 0,    # -1 each
+        "false_negative": 0,    # -1 each (per uncovered truth)
+        "true_negative": 0,     # 0
+    }
+
+    # Handle trivial TN
+    if not truths and not preds:
+        breakdown["true_negative"] += 1
+        return {"score": score, "breakdown": breakdown}
+
+    # Credit/penalize each prediction
+    if not truths:
+        # Empty ground truth: every prediction is an FP
+        fp = len(preds)
+        score -= fp
+        breakdown["false_positive"] += fp
+    else:
+        for p in preds:
+            dmin = min(abs(p - t) for t in truths)
+            if dmin <= r1:
+                score += 3
+                breakdown["very_good"] += 1
+            elif dmin <= r2:
+                score += 2
+                breakdown["good"] += 1
+            else:
+                score += 1
+                breakdown["off_but_present"] += 1
+
+    # Penalize uncovered truths (no prediction within r2)
+    if truths:
+        for t in truths:
+            covered = any(abs(p - t) <= r2 for p in preds)
+            if not covered:
+                score -= 1
+                breakdown["false_negative"] += 1
+
+    return {"score": score, "breakdown": breakdown}
+
+def score_dataset(
+    truths_per_subinterval: List[Sequence[float]],
+    preds_per_subinterval: List[Sequence[float]],
+    r1: float = 1.0,
+    r2: float = 3.0,
+) -> Dict[str, Any]:
+    """
+    Score a whole dataset of 1LT sub-intervals.
+    Pass length-120 lists if you have 40 test windows × 3 sub-intervals each.
+    """
+    assert len(truths_per_subinterval) == len(preds_per_subinterval)
+    total_score = 0
+    agg = {
+        "very_good": 0,
+        "good": 0,
+        "off_but_present": 0,
+        "false_positive": 0,
+        "false_negative": 0,
+        "true_negative": 0,
+    }
+
+    per_sub = []
+    for truths, preds in zip(truths_per_subinterval, preds_per_subinterval):
+        res = score_subinterval(truths, preds, r1=r1, r2=r2)
+        total_score += res["score"]
+        for k in agg:
+            agg[k] += res["breakdown"][k]
+        per_sub.append(res)
+
+    # Optional normalization: average score per sub-interval
+    avg_score = total_score / len(truths_per_subinterval) if truths_per_subinterval else 0.0
+
+    return {
+        "total_score": total_score,
+        "avg_score": avg_score,
+        "breakdown": agg,
+        "per_subinterval": per_sub,  # keep if you want detailed audit; drop if not needed
+        "params": {"r1": r1, "r2": r2},
+    }

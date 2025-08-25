@@ -1818,7 +1818,7 @@ if initiation_score_interval:
 
             if Data == 'RB_plume':
                 if plumetype == 'sincospositions':
-                        
+                    
 
 
             if plot:
