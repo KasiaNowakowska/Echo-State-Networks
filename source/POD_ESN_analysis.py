@@ -208,7 +208,7 @@ elif Data == 'RB_plume':
         variables_plus_act = ['q_all', 'w_all', 'u_all', 'b_all', 'plume_positions']
         names = ['q_all', 'w_all', 'u_all', 'b_all']
         names_plus_act = ['q', 'w', 'u', 'b', 'active']
-        data_set, time_vals, plume_features = load_data_set_RB_act(input_path+'/data_4var_5000_48000_cossinpositions.h5', variables_plus_act, snapshots_load)
+        data_set, time_vals, plume_features = load_data_set_RB_act(input_path+'/data_4var_5000_48000_cossinpositions2.h5', variables_plus_act, snapshots_load)
     print('shape of dataset', np.shape(data_set))
     dt = 2
     print('shape of plume_features', np.shape(plume_features))
@@ -1707,6 +1707,126 @@ if initiation_interval:
     fig.savefig(init_path+f"/metrics_spatial_allens.png")
 
     print('finished testing')
+
+if initiation_score_interval:
+    #### INITIATION ####
+    init_path = output_path + '/initation_score/'
+    if not os.path.exists(init_path):
+        os.makedirs(init_path)
+        print('made directory')
+
+    #test_indexes = [210, 420, 555]
+    N_test   = 40                    #number of intervals in the test set
+    N_tstart = int(N_washout + N_train)   #where the first test interval starts
+    N_intt   = 3*N_lyap             #length of each test set interval
+    N_washout = int(N_washout)
+    N_gap = int(1*N_lyap)
+
+    print('N_tstart:', N_tstart)
+    print('N_intt:', N_intt)
+    print('N_washout:', N_washout)
+
+    # #prediction horizon normalization factor and threshold
+    sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
+    threshold_ph = threshold_ph
+
+    ensemble_test = 5
+    n_bins        = 3
+
+    ens_pred             = np.zeros((N_intt, dim, ensemble_test))
+    ens_PH               = np.zeros((N_test, ensemble_test))
+    ens_prec             = np.zeros((N_test, ensemble_test))
+    ens_recall           = np.zeros((N_test, ensemble_test))
+    ens_f1               = np.zeros((N_test, ensemble_test))
+    ens_acc              = np.zeros((N_test, ensemble_test))
+    interval_true_counts = np.zeros((N_intt, N_test, ensemble_test))
+    interval_pred_counts = np.zeros((N_intt, N_test, ensemble_test))
+    # pre-allocate arrays for metrics: shape (N_test, ensemble_test, n_bins)
+    spatial_precision = np.zeros((N_test, ensemble_test, n_bins))
+    spatial_recall    = np.zeros((N_test, ensemble_test, n_bins))
+    spatial_f1        = np.zeros((N_test, ensemble_test, n_bins))
+
+    images_test_path = init_path+'/test_images/'
+    if not os.path.exists(images_test_path):
+        os.makedirs(images_test_path)
+        print('made directory')
+    metrics_test_path = init_path+'/test_metrics/'
+    if not os.path.exists(metrics_test_path):
+        os.makedirs(metrics_test_path)
+        print('made directory')
+
+    for j in range(ensemble_test):
+
+        print('Realization    :',j+1)
+
+        #load matrices and hyperparameters
+        Wout     = Woutt[j].copy()
+        Win      = Winn[j] #csr_matrix(Winn[j])
+        W        = Ws[j]   #csr_matrix(Ws[j])
+        rho      = opt_hyp[j,0].copy()
+        sigma_in = opt_hyp[j,1].copy()
+        print('Hyperparameters:',rho, sigma_in)
+
+        # to store prediction horizon in the test set
+        PH             = np.zeros(N_test)
+        nrmse_error    = np.zeros((N_test, N_intt))
+
+        # to plot results
+        plot = True
+        Plotting = True
+        if plot:
+            n_plot = N_test
+            plt.rcParams["figure.figsize"] = (15,3*n_plot)
+            plt.figure()
+            plt.tight_layout()
+
+        #run different test intervals
+        for i in range(N_test):
+            print('test', i+1)
+            print(N_tstart + i*N_gap)
+            print('start time of test', time_vals[N_tstart + i*N_gap])
+            # data for washout and target in each interval
+            U_wash    = U[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap].copy()
+            Y_t       = U[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt].copy()
+            data_set_Y_t =  data_set[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt]
+
+            #washout for each interval
+            Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
+            Uh_wash = np.dot(Xa1, Wout)
+
+            # Prediction Horizon
+            Yh_t,_,Xa2        = closed_loop(N_intt-1, Xa1[-1], Wout, sigma_in, rho)
+            print(np.shape(Yh_t))
+            Y_err       = np.sqrt(np.mean((Y_t-Yh_t)**2,axis=1))/sigma_ph
+            PH[i]       = np.argmax(Y_err>threshold_ph)/N_lyap
+            if PH[i] == 0 and Y_err[0]<threshold_ph: PH[i] = N_intt/N_lyap #(in case PH is larger than interval)
+            ens_PH[i,j] = PH[i]
+
+            ##### reconstructions ####
+            if Data == 'RB_plume':
+                _, reconstructed_truth       = inverse_POD(Y_t[:,:n_components], pca_)
+                _, reconstructed_predictions = inverse_POD(Yh_t[:,:n_components], pca_)
+                plume_features_truth         = Y_t[:,n_components:]
+                plume_features_predictions   = Yh_t[:,n_components:]
+            else:
+                _, reconstructed_truth       = inverse_POD(Y_t, pca_)
+                _, reconstructed_predictions = inverse_POD(Yh_t, pca_)
+
+            # rescale
+            reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
+            reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
+
+            if Data == 'RB_plume':
+                if plumetype == 'sincospositions':
+                        
+
+
+            if plot:
+                #left column has the washout (open-loop) and right column the prediction (closed-loop)
+                # only first n_plot test set intervals are plotted
+                 if i<n_plot:
+                    if j % 5 == 0:
+
 
 if initiation_interval2:
     #### INITIATION ####
