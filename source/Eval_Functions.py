@@ -932,6 +932,7 @@ from collections import Counter
 def score_plumes(truth_positions, pred_positions, N_lyap,
                  checkpoints=(0.5, 1.0, 1.5, 2.0, 3.0),
                  thresholds=(1,3,10),  # very good, good, medium
+                 x_domain=(0.0,20.0),
                  weights=None):
     """
     Score predicted vs true plume positions at chosen checkpoints.
@@ -965,6 +966,14 @@ def score_plumes(truth_positions, pred_positions, N_lyap,
             "TN": 0
         }
 
+    x_min, x_max = x_domain
+    L = x_max - x_min  # domain length
+
+    def circ_dist(a, b):
+        """Compute minimum distance in periodic domain."""
+        d = np.abs(a - b)
+        return np.minimum(d, L - d)
+
     T = truth_positions.shape[0]
 
     def match_scores(true_slots, pred_slots):
@@ -982,7 +991,7 @@ def score_plumes(truth_positions, pred_positions, N_lyap,
                 labels.append("FP")
                 continue
 
-            dists = np.array([abs(pp - true_slots[i]) for i in valid_indices])
+            dists = np.array([circ_dist(pp, true_slots[i]) for i in valid_indices])
             min_idx = valid_indices[np.argmin(dists)]
             min_dist = dists.min()
 

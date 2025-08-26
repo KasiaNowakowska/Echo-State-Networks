@@ -1770,7 +1770,7 @@ if initiation_score_interval:
         plot = True
         Plotting = True
         if plot:
-            n_plot = 15
+            n_plot = N_test
             plt.rcParams["figure.figsize"] = (15,3*n_plot)
             plt.figure()
             plt.tight_layout()
@@ -1862,7 +1862,7 @@ if initiation_score_interval:
                         ax.grid()
                         fig.savefig(images_test_path+f"/plume_scores_ens{j}_test{i}.png")
                         plt.close()
-                        
+
     ensemble_stats = {}
 
     for j in range(ensemble_test):
