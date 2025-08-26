@@ -905,16 +905,17 @@ def extract_plume_positions(features, x_domain=(0,20), max_plumes=3, threshold_p
     x_min, x_max = x_domain
     T = features.shape[0]
 
-    x_positions = np.zeros((T, max_plumes))
-
+    feats = features.copy()
     # Only clean predictions if requested
     if threshold_predictions:
-        features = clean_strengths(features, KE_threshold, KE_threshold)
+        feats = clean_strengths(feats, KE_threshold, KE_threshold)
+
+    x_positions = np.full((T, 3), np.nan)
 
     for v in range(3):
-        cos_vals = features[:, v*3]      # cos
-        sin_vals = features[:, v*3 + 1]  # sin
-        strength = features[:, v*3 + 2]  # KE
+        cos_vals = feats[:, v*3]      # cos
+        sin_vals = feats[:, v*3 + 1]  # sin
+        strength = feats[:, v*3 + 2]  # KE
 
         # Recover downsampled x position
         angles = np.arctan2(sin_vals, cos_vals)  # [-π, π]
@@ -923,111 +924,110 @@ def extract_plume_positions(features, x_domain=(0,20), max_plumes=3, threshold_p
 
         valid_mask = strength > 0
 
-        x_positions[:,v] = x_vals[valid_mask]
+        x_positions[valid_mask,v] = x_vals[valid_mask]
 
     return x_positions
 
-from typing import List, Sequence, Dict, Any
-def score_subinterval(
-    truths: Sequence[float],
-    preds: Sequence[float],
-    r1: float = 1.0,
-    r2: float = 3.0,
-) -> Dict[str, Any]:
+from collections import Counter
+def score_plumes(truth_positions, pred_positions, N_lyap,
+                 checkpoints=(0.5, 1.0, 1.5, 2.0, 3.0),
+                 thresholds=(1,3,10),  # very good, good, medium
+                 weights=None):
     """
-    Score a single 1LT sub-interval.
+    Score predicted vs true plume positions at chosen checkpoints.
 
-    truths: x-positions of true plumes (len <= 3)
-    preds:  x-positions of predicted plumes (len <= 3)
-    r1: very-good spatial tolerance
-    r2: good spatial tolerance (r2 >= r1)
+    Parameters
+    ----------
+    truth_positions : array, shape (T, max_plumes)
+        Extracted plume x-positions (NaN if no plume).
+    pred_positions : array, shape (T, max_plumes)
+        Predicted plume x-positions (NaN if no plume).
+    N_lyap : int
+        Number of timesteps per LT.
+    checkpoints : list of floats
+        Lead times (in LTs) to evaluate (e.g. [0.5, 1.0, 2.0]).
+    thresholds : tuple
+        (very_good, good, medium) in number of indexes
 
-    Returns dict with total score and breakdown counts.
+    Returns
+    -------
+    all_scores : dict
+        {checkpoint_time (in steps): list of scores for each plume}
     """
-    truths = list(truths)
-    preds = list(preds)
-    assert r2 >= r1 >= 0
 
-    score = 0
-    breakdown = {
-        "very_good": 0,   # +3 each
-        "good": 0,        # +2 each
-        "off_but_present": 0,  # +1 each
-        "false_positive": 0,    # -1 each
-        "false_negative": 0,    # -1 each (per uncovered truth)
-        "true_negative": 0,     # 0
-    }
+    if weights is None:
+        weights = {
+            "very good": 3,
+            "good": 2,
+            "medium": 1,
+            "FN": -1,
+            "FP": -1,   
+            "TN": 0
+        }
 
-    # Handle trivial TN
-    if not truths and not preds:
-        breakdown["true_negative"] += 1
-        return {"score": score, "breakdown": breakdown}
+    T = truth_positions.shape[0]
 
-    # Credit/penalize each prediction
-    if not truths:
-        # Empty ground truth: every prediction is an FP
-        fp = len(preds)
-        score -= fp
-        breakdown["false_positive"] += fp
-    else:
-        for p in preds:
-            dmin = min(abs(p - t) for t in truths)
-            if dmin <= r1:
-                score += 3
-                breakdown["very_good"] += 1
-            elif dmin <= r2:
-                score += 2
-                breakdown["good"] += 1
+    def match_scores(true_slots, pred_slots):
+        labels = []
+        matched_true_indices = set()
+
+        # 1. Match predicted plumes to closest true plume
+        for pp in pred_slots:
+            if np.isnan(pp):
+                continue  # skip empty prediction slot
+
+            # compute distances to all true plumes
+            valid_indices = [i for i, tp in enumerate(true_slots) if not np.isnan(tp)]
+            if len(valid_indices) == 0:
+                labels.append("FP")
+                continue
+
+            dists = np.array([abs(pp - true_slots[i]) for i in valid_indices])
+            min_idx = valid_indices[np.argmin(dists)]
+            min_dist = dists.min()
+
+            # assign category based on thresholds
+            if min_dist <= thresholds[0]:
+                labels.append("very good")
+            elif min_dist <= thresholds[1]:
+                labels.append("good")
+            elif min_dist <= thresholds[2]:
+                labels.append("medium")
             else:
-                score += 1
-                breakdown["off_but_present"] += 1
+                labels.append("FP")
 
-    # Penalize uncovered truths (no prediction within r2)
-    if truths:
-        for t in truths:
-            covered = any(abs(p - t) <= r2 for p in preds)
-            if not covered:
-                score -= 1
-                breakdown["false_negative"] += 1
+            # mark as matched only if within medium threshold
+            if min_dist <= thresholds[2]:
+                matched_true_indices.add(min_idx)
 
-    return {"score": score, "breakdown": breakdown}
+        # 2. Any true plume not matched within medium threshold → FN
+        for i, tp in enumerate(true_slots):
+            if np.isnan(tp):
+                continue
+            if i not in matched_true_indices:
+                labels.append("FN")
 
-def score_dataset(
-    truths_per_subinterval: List[Sequence[float]],
-    preds_per_subinterval: List[Sequence[float]],
-    r1: float = 1.0,
-    r2: float = 3.0,
-) -> Dict[str, Any]:
-    """
-    Score a whole dataset of 1LT sub-intervals.
-    Pass length-120 lists if you have 40 test windows × 3 sub-intervals each.
-    """
-    assert len(truths_per_subinterval) == len(preds_per_subinterval)
-    total_score = 0
-    agg = {
-        "very_good": 0,
-        "good": 0,
-        "off_but_present": 0,
-        "false_positive": 0,
-        "false_negative": 0,
-        "true_negative": 0,
-    }
+        # 3. TN: slots where both truth and prediction are empty
+        for tp, pp in zip(true_slots, pred_slots):
+            if np.isnan(tp) and np.isnan(pp):
+                labels.append("TN")
 
-    per_sub = []
-    for truths, preds in zip(truths_per_subinterval, preds_per_subinterval):
-        res = score_subinterval(truths, preds, r1=r1, r2=r2)
-        total_score += res["score"]
-        for k in agg:
-            agg[k] += res["breakdown"][k]
-        per_sub.append(res)
+        return labels
 
-    # Optional normalization: average score per sub-interval
-    avg_score = total_score / len(truths_per_subinterval) if truths_per_subinterval else 0.0
+    result_dict = {}
+    for lt in checkpoints:
+        ck = int(round(lt * N_lyap))
+        if ck >= T:
+            continue
 
-    return {
-        "total_score": total_score,
-        "avg_score": avg_score,
-        "breakdown": agg,
-        "per_subinterval": per_sub,  # keep if you want detailed audit; drop if not needed
-        "params": {"r1": r1, "r2": r2},
-    }
+        true_slots = truth_positions[ck, :]
+        pred_slots = pred_positions[ck, :]
+
+        labels = match_scores(true_slots, pred_slots)
+        counts = Counter(labels)
+        overall_score = sum([weights[l] for l in labels])
+
+        result_dict[ck] = {"counts": counts, "overall_score": overall_score}
+
+    return result_dict
+

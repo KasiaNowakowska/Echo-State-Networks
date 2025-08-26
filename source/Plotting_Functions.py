@@ -413,3 +413,17 @@ def plot_barchart_errors1(bins, vals, x_label, bar_width, fig, ax, color1='tab:b
     #ax.set_ylim(0, 1.05)
     ax.grid(True)
     #ax.legend()
+
+def plot_barchart_errors(tests, median, mean, lower, upper, x_label, bar_width, fig, ax, color1='tab:blue', color2='black', marker2='o'):
+    lower_error = median - lower
+    upper_error = upper - median
+    yerr = np.vstack([lower_error, upper_error])
+
+    ax.bar(tests, mean, width=bar_width, align='center', label='Mean', color=color1, capsize=5, zorder=1) #align='center'
+    ax.errorbar(tests, median, yerr=yerr, fmt='o', ecolor=color2, markerfacecolor=color2, markeredgecolor=color2, capsize=5, label='Median with Q1-Q3')
+
+    ax.grid()
+    ax.set_xlabel(x_label, fontsize=16)
+    #ax.set_ylabel(r"$\mathrm{PH}$", fontsize=16)
+    ax.tick_params(labelsize=12)
+    #ax.set_ylim(0,3)

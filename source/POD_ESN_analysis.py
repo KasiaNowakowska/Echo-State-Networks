@@ -42,6 +42,8 @@ from skimage.metrics import structural_similarity as ssim
 from scipy.stats import wasserstein_distance
 from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
 from matplotlib.colors import ListedColormap, BoundaryNorm
+from collections import Counter
+import pickle
 from Eval_Functions import *
 from Plotting_Functions import *
 from POD_functions import *
@@ -208,7 +210,7 @@ elif Data == 'RB_plume':
         variables_plus_act = ['q_all', 'w_all', 'u_all', 'b_all', 'plume_positions']
         names = ['q_all', 'w_all', 'u_all', 'b_all']
         names_plus_act = ['q', 'w', 'u', 'b', 'active']
-        data_set, time_vals, plume_features = load_data_set_RB_act(input_path+'/data_4var_5000_48000_cossinpositions2.h5', variables_plus_act, snapshots_load)
+        data_set, time_vals, plume_features = load_data_set_RB_act(input_path+'/data_4var_5000_48000_cossinpositions.h5', variables_plus_act, snapshots_load)
     print('shape of dataset', np.shape(data_set))
     dt = 2
     print('shape of plume_features', np.shape(plume_features))
@@ -492,11 +494,12 @@ print('norm:', norm)
 print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
-test_interval = True
+test_interval = False
 validation_interval = False
 statistics_interval = False
 initiation_interval = False
 initiation_interval2 = False
+initiation_score_interval = True
 
 train_data = data_set[:int(N_washout+N_train)]
 global_stds = [np.std(train_data[..., c]) for c in range(train_data.shape[-1])]
@@ -1731,20 +1734,11 @@ if initiation_score_interval:
     threshold_ph = threshold_ph
 
     ensemble_test = 5
-    n_bins        = 3
 
     ens_pred             = np.zeros((N_intt, dim, ensemble_test))
     ens_PH               = np.zeros((N_test, ensemble_test))
-    ens_prec             = np.zeros((N_test, ensemble_test))
-    ens_recall           = np.zeros((N_test, ensemble_test))
-    ens_f1               = np.zeros((N_test, ensemble_test))
-    ens_acc              = np.zeros((N_test, ensemble_test))
-    interval_true_counts = np.zeros((N_intt, N_test, ensemble_test))
-    interval_pred_counts = np.zeros((N_intt, N_test, ensemble_test))
-    # pre-allocate arrays for metrics: shape (N_test, ensemble_test, n_bins)
-    spatial_precision = np.zeros((N_test, ensemble_test, n_bins))
-    spatial_recall    = np.zeros((N_test, ensemble_test, n_bins))
-    spatial_f1        = np.zeros((N_test, ensemble_test, n_bins))
+
+    all_scores = {}
 
     images_test_path = init_path+'/test_images/'
     if not os.path.exists(images_test_path):
@@ -1758,6 +1752,7 @@ if initiation_score_interval:
     for j in range(ensemble_test):
 
         print('Realization    :',j+1)
+        all_scores[j] = {}
 
         #load matrices and hyperparameters
         Wout     = Woutt[j].copy()
@@ -1775,7 +1770,7 @@ if initiation_score_interval:
         plot = True
         Plotting = True
         if plot:
-            n_plot = N_test
+            n_plot = 15
             plt.rcParams["figure.figsize"] = (15,3*n_plot)
             plt.figure()
             plt.tight_layout()
@@ -1818,7 +1813,17 @@ if initiation_score_interval:
 
             if Data == 'RB_plume':
                 if plumetype == 'sincospositions':
+                    x_positions_truth = extract_plume_positions(plume_features_truth, x_domain=(0,20), max_plumes=3, threshold_predictions=False, KE_threshold=0.00005)
+                    x_positions_pred  = extract_plume_positions(plume_features_predictions, x_domain=(0,20), max_plumes=3, threshold_predictions=True, KE_threshold=0.00005)
+
+                    scores = score_plumes(x_positions_truth, x_positions_pred, N_lyap,
+                                            checkpoints=(0.5, 1.0, 1.5, 2.0, 2.5),
+                                            thresholds=(1,3,10),  # very good, good, medium
+                                            weights=None)
                     
+                    all_scores[j][i] = scores
+                    if j ==0:
+                        print(scores)
 
 
             if plot:
@@ -1826,7 +1831,82 @@ if initiation_score_interval:
                 # only first n_plot test set intervals are plotted
                  if i<n_plot:
                     if j % 5 == 0:
+                        categories = ['very good', 'good', 'medium', 'FN', 'FP', 'TN']
+                        lts = sorted(scores.keys())  # [0.5, 1.0, 1.5, 2.0, 2.5]
+                        print("lts:", lts)
+                        lts_labels = np.array(lts)/N_lyap
+                        lts_labels  = [f"{lt:.1f}" for lt in lts_labels]
+                        # Extract counts for each category at each LT
+                        counts_per_category = {cat: [] for cat in categories}
+                        overalls            = []
 
+                        for lt in lts:
+                            counter = scores[lt]['counts']
+                            for cat in categories:
+                                counts_per_category[cat].append(counter.get(cat, 0))  # default 0 if missing
+                            overalls.append(scores[lt]['overall_score'])
+
+                        print(f"ens{j}: {overalls}")
+                        # Plot grouped bar chart
+                        x_range = range(len(lts))
+                        width = 0.15
+                        fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
+                        for k, cat in enumerate(categories):
+                            ax.bar([xi + k*width for xi in x_range], counts_per_category[cat], width=width, label=cat)
+                        ax.plot([xi + width*2 for xi in x_range], overalls, color='black', marker='o', linestyle='-', label='Overall Score')
+                        ax.set_xticks([xi + width*2 for xi in x_range])
+                        ax.set_xticklabels(lts_labels)
+                        ax.set_xlabel('Lead Times [LTs]')
+                        ax.set_ylabel('Number')
+                        ax.legend()
+                        ax.grid()
+                        fig.savefig(images_test_path+f"/plume_scores_ens{j}_test{i}.png")
+                        plt.close()
+                        
+    ensemble_stats = {}
+
+    for j in range(ensemble_test):
+        all_test_scores = []
+        for i in range(N_test):
+            scores_dict = all_scores[j][i]
+            overall_scores = [v['overall_score'] for v in scores_dict.values()]
+            all_test_scores.append(overall_scores)
+        all_test_scores = np.array(all_test_scores)
+        ensemble_stats[j] = {
+            'mean_per_checkpoint': np.mean(all_test_scores, axis=0),
+            'median_per_checkpoint': np.median(all_test_scores, axis=0),
+            'std_per_checkpoint': np.std(all_test_scores, axis=0),
+            'UQ_per_checkpoint': np.percentile(all_test_scores, 75, axis=0),
+            'LQ_per_checkpoint': np.percentile(all_test_scores, 25, axis=0)
+        }
+
+    checkpoints=(0.5, 1.0, 1.5, 2.0, 2.5)
+    for j in range(ensemble_test):
+        stats = ensemble_stats[j]
+        print(f"ens {j} stats: {stats['mean_per_checkpoint']}")
+        fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
+        plot_barchart_errors(checkpoints, stats['median_per_checkpoint'], stats['mean_per_checkpoint'], stats['LQ_per_checkpoint'], stats['UQ_per_checkpoint'], 'Lead Time', 0.4, fig, ax, color1='tab:blue', color2='black', marker2='o')
+        ax.set_ylabel('Score')
+        fig.savefig(init_path+f"/Score_ens{j}.png")
+        plt.close()
+    
+all_means    = np.array([ensemble_stats[j]['mean_per_checkpoint'] for j in range(ensemble_test)])
+all_medians  = np.array([ensemble_stats[j]['median_per_checkpoint'] for j in range(ensemble_test)])
+all_UQs      = np.array([ensemble_stats[j]['UQ_per_checkpoint'] for j in range(ensemble_test)])
+all_LQs      = np.array([ensemble_stats[j]['LQ_per_checkpoint'] for j in range(ensemble_test)])
+avg_mean_across_ensembles   = np.nanmean(all_means, axis=0)
+avg_median_across_ensembles = np.nanmean(all_medians, axis=0)
+avg_UQ_across_ensembles = np.nanmean(all_UQs, axis=0)
+avg_LQ_across_ensembles = np.nanmean(all_LQs, axis=0)
+
+fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
+plot_barchart_errors(checkpoints, avg_median_across_ensembles, avg_mean_across_ensembles, avg_LQ_across_ensembles, avg_UQ_across_ensembles, 'Lead Time', 0.4, fig, ax, color1='tab:blue', color2='black', marker2='o')
+ax.set_ylabel('Score')
+fig.savefig(init_path+f"/Score_avg_ens.png")
+
+# Save the dictionary
+with open(init_path+'/all_scores.pkl', 'wb') as f:
+    pickle.dump(all_scores, f)
 
 if initiation_interval2:
     #### INITIATION ####
