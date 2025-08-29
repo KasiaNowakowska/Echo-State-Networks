@@ -1040,3 +1040,236 @@ def score_plumes(truth_positions, pred_positions, N_lyap,
 
     return result_dict
 
+from collections import Counter
+def score_plumes2(truth_positions, pred_positions, N_lyap,
+                 checkpoints=(0.5, 1.0, 1.5, 2.0, 3.0),
+                 thresholds=(1,2,3,4,5,6,7,8,9,10),  # very good, good, medium
+                 x_domain=(0.0,20.0)):
+    """
+    Score predicted vs true plume positions at chosen checkpoints.
+
+    Parameters
+    ----------
+    truth_positions : array, shape (T, max_plumes)
+        Extracted plume x-positions (NaN if no plume).
+    pred_positions : array, shape (T, max_plumes)
+        Predicted plume x-positions (NaN if no plume).
+    N_lyap : int
+        Number of timesteps per LT.
+    checkpoints : list of floats
+        Lead times (in LTs) to evaluate (e.g. [0.5, 1.0, 2.0]).
+    thresholds : tuple
+        (very_good, good, medium) in number of indexes
+
+    Returns
+    -------
+    all_scores : dict
+        {checkpoint_time (in steps): list of scores for each plume}
+    """
+
+    x_min, x_max = x_domain
+    L = x_max - x_min  # domain length
+
+    def circ_dist(a, b):
+        """Compute minimum distance in periodic domain."""
+        d = np.abs(a - b)
+        return np.minimum(d, L - d)
+
+    T = truth_positions.shape[0]
+
+    def match_scores(true_slots, pred_slots):
+        labels = []
+        matched_true_indices = set()
+
+        # 1. Match predicted plumes to closest true plume
+        for pp in pred_slots:
+            if np.isnan(pp):
+                continue  # skip empty prediction slot
+
+            # compute distances to all true plumes
+            valid_indices = [i for i, tp in enumerate(true_slots) if not np.isnan(tp)]
+            if len(valid_indices) == 0:
+                labels.append("FP")
+                continue
+
+            dists = np.array([circ_dist(pp, true_slots[i]) for i in valid_indices])
+            min_idx = valid_indices[np.argmin(dists)]
+            min_dist = dists.min()
+
+            # assign label based on thresholds
+            assigned_label = None
+            for th in thresholds:  # thresholds = [1,2,3,...,10]
+                if min_dist <= th:
+                    assigned_label = th
+                    break
+            if assigned_label is None:
+                labels.append("FP")
+            else:
+                labels.append(assigned_label)
+                matched_true_indices.add(min_idx)  # mark as matched
+
+        # 2. Any true plume not matched within medium threshold → FN
+        for i, tp in enumerate(true_slots):
+            if np.isnan(tp):
+                continue
+            if i not in matched_true_indices:
+                labels.append("FN")
+
+        # 3. TN: slots where both truth and prediction are empty
+        for tp, pp in zip(true_slots, pred_slots):
+            if np.isnan(tp) and np.isnan(pp):
+                labels.append("TN")
+
+        return labels
+
+    result_dict = {}
+    for lt in checkpoints:
+        ck = int(round(lt * N_lyap))
+        if ck >= T:
+            continue
+
+        true_slots = truth_positions[ck, :]
+        pred_slots = pred_positions[ck, :]
+
+        labels = match_scores(true_slots, pred_slots)
+        counts = Counter(labels)
+
+        result_dict[ck] = {"counts": counts}
+
+    return result_dict
+
+
+
+def circ_dist_scalar_array(xq, xval, L):
+    """
+    Minimum circular distance between scalar xval and array xq (or vice versa).
+    xq: array_like (grid or queries)
+    xval: scalar
+    returns: array of same shape as xq
+    """
+    d = np.abs(np.asarray(xq) - float(xval))
+    return np.minimum(d, L - d)
+
+# --- main function: probability at one or several x locations ----------
+def probability_at_location(pred_pos, pred_strength,      # arrays shape (T, P)
+                            ck_step,                     # integer time index (checkpoint)
+                            x_query,                     # scalar or array of x positions to query
+                            x_domain=(0.0, 20.0),
+                            sigma_x=1.0,                 # spatial kernel width (same units as x)
+                            temporal_radius=0,           # include ± timesteps around ck_step
+                            sigma_t=1.0,                 # temporal decay scale; <=0 disables temporal weighting
+                            use_strength=True,
+                            strength_power=1.0,
+                            score_to_prob_scale=1.0):
+    """
+    Compute probability (and raw score) that a plume is present at x_query,
+    using predicted plume positions & strengths for a single test & ensemble.
+
+    Parameters
+    ----------
+    pred_pos : ndarray (T, P)
+        Predicted plume positions (x) per timestep and slot; np.nan if empty slot.
+    pred_strength : ndarray (T, P) or None
+        Predicted strengths (sKE); can be None.
+    ck_step : int
+        Checkpoint timestep index.
+    x_query : float or 1D array
+        Position(s) to evaluate probability at.
+    x_domain : (xmin, xmax)
+        Periodic domain.
+    sigma_x : float
+        Gaussian kernel width (stddev) in x-units.
+    temporal_radius : int
+        ± timesteps around ck_step to include. 0 uses only ck_step.
+    sigma_t : float
+        Temporal decay scale. If <=0, only ck_step is used.
+    use_strength : bool
+    strength_power : float
+    score_to_prob_scale : float
+        S parameter for mapping score -> prob: p = 1 - exp(-score / S)
+
+    Returns
+    -------
+    prob : ndarray (same shape as x_query flattened)
+        Probability(s) at x_query.
+    score : ndarray
+        Raw score(s) before mapping.
+    """
+
+    xq = np.atleast_1d(x_query).astype(float)
+    x_min, x_max = x_domain
+    L = x_max - x_min
+
+    # temporal weights
+    if temporal_radius <= 0 or sigma_t <= 0:
+        temporal_weights = {0: 1.0}
+    else:
+        temporal_weights = {dt: np.exp(-abs(dt) / sigma_t) for dt in range(-temporal_radius, temporal_radius+1)}
+
+    two_sigx2 = 2.0 * (sigma_x**2)
+    T, P = pred_pos.shape
+
+    # accumulate score for each query point
+    scores = np.zeros_like(xq, dtype=float)
+
+    for dt, tw in temporal_weights.items():
+        t = ck_step + dt
+        if t < 0 or t >= T:
+            continue
+        for p in range(P):
+            pp = pred_pos[t, p]
+            if np.isnan(pp):
+                continue
+            # compute circular distances between this plume and all query points
+            dists = circ_dist_scalar_array(xq, pp, L)  # array len(xq)
+            spatial_kernel = np.exp(-(dists**2) / two_sigx2)   # peak=1 at distance 0
+            w = 1.0
+            if use_strength and (pred_strength is not None):
+                sval = pred_strength[t, p]
+                if not np.isnan(sval):
+                    w = sval ** strength_power
+            scores += tw * w * spatial_kernel
+
+    # map raw score -> probability
+    S = score_to_prob_scale if score_to_prob_scale > 0 else 1.0
+    probs = 1.0 - np.exp(-scores / S)
+
+    # return same shape as input x_query
+    if np.isscalar(x_query):
+        return float(probs[0]), float(scores[0])
+    else:
+        return probs, scores
+    
+def truth_at_location(true_pos,                # (T, P) array of true plume x (np.nan if absent)
+                      ck_step,
+                      x_query,
+                      x_domain=(0.0,20.0),
+                      label_radius=1.0,
+                      temporal_radius=0):
+    """
+    Return binary truth (1/0) whether any true plume is within label_radius
+    of x_query at checkpoint ck_step (optionally consider ±temporal_radius).
+    """
+    xq = np.atleast_1d(x_query).astype(float)
+    x_min, x_max = x_domain
+    L = x_max - x_min
+    T, P = true_pos.shape
+
+    # start with zeros
+    truth = np.zeros_like(xq, dtype=int)
+
+    for dt in range(-temporal_radius, temporal_radius+1):
+        t = ck_step + dt
+        if t < 0 or t >= T:
+            continue
+        row = true_pos[t, :]
+        valid = row[~np.isnan(row)]
+        if valid.size == 0:
+            continue
+        for pp in valid:
+            d = np.minimum(np.abs(xq - pp), L - np.abs(xq - pp))
+            truth[d <= label_radius] = 1
+
+    if np.isscalar(x_query):
+        return int(truth[0])
+    return truth

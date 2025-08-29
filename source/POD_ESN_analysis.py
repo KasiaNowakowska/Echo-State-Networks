@@ -1739,6 +1739,9 @@ if initiation_score_interval:
     ens_PH               = np.zeros((N_test, ensemble_test))
 
     all_scores = {}
+    all_scores_extended = {}
+    all_probs = {}
+    truths    = {}
 
     images_test_path = init_path+'/test_images/'
     if not os.path.exists(images_test_path):
@@ -1753,6 +1756,9 @@ if initiation_score_interval:
 
         print('Realization    :',j+1)
         all_scores[j] = {}
+        all_scores_extended[j] = {}
+        all_probs[j] = {}
+        truths[j]    = {}
 
         #load matrices and hyperparameters
         Wout     = Woutt[j].copy()
@@ -1825,7 +1831,43 @@ if initiation_score_interval:
                     if j ==0:
                         print(scores)
 
+                    scores_extended = score_plumes2(x_positions_truth, x_positions_pred, N_lyap,
+                                            checkpoints=(0.5, 1.0, 1.5, 2.0, 2.5),
+                                            thresholds=(1,2,3,4,5,6,7,8,9,10))
+                    all_scores_extended[j][i] = scores_extended
+                    if j == 0:
+                        print(scores_extended)
 
+                    # --- NEW: probability at fixed x positions ---
+                    checkpoints  = (0.5, 1.0, 1.5, 2.0, 2.5)   # in Lyapunov times
+                    x_queries    = np.arange(0, 20, 2)         # positions 0,2,...,18   
+                    
+                    all_probs[j][i] = {}
+                    for ck in checkpoints:
+                        ck_step = int(ck * N_lyap)  # convert to time index
+                        prob, score = probability_at_location(
+                            pred_pos      = x_positions_pred,
+                            pred_strength = None,  # or pass strengths if you have them
+                            ck_step       = ck_step,
+                            x_query       = x_queries,
+                            x_domain      = (0,20),
+                            sigma_x       = 1.0,
+                            temporal_radius = 2,   # or >0 to include neighbors
+                            sigma_t       = 1.0,
+                            use_strength  = False
+                        )
+                        all_probs[j][i][ck] = {"probs": prob, "scores": score}
+
+                    for ck in checkpoints:
+                        ck_step = int(ck * N_lyap)  # convert to time index
+                        truth_val = probability_at_location(x_positions_truth,                # (T, P) array of true plume x (np.nan if absent)
+                                        ck_step,
+                                        x_queries,
+                                        x_domain=(0.0,20.0),
+                                        label_radius=1.0,
+                                        temporal_radius=0)
+                        truths[j][i][ck] = truth_val
+                        
             if plot:
                 #left column has the washout (open-loop) and right column the prediction (closed-loop)
                 # only first n_plot test set intervals are plotted
@@ -1890,23 +1932,27 @@ if initiation_score_interval:
         fig.savefig(init_path+f"/Score_ens{j}.png")
         plt.close()
     
-all_means    = np.array([ensemble_stats[j]['mean_per_checkpoint'] for j in range(ensemble_test)])
-all_medians  = np.array([ensemble_stats[j]['median_per_checkpoint'] for j in range(ensemble_test)])
-all_UQs      = np.array([ensemble_stats[j]['UQ_per_checkpoint'] for j in range(ensemble_test)])
-all_LQs      = np.array([ensemble_stats[j]['LQ_per_checkpoint'] for j in range(ensemble_test)])
-avg_mean_across_ensembles   = np.nanmean(all_means, axis=0)
-avg_median_across_ensembles = np.nanmean(all_medians, axis=0)
-avg_UQ_across_ensembles = np.nanmean(all_UQs, axis=0)
-avg_LQ_across_ensembles = np.nanmean(all_LQs, axis=0)
+    all_means    = np.array([ensemble_stats[j]['mean_per_checkpoint'] for j in range(ensemble_test)])
+    all_medians  = np.array([ensemble_stats[j]['median_per_checkpoint'] for j in range(ensemble_test)])
+    all_UQs      = np.array([ensemble_stats[j]['UQ_per_checkpoint'] for j in range(ensemble_test)])
+    all_LQs      = np.array([ensemble_stats[j]['LQ_per_checkpoint'] for j in range(ensemble_test)])
+    avg_mean_across_ensembles   = np.nanmean(all_means, axis=0)
+    avg_median_across_ensembles = np.nanmean(all_medians, axis=0)
+    avg_UQ_across_ensembles = np.nanmean(all_UQs, axis=0)
+    avg_LQ_across_ensembles = np.nanmean(all_LQs, axis=0)
 
-fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
-plot_barchart_errors(checkpoints, avg_median_across_ensembles, avg_mean_across_ensembles, avg_LQ_across_ensembles, avg_UQ_across_ensembles, 'Lead Time', 0.4, fig, ax, color1='tab:blue', color2='black', marker2='o')
-ax.set_ylabel('Score')
-fig.savefig(init_path+f"/Score_avg_ens.png")
+    fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
+    plot_barchart_errors(checkpoints, avg_median_across_ensembles, avg_mean_across_ensembles, avg_LQ_across_ensembles, avg_UQ_across_ensembles, 'Lead Time', 0.4, fig, ax, color1='tab:blue', color2='black', marker2='o')
+    ax.set_ylabel('Score')
+    fig.savefig(init_path+f"/Score_avg_ens.png")
 
-# Save the dictionary
-with open(init_path+'/all_scores.pkl', 'wb') as f:
-    pickle.dump(all_scores, f)
+    # Save the dictionary
+    with open(init_path+'/all_scores.pkl', 'wb') as f:
+        pickle.dump(all_scores, f)
+
+    # Save the dictionary
+    with open(init_path+'/all_scores_extended.pkl', 'wb') as f:
+        pickle.dump(all_scores_extended, f)
 
 if initiation_interval2:
     #### INITIATION ####

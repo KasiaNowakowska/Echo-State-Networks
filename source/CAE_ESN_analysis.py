@@ -29,6 +29,7 @@ import numpy as np
 import h5py
 import yaml
 import skopt
+import pickle
 from skopt.space import Real
 
 from docopt import docopt
@@ -849,9 +850,10 @@ print('norm:', norm)
 print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
-test_interval = True
+test_interval = False
 validation_interval = False
 statistics_interval = False
+initiation_score_interval = True
 fourier = False
 vertical_profiles = False
 reservoir_investigation = False
@@ -1644,6 +1646,217 @@ if statistics_interval:
     with open(output_path_met_ALL, "w") as file:
         json.dump(metrics_ens_ALL, file, indent=4)
     print('finished statistics')
+
+
+if initiation_score_interval:
+    #### INITIATION ####
+    init_path = output_path + '/initation_score/'
+    if not os.path.exists(init_path):
+        os.makedirs(init_path)
+        print('made directory')
+
+    #test_indexes = [210, 420, 555]
+    N_test   = 40                    #number of intervals in the test set
+    N_tstart = int(N_washout + N_train)   #where the first test interval starts
+    N_intt   = 3*N_lyap             #length of each test set interval
+    N_washout = int(N_washout)
+    N_gap = int(1*N_lyap)
+
+    print('N_tstart:', N_tstart)
+    print('N_intt:', N_intt)
+    print('N_washout:', N_washout)
+
+    # #prediction horizon normalization factor and threshold
+    sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
+    threshold_ph = threshold_ph
+
+    ensemble_test = 5
+
+    ens_pred             = np.zeros((N_intt, dim, ensemble_test))
+    ens_PH               = np.zeros((N_test, ensemble_test))
+
+    all_scores = {}
+
+    images_test_path = init_path+'/test_images/'
+    if not os.path.exists(images_test_path):
+        os.makedirs(images_test_path)
+        print('made directory')
+    metrics_test_path = init_path+'/test_metrics/'
+    if not os.path.exists(metrics_test_path):
+        os.makedirs(metrics_test_path)
+        print('made directory')
+
+    for j in range(ensemble_test):
+
+        print('Realization    :',j+1)
+        all_scores[j] = {}
+
+        #load matrices and hyperparameters
+        Wout     = Woutt[j].copy()
+        Win      = Winn[j] #csr_matrix(Winn[j])
+        W        = Ws[j]   #csr_matrix(Ws[j])
+        rho      = opt_hyp[j,0].copy()
+        sigma_in = opt_hyp[j,1].copy()
+        print('Hyperparameters:',rho, sigma_in)
+
+        # to store prediction horizon in the test set
+        PH             = np.zeros(N_test)
+        nrmse_error    = np.zeros((N_test, N_intt))
+
+        # to plot results
+        plot = True
+        Plotting = True
+        if plot:
+            n_plot = N_test
+            plt.rcParams["figure.figsize"] = (15,3*n_plot)
+            plt.figure()
+            plt.tight_layout()
+
+        #run different test intervals
+        for i in range(N_test):
+            print('test', i+1)
+            print(N_tstart + i*N_gap)
+            print('start time of test', time_vals[N_tstart + i*N_gap])
+            # data for washout and target in each interval
+            U_wash    = U[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap].copy()
+            Y_t       = U[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt].copy()
+            data_set_Y_t =  data_set[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt]
+
+            #washout for each interval
+            Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
+            Uh_wash = np.dot(Xa1, Wout)
+
+            # Prediction Horizon
+            Yh_t,_,Xa2        = closed_loop(N_intt-1, Xa1[-1], Wout, sigma_in, rho)
+            print(np.shape(Yh_t))
+            Y_err       = np.sqrt(np.mean((Y_t-Yh_t)**2,axis=1))/sigma_ph
+            PH[i]       = np.argmax(Y_err>threshold_ph)/N_lyap
+            if PH[i] == 0 and Y_err[0]<threshold_ph: PH[i] = N_intt/N_lyap #(in case PH is larger than interval)
+            ens_PH[i,j] = PH[i]
+
+            ##### reconstructions ####
+            if Data == 'RB_plume':
+                plume_features_truth         = Y_t[:,N_latent:]
+                plume_features_predictions   = Yh_t[:,N_latent:]
+
+                # 1. reshape for decoder
+                Y_t_reshaped = Y_t[:,:N_latent].reshape(Y_t.shape[0], N_1[1], N_1[2], N_1[3])
+                Yh_t_reshaped = Yh_t[:,:N_latent].reshape(Yh_t.shape[0], N_1[1], N_1[2], N_1[3])
+                # 2. put through decoder
+                reconstructed_truth = Decoder(Y_t_reshaped,b).numpy()
+                reconstructed_predictions = Decoder(Yh_t_reshaped,b).numpy()
+                # 3. scale back
+                reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
+                reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
+
+            else:
+                # 1. reshape for decoder
+                Y_t_reshaped = Y_t.reshape(Y_t.shape[0], N_1[1], N_1[2], N_1[3])
+                Yh_t_reshaped = Yh_t.reshape(Yh_t.shape[0], N_1[1], N_1[2], N_1[3])
+                # 2. put through decoder
+                reconstructed_truth = Decoder(Y_t_reshaped,b).numpy()
+                reconstructed_predictions = Decoder(Yh_t_reshaped,b).numpy()
+                # 3. scale back
+                reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
+                reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
+
+
+            if Data == 'RB_plume':
+                if plumetype == 'sincospositions':
+                    x_positions_truth = extract_plume_positions(plume_features_truth, x_domain=(0,20), max_plumes=3, threshold_predictions=False, KE_threshold=0.00005)
+                    x_positions_pred  = extract_plume_positions(plume_features_predictions, x_domain=(0,20), max_plumes=3, threshold_predictions=True, KE_threshold=0.00005)
+
+                    scores = score_plumes(x_positions_truth, x_positions_pred, N_lyap,
+                                            checkpoints=(0.5, 1.0, 1.5, 2.0, 2.5),
+                                            thresholds=(1,3,10),  # very good, good, medium
+                                            weights=None)
+                    
+                    all_scores[j][i] = scores
+                    if j ==0:
+                        print(scores)
+
+            if plot:
+                #left column has the washout (open-loop) and right column the prediction (closed-loop)
+                # only first n_plot test set intervals are plotted
+                 if i<n_plot:
+                    if j % 5 == 0:
+                        categories = ['very good', 'good', 'medium', 'FN', 'FP', 'TN']
+                        lts = sorted(scores.keys())  # [0.5, 1.0, 1.5, 2.0, 2.5]
+                        print("lts:", lts)
+                        lts_labels = np.array(lts)/N_lyap
+                        lts_labels  = [f"{lt:.1f}" for lt in lts_labels]
+                        # Extract counts for each category at each LT
+                        counts_per_category = {cat: [] for cat in categories}
+                        overalls            = []
+
+                        for lt in lts:
+                            counter = scores[lt]['counts']
+                            for cat in categories:
+                                counts_per_category[cat].append(counter.get(cat, 0))  # default 0 if missing
+                            overalls.append(scores[lt]['overall_score'])
+
+                        print(f"ens{j}: {overalls}")
+                        # Plot grouped bar chart
+                        x_range = range(len(lts))
+                        width = 0.15
+                        fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
+                        for k, cat in enumerate(categories):
+                            ax.bar([xi + k*width for xi in x_range], counts_per_category[cat], width=width, label=cat)
+                        ax.plot([xi + width*2 for xi in x_range], overalls, color='black', marker='o', linestyle='-', label='Overall Score')
+                        ax.set_xticks([xi + width*2 for xi in x_range])
+                        ax.set_xticklabels(lts_labels)
+                        ax.set_xlabel('Lead Times [LTs]')
+                        ax.set_ylabel('Number')
+                        ax.legend()
+                        ax.grid()
+                        fig.savefig(images_test_path+f"/plume_scores_ens{j}_test{i}.png")
+                        plt.close()
+
+    ensemble_stats = {}
+
+    for j in range(ensemble_test):
+        all_test_scores = []
+        for i in range(N_test):
+            scores_dict = all_scores[j][i]
+            overall_scores = [v['overall_score'] for v in scores_dict.values()]
+            all_test_scores.append(overall_scores)
+        all_test_scores = np.array(all_test_scores)
+        ensemble_stats[j] = {
+            'mean_per_checkpoint': np.mean(all_test_scores, axis=0),
+            'median_per_checkpoint': np.median(all_test_scores, axis=0),
+            'std_per_checkpoint': np.std(all_test_scores, axis=0),
+            'UQ_per_checkpoint': np.percentile(all_test_scores, 75, axis=0),
+            'LQ_per_checkpoint': np.percentile(all_test_scores, 25, axis=0)
+        }
+
+    checkpoints=(0.5, 1.0, 1.5, 2.0, 2.5)
+    for j in range(ensemble_test):
+        stats = ensemble_stats[j]
+        print(f"ens {j} stats: {stats['mean_per_checkpoint']}")
+        fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
+        plot_barchart_errors(checkpoints, stats['median_per_checkpoint'], stats['mean_per_checkpoint'], stats['LQ_per_checkpoint'], stats['UQ_per_checkpoint'], 'Lead Time', 0.4, fig, ax, color1='tab:blue', color2='black', marker2='o')
+        ax.set_ylabel('Score')
+        fig.savefig(init_path+f"/Score_ens{j}.png")
+        plt.close()
+    
+    all_means    = np.array([ensemble_stats[j]['mean_per_checkpoint'] for j in range(ensemble_test)])
+    all_medians  = np.array([ensemble_stats[j]['median_per_checkpoint'] for j in range(ensemble_test)])
+    all_UQs      = np.array([ensemble_stats[j]['UQ_per_checkpoint'] for j in range(ensemble_test)])
+    all_LQs      = np.array([ensemble_stats[j]['LQ_per_checkpoint'] for j in range(ensemble_test)])
+    avg_mean_across_ensembles   = np.nanmean(all_means, axis=0)
+    avg_median_across_ensembles = np.nanmean(all_medians, axis=0)
+    avg_UQ_across_ensembles = np.nanmean(all_UQs, axis=0)
+    avg_LQ_across_ensembles = np.nanmean(all_LQs, axis=0)
+
+    fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
+    plot_barchart_errors(checkpoints, avg_median_across_ensembles, avg_mean_across_ensembles, avg_LQ_across_ensembles, avg_UQ_across_ensembles, 'Lead Time', 0.4, fig, ax, color1='tab:blue', color2='black', marker2='o')
+    ax.set_ylabel('Score')
+    fig.savefig(init_path+f"/Score_avg_ens.png")
+
+    # Save the dictionary
+    with open(init_path+'/all_scores.pkl', 'wb') as f:
+        pickle.dump(all_scores, f)
+
 
 def FFT1D(signal, x1):
     signal = signal - np.mean(signal)
