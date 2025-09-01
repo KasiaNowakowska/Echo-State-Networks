@@ -50,6 +50,88 @@ def plot_modes_prediction(truth, prediction, xx, i, j, indexes_to_plot, file_nam
         fig.savefig(file_name+'_ens%i_test%i.eps' % (j,i), format='eps')
         plt.close()
 
+def plot_modes_washoutprediction(truth_washout, prediction_washout, truth, prediction, xx_washout, xx, i, j, indexes_to_plot, file_name, Modes=True):
+    fig, ax = plt.subplots(len(indexes_to_plot), figsize=(8,6), sharex=True, tight_layout=True)
+    if len(indexes_to_plot) == 1:
+        ax.plot(xx, truth, 'b', label='True')
+        ax.plot(xx, prediction[:-1], '--r', label='ESN')
+        ax.legend()
+        ax.grid()
+    else:
+        for v in range(len(indexes_to_plot)):
+            index = indexes_to_plot[v]
+            ax[v].plot(xx_washout, truth_washout[:, index], color='tab:blue')
+            ax[v].plot(xx,truth[:,index], color='tab:blue', label='True')
+            ax[v].plot(xx,prediction[:,index], color='tab:orange', linestyle='--', label='ESN')
+            ax[v].grid()
+            ax[v].axvline(x=xx[0], color='tab:red', alpha=0.5)
+            if Modes == True:
+                ax[v].set_ylabel('Mode %i' % (index+1))
+            else:
+                ax[v].set_ylabel('LV %i' % (index+1))
+        ax[-1].set_xlabel('Time [Lyapunov Times]')
+        ax[0].legend(ncol=2)
+        fig.savefig(file_name+'_ens%i_test%i.png' % (j,i))
+        fig.savefig(file_name+'_ens%i_test%i.eps' % (j,i), format='eps')
+        plt.close()
+
+# Your FFT wrapper
+def fft(variable, x):
+    variable = variable - np.mean(variable)
+    fft = np.fft.fft(variable)
+    fft = np.fft.fftshift(fft)
+    end = x[-1]
+    start = x[0]
+    m = np.fft.fftfreq(len(x), d=(end-start)/len(x))
+    m = np.fft.fftshift(m)
+    m = 2*np.pi*m  # angular frequency [rad/s]
+    magnitude_w = np.abs(fft)**2 / len(x)   # PSD estimate (normalize)
+    return magnitude_w, m
+
+def plot_modes_prediction_FFT(truth, prediction, xx, i, j, indexes_to_plot, file_name, Modes=True):
+    fig, ax = plt.subplots(len(indexes_to_plot), figsize=(8,6), sharex=True, tight_layout=True)
+    
+    if len(indexes_to_plot) == 1:
+        # Compute PSDs
+        psd_true, freq_true = fft(truth, xx)
+        psd_pred, freq_pred = fft(prediction, xx)
+        
+        # Keep only positive frequencies
+        pos_idx_true = freq_true >= 0
+        pos_idx_pred = freq_pred >= 0
+        
+        ax.plot(freq_true[pos_idx_true], psd_true[pos_idx_true], color='tab:blue', label='True')
+        ax.plot(freq_pred[pos_idx_pred], psd_pred[pos_idx_pred], color='tab:orange', linestyle='--', label='ESN')
+        ax.legend()
+        ax.grid()
+        
+    else:
+        for v in range(len(indexes_to_plot)):
+            index = indexes_to_plot[v]
+            psd_true, freq_true = fft(truth[:,index], xx)
+            psd_pred, freq_pred = fft(prediction[:,index], xx)
+            
+            # Positive frequencies only
+            pos_idx_true = freq_true >= 0
+            pos_idx_pred = freq_pred >= 0
+            
+            ax[v].plot(freq_true[pos_idx_true], psd_true[pos_idx_true], color='tab:blue', label='True')
+            ax[v].plot(freq_pred[pos_idx_pred], psd_pred[pos_idx_pred], color='tab:orange', linestyle='--', label='ESN')
+            ax[v].grid()
+            
+            if Modes:
+                ax[v].set_ylabel('PSD Mode %i' % (index+1))
+            else:
+                ax[v].set_ylabel('PSD LV %i' % (index+1))
+        
+        ax[-1].set_xlabel('Frequency [rad/s]')
+        ax[0].legend(ncol=2)
+        
+    fig.savefig(file_name+'_ens%i_test%i.png' % (j,i))
+    fig.savefig(file_name+'_ens%i_test%i.eps' % (j,i), format='eps')
+    plt.close()
+
+
 def plot_PH(error, threshold_ph, xx, i, j, file_name):
     fig,ax =plt.subplots(1, figsize=(8,6),sharex=True, tight_layout=True)
     ax.plot(xx,error, 'b')
@@ -94,6 +176,26 @@ def plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, var
         for v in range(2):
             ax[v].set_xlabel('time')
             ax[v].set_ylabel('x')
+        fig.savefig(file_name+f"_ens{j}_test{i}.png")
+        plt.close()
+    else:
+        print('no image')
+
+def plot_active_array_with_true(active_array_true, active_array, active_array_reconstructed, x, xx, i, j, variables, file_name):
+    if len(variables) == 4:
+        fig, ax = plt.subplots(3, figsize=(12,12), tight_layout=True)
+        c1 = ax[0].contourf(xx, x, active_array_true[:,:, 32].T, cmap='Reds')
+        fig.colorbar(c1, ax=ax[0])
+        ax[0].set_title('True', fontsize=16)
+        c2 = ax[1].contourf(xx, x, active_array[:,:, 32].T, cmap='Reds')
+        fig.colorbar(c2, ax=ax[1])
+        ax[1].set_title('POD Reconstruction', fontsize=16)
+        c3 = ax[2].contourf(xx, x, active_array_reconstructed[:,:, 32].T, cmap='Reds')
+        fig.colorbar(c3, ax=ax[2])
+        ax[2].set_title('ESN Reconstruction', fontsize=16)
+        for v in range(3):
+            ax[v].set_xlabel('Time [Lyapunov Times]', fontsize=14)
+            ax[v].set_ylabel('x', fontsize=14)
         fig.savefig(file_name+f"_ens{j}_test{i}.png")
         plt.close()
     else:

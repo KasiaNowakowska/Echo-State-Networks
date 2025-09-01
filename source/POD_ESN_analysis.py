@@ -494,12 +494,12 @@ print('norm:', norm)
 print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
-test_interval = False
+test_interval = True
 validation_interval = False
 statistics_interval = False
 initiation_interval = False
 initiation_interval2 = False
-initiation_score_interval = True
+initiation_score_interval = False
 
 train_data = data_set[:int(N_washout+N_train)]
 global_stds = [np.std(train_data[..., c]) for c in range(train_data.shape[-1])]
@@ -844,7 +844,7 @@ if test_interval:
         plot = True
         Plotting = True
         if plot:
-            n_plot = 40
+            n_plot = 18
             plt.rcParams["figure.figsize"] = (15,3*n_plot)
             plt.figure()
             plt.tight_layout()
@@ -858,6 +858,7 @@ if test_interval:
             # data for washout and target in each interval
             U_wash    = U[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap].copy()
             Y_t       = U[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt].copy()
+            data_set_Y_t =  data_set[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt]
 
             #washout for each interval
             Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
@@ -910,6 +911,7 @@ if test_interval:
                 nrmse_inPHreg = NRMSE_per_channel(reconstructed_truth[:PH_index], reconstructed_predictions[:PH_index])
 
             if len(variables) == 4:
+                active_array_true, mask_expanded_true, _,_,_ = active_array_truth(data_set_Y_t, z)
                 active_array, active_array_reconstructed, mask, mask_expanded_recon = active_array_calc(reconstructed_truth, reconstructed_predictions, z)
                 accuracy = np.mean(active_array == active_array_reconstructed)
                 if np.any(mask):  # Check if plumes exist
@@ -1022,20 +1024,26 @@ if test_interval:
                         xx = np.arange(U_wash[:,0].shape[0])/N_lyap
                         plot_modes_washout(U_wash, Uh_wash, xx, i, j, indexes_to_plot, images_test_path+'/washout_test', Modes=True)
 
+                        xx_washout = np.arange(U_wash[:,0].shape[0]) / N_lyap - (U_wash[:,0].shape[0]) / N_lyap
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
                         plot_modes_prediction(Y_t, Yh_t, xx, i, j, indexes_to_plot, images_test_path+'/prediction_test', Modes=True)
                         plot_PH(Y_err, threshold_ph, xx, i, j, images_test_path+'/PH_test')
-                        
+                        plot_modes_washoutprediction(U_wash, Uh_wash, Y_t, Yh_t, xx_washout, xx, i, j, indexes_to_plot, images_test_path+'/washout_prediction_test', Modes=True)
+                        plot_modes_prediction_FFT(Y_t, Yh_t, xx, i, j, indexes_to_plot, images_test_path+'/prediction_FFT_test', Modes=True)
+
                         plot_reservoir_states_norm(Xa1, Xa2, time_vals, N_tstart, N_washout_val, i, j, N_gap, N_intt, N_units, images_test_path+'/resnorm_test')
                         plot_input_states_norm(U_wash, Y_t, time_vals, N_tstart, N_washout_val, i, j, N_gap,  N_intt, images_test_path+'/inputnorm_test')
 
                         # reconstruction after scaling
                         print('reconstruction and error plot')
-                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, int(0.5*N_lyap), x, z, xx, names, images_test_path+'/ESN_validation_ens%i_test%i' %(j,i), type='POD')
+                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 32, int(1*N_lyap), x, z, xx, names, images_test_path+'/ESN_validation_ens%i_test%i' %(j,i), type='POD')
+                        plot_reconstruction_and_error(reconstructed_truth, reconstructed_predictions, 48, int(2*N_lyap), x, z, xx, names, images_test_path+'/ESN_validation_alt_ens%i_test%i' %(j,i), type='POD')
+
 
                         if len(variables)==4:
                             plot_active_array(active_array, active_array_reconstructed, x, xx, i, j, variables, images_test_path+'/active_plumes_test')
                             plot_global_prediction_ts(PODtruth_global, predictions_global, xx, i, j, images_test_path+'/global_prediciton')
+                            plot_active_array_with_true(active_array_true, active_array, active_array_reconstructed, x, xx, i, j, variables, images_test_path+'/active_plumes_wtrue_test')
                             #plot_global_prediction_ps(PODtruth_global, predictions_global, i, j, stats_path+'/global_prediciton')
 
                         if Data == 'RB_plume':
@@ -1089,6 +1097,9 @@ if test_interval:
     "lower PH (modes)": np.quantile(flatten_PH_modes, 0.75),
     "upper PH (modes)": np.quantile(flatten_PH_modes, 0.25),
     "median PH (modes)": np.median(flatten_PH_modes),
+    "median NRMSE per channel": np.median(ens_nrmse_ch),
+    "upper NRMSE per channel": np.percentile(ens_nrmse_ch, 75),
+    "lower NRMSE per channel": np.percentile(ens_nrmse_ch, 25),
     }
 
     with open(output_path_met_ALL, "w") as file:

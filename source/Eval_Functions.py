@@ -198,7 +198,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             vmax_res = np.max(np.abs(residual[t_value,:,:,i]))  # Get maximum absolute value
             vmin_res = -vmax_res
             c1 = ax[0].pcolormesh(x, z, original[t_value,:,:,i].T, vmin=minm, vmax=maxm, rasterized=True, zorder=0, edgecolors='none')
-            fig.colorbar(c1, ax=ax[0])
+            fig.colorbar(c1, ax=ax[0], label=names[v])
             if type == 'Recon':
                 ax[0].set_title('Reconstruction', fontsize=18)
             elif type == 'CAE':
@@ -206,7 +206,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             elif type == 'POD':
                 ax[0].set_title('POD Reconstruction (True)', fontsize=18)
             c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm, rasterized=True, zorder=0, edgecolors='none')
-            fig.colorbar(c2, ax=ax[1])
+            fig.colorbar(c2, ax=ax[1], label=names[v])
             if type == 'Recon':
                 ax[1].set_title('Reconstruction', fontsize=18)
             elif type == 'CAE':
@@ -214,7 +214,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             elif type == 'POD':
                 ax[1].set_title('POD Reconstruction (ESN)', fontsize=18)
             c3 = ax[2].pcolormesh(x, z, residual[t_value,:,:, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res, rasterized=True, zorder=0, edgecolors='none')
-            fig.colorbar(c3, ax=ax[2])
+            fig.colorbar(c3, ax=ax[2], label=names[v])
             ax[2].set_title('Error', fontsize=18)
             for v in range(3):
                 ax[v].set_ylabel('z', fontsize=16)
@@ -236,7 +236,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             print("x shape:", np.shape(x))
             print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
             c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm, rasterized=True, zorder=0, edgecolors='none')
-            fig.colorbar(c1, ax=ax[0])
+            fig.colorbar(c1, ax=ax[0], label=names[v])
             if type == 'Recon':
                 ax[0].set_title('Reconstruction', fontsize=18)
             elif type == 'CAE':
@@ -244,7 +244,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             elif type == 'POD':
                 ax[0].set_title('POD Reconstruction (True)', fontsize=18)
             c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm, rasterized=True, zorder=0, edgecolors='none')
-            fig.colorbar(c2, ax=ax[1])
+            fig.colorbar(c2, ax=ax[1], label=names[v])
             if type == 'Recon':
                 ax[1].set_title('Reconstruction', fontsize=18)
             elif type == 'CAE':
@@ -252,12 +252,12 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             elif type == 'POD':
                 ax[1].set_title('POD Reconstruction (ESN)', fontsize=18)
             c3 = ax[2].pcolormesh(time_vals, x,  residual[:,:,z_value, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res, rasterized=True, zorder=0, edgecolors='none')
-            fig.colorbar(c3, ax=ax[2])
+            fig.colorbar(c3, ax=ax[2], label=names[v])
             ax[2].set_title('Error', fontsize=18)
             for v in range(3):
                 ax[v].set_ylabel('x', fontsize=16)
                 ax[v].tick_params(axis='both', labelsize=12)
-            ax[-1].set_xlabel('Time', fontsize=16)
+            ax[-1].set_xlabel('Time [Lyapunov Times]', fontsize=16)
             fig.savefig(file_str+name+'_hovmoller_recon_residual.png')
             fig.savefig(file_str+name+'_hovmoller_recon_residual.eps', format='eps')
             fig.savefig(file_str+name+'_hovmoller_recon_residual.pdf', format='pdf')
@@ -555,6 +555,37 @@ def active_array_calc(original_data, reconstructed_data, z):
     
     return active_array, active_array_reconstructed, mask_expanded, mask_expanded_recon
 
+def active_array_calc_softer(original_data, reconstructed_data, z, RH_threshold=0.8, w_threshold=0, b_threshold=0):
+    beta = 1.201
+    alpha = 3.0
+    T = original_data[:,:,:,3] - beta*z
+    T_reconstructed = reconstructed_data[:,:,:,3] - beta*z
+    q_s = np.exp(alpha*T)
+    q_s_reconstructed = np.exp(alpha*T_reconstructed)
+    rh = original_data[:,:,:,0]/q_s
+    rh_reconstructed = reconstructed_data[:,:,:,0]/q_s_reconstructed
+    mean_b = np.mean(original_data[:,:,:,3], axis=1, keepdims=True)
+    mean_b_reconstructed= np.mean(reconstructed_data[:,:,:,3], axis=1, keepdims=True)
+    b_anom = original_data[:,:,:,3] - mean_b
+    b_anom_reconstructed = reconstructed_data[:,:,:,3] - mean_b_reconstructed
+    w = original_data[:,:,:,1]
+    w_reconstructed = reconstructed_data[:,:,:,1]
+    
+    mask = (rh[:, :, :] >= 1) & (w[:, :, :] > 0) & (b_anom[:, :, :] > 0)
+    mask_reconstructed = (rh_reconstructed[:, :, :] >= RH_threshold) & (w_reconstructed[:, :, :] > w_threshold) & (b_anom_reconstructed[:, :, :] > b_threshold)
+    
+    active_array = np.zeros((original_data.shape[0], original_data.shape[1], len(z)))
+    active_array[mask] = 1
+    active_array_reconstructed = np.zeros((original_data.shape[0], original_data.shape[1], len(z)))
+    active_array_reconstructed[mask_reconstructed] = 1
+    
+    # Expand the mask to cover all features (optional, depending on use case)
+    mask_expanded       =  np.repeat(mask[:, :, :, np.newaxis], 4, axis=-1)  # Shape: (256, 64, 1)
+    mask_expanded_recon =  np.repeat(mask_reconstructed[:, :, :, np.newaxis], 4, axis=-1) # Shape: (256, 64, 1)
+    
+    return active_array, active_array_reconstructed, mask_expanded, mask_expanded_recon
+
+
 def active_array_calc_prob(original_data, reconstructed_data, z, rh_min, rh_max, w_min, w_max, b_anom_min, b_anom_max, plume_score_threshold):
     beta = 1.201
     alpha = 3.0
@@ -637,6 +668,57 @@ def active_array_calc_prob(original_data, reconstructed_data, z, rh_min, rh_max,
     fig.savefig('Ra2e8/POD/Thesis/scaler/snapshots11200/modes64/plume_score_dist.png')
 
     return active_array, active_array_reconstructed, mask_expanded, mask_expanded_recon
+
+def plume_positions_from_active(active_array, x_full, x_domain=(0,20), max_plumes=3, z_range=(5,10)):
+    x_min, x_max = x_domain
+    # Assume active_array.shape = (time, nx, nz)
+    time_steps, nx, nz = active_array.shape[1], active_array.shape[2]
+
+    # Storage for features
+    positions = np.zeros((time_steps, max_plumes), dtype=float)  # x-centroids of up to 6 plumes
+
+    # Use 8-connectivity for labeling
+    structure = np.ones((3, 3))
+
+    # Trim to multiples of 4
+    nx_trim = (nx // 4) * 4
+    nz_trim = (nz // 4) * 4
+    active_trimmed = active_array[:, :nx_trim, :nz_trim]
+
+    # Reshape into 4x4 blocks
+    blocks = active_trimmed.reshape(len(time_steps), nx_trim//4, 4, nz_trim//4, 4)
+
+    # Take max (equivalent to np.any) over the 4x4 subgrid
+    new_array = blocks.max(axis=(2, 4))
+
+    x_downsample = x_full[:nx_trim:4]
+
+    for t in range(time_steps):
+        # Slice relevant z-range
+        z_start, z_end = z_range
+        subgrid = new_array[t, :, z_start:z_end]
+        
+        # Make binary
+        binary_mask = (subgrid > 0).astype(int)
+
+        # Connected component labeling
+        labeled, num_plumes = label(binary_mask, structure=structure)
+        if num_plumes == 0:
+            continue
+
+        
+        #  Centroids in downsampled index space
+        centroids = center_of_mass(binary_mask, labeled, range(1, num_plumes + 1))
+        x_centroids_idx = np.array([c[0] for c in centroids])
+
+        # Map downsampled centroid index to physical x value
+        # Assume evenly spaced downsampled x_full for new_array
+        x_spacing = x_full[1] - x_full[0]  # spacing of full grid
+        x_centroids_val = x_full[(x_centroids_idx * (len(x_full)/nx)).astype(int)]
+
+        positions[t, :] = x_centroids_val
+
+    return positions
 
 def ss_transform(data, scaler):
     print('implementing standard scaler')

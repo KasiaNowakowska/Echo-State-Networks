@@ -329,6 +329,7 @@ if POD_type == 'together':
 
         elif Data == 'RB':
             active_array, active_array_reconstructed, mask, mask_reconstructed = active_array_calc(data_set, data_reconstructed, z)
+
             print(np.shape(active_array))
             print(np.shape(mask))
             nrmse_plume             = NRMSE(data_set[:,:,:,:][mask], data_reconstructed[:,:,:,:][mask])
@@ -336,19 +337,109 @@ if POD_type == 'together':
             mask_original     = mask[..., 0]
             nrmse_sep_plume   = NRMSE_per_channel_masked(data_set, data_reconstructed, mask_original, global_stds) 
 
-        if Data in ('RB', 'RBplusActive'):
-            fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
-            c1 = ax[0].contourf(time_vals[:1000], x, active_array[:1000,:, 32].T, cmap='Reds')
-            fig.colorbar(c1, ax=ax[0])
-            ax[0].set_title('true')
-            c2 = ax[1].contourf(time_vals[:1000], x, active_array_reconstructed[:1000,:, 32].T, cmap='Reds')
-            fig.colorbar(c1, ax=ax[1])
-            ax[1].set_title('reconstruction')
-            for v in range(2):
-                ax[v].set_xlabel('time')
-                ax[v].set_ylabel('x')
-            fig.savefig(output_path+f"/active_plumes_1000_{c_names[index]}.png")
-            plt.close()
+            RH_values = np.array((0.8,0.85,0.9,0.95,1))  #np.array((0.7,0.75,0.8,0.85,0.9,0.95)) # Example: test 0.7, 0.73, ..., 1.0
+            w_thresh = 0
+            b_thresh = 0
+            print('RH_values:', RH_values)
+
+            precision_all = []
+            recall_all    = []
+            f1_all        = []
+            accuracy_all  = []
+
+            precision_full = []
+            recall_full    = []
+            f1_full        = []
+            accuracy_full  = []
+
+            for index1, element1 in enumerate(RH_values):
+                print(f"RH: {element1}")
+                active_array_softer, active_array_reconstructed_softer, mask_softer, mask_reconstructed_softer = active_array_calc_softer(data_set, data_reconstructed, z, RH_threshold=element1, w_threshold=0, b_threshold=0)
+
+
+                fig, ax = plt.subplots(3, figsize=(12,12), tight_layout=True)
+                c1 = ax[0].contourf(time_vals[:1000], x, active_array[:1000,:, 32].T, cmap='Reds')
+                fig.colorbar(c1, ax=ax[0])
+                ax[0].set_title('True')
+                c2 = ax[1].contourf(time_vals[:1000], x, active_array_reconstructed[:1000,:, 32].T, cmap='Reds')
+                fig.colorbar(c2, ax=ax[1])
+                ax[1].set_title('Reconstruction (Full Criteria)')
+                c3 = ax[2].contourf(time_vals[:1000], x, active_array_reconstructed_softer[:1000,:, 32].T, cmap='Reds')
+                fig.colorbar(c3, ax=ax[2])
+                ax[2].set_title(f"Reconstruction (Soft Criteria RH={element1})")
+                for v in range(2):
+                    ax[v].set_xlabel('time')
+                    ax[v].set_ylabel('x')
+                fig.savefig(output_path+f"/softer/active_plumes_softer_RH{element1}_1000_{c_names[index]}.png")
+                plt.close()
+
+                # Flatten the relevant chunks of true and reconstructed active arrays
+                flatten_true       = active_array[:1000,:,:].flatten().astype(int)
+                flatten_recon_full = active_array_reconstructed[:1000,:,:].flatten().astype(int)
+                flatten_recon_soft = active_array_reconstructed_softer[:1000,:,:].flatten().astype(int)
+
+                print("Any difference?", np.any(flatten_recon_full != flatten_recon_soft))
+                print("Num plume points full:", np.sum(flatten_recon_full))
+                print("Num plume points soft:", np.sum(flatten_recon_soft))
+
+                prec_soft = precision_score(flatten_true, flatten_recon_soft)
+                recall_soft = recall_score(flatten_true, flatten_recon_soft)
+                f1_soft = f1_score(flatten_true, flatten_recon_soft)
+                accuracy_soft = accuracy_score(flatten_true, flatten_recon_soft)
+
+                prec_og = precision_score(flatten_true, flatten_recon_full)
+                recall_og = recall_score(flatten_true, flatten_recon_full)
+                f1_og = f1_score(flatten_true, flatten_recon_full)
+                accuracy_og = accuracy_score(flatten_true, flatten_recon_full)
+
+                print(prec_soft, prec_og)
+                print(recall_soft, recall_og)
+                print(f1_soft, f1_og)
+                # Compute metrics for this chunk
+                precision_all.append(prec_soft)
+                recall_all.append(recall_soft)
+                f1_all.append(f1_soft)
+                accuracy_all.append(accuracy_soft)
+
+                precision_full.append(prec_og)
+                recall_full.append(recall_og)
+                f1_full.append(f1_og)
+                accuracy_full.append(accuracy_og)
+
+            print(precision_full, precision_all)
+            print(recall_full, recall_all)
+            print(f1_full, f1_all)
+            print(accuracy_full, accuracy_full)
+
+
+        # if Data in ('RB', 'RBplusActive'):
+        #     fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
+        #     c1 = ax[0].contourf(time_vals[:1000], x, active_array[:1000,:, 32].T, cmap='Reds')
+        #     fig.colorbar(c1, ax=ax[0])
+        #     ax[0].set_title('true')
+        #     c2 = ax[1].contourf(time_vals[:1000], x, active_array_reconstructed[:1000,:, 32].T, cmap='Reds')
+        #     fig.colorbar(c1, ax=ax[1])
+        #     ax[1].set_title('reconstruction')
+        #     for v in range(2):
+        #         ax[v].set_xlabel('time')
+        #         ax[v].set_ylabel('x')
+        #     fig.savefig(output_path+f"/active_plumes_1000_{c_names[index]}.png")
+        #     plt.close()
+
+        #     fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
+        #     c1 = ax[0].contourf(time_vals[:1000], x, active_array[:1000,:, 32].T, cmap='Reds')
+        #     fig.colorbar(c1, ax=ax[0])
+        #     ax[0].set_title('true')
+        #     c2 = ax[1].contourf(time_vals[:1000], x, active_array_reconstructed_softer[:1000,:, 32].T, cmap='Reds')
+        #     fig.colorbar(c1, ax=ax[1])
+        #     ax[1].set_title('reconstruction')
+        #     for v in range(2):
+        #         ax[v].set_xlabel('time')
+        #         ax[v].set_ylabel('x')
+        #     fig.savefig(output_path+f"/softer/active_plumes_softer_1000_{c_names[index]}.png")
+        #     plt.close()
+
+
 
             # Extract values in POD in true plume regions
             _, _, RH_recon, w_recon, b_anom_recon = active_array_truth(data_reconstructed, z)
@@ -385,114 +476,114 @@ if POD_type == 'together':
             ax[2].axvline(x=0, color='tab:red', linestyle='--')
             fig.savefig(output_path+'/stats.png')
 
-            #thresholds = [0.6, 0.65, 0.68, 0.7, 0.75, 0.8]
-            thresholds = [0.20, 0.25, 0.30]
-            #thresholds = [0.2,0.4,0.6,0.8]
-            chunk_size = 1000
-            time_steps = active_array.shape[0]
+        #     #thresholds = [0.6, 0.65, 0.68, 0.7, 0.75, 0.8]
+        #     thresholds = [0.20, 0.25, 0.30]
+        #     #thresholds = [0.2,0.4,0.6,0.8]
+        #     chunk_size = 1000
+        #     time_steps = active_array.shape[0]
 
-            precision_all = []
-            recall_all    = []
-            f1_all        = []
-            accuracy_all  = []
+        #     precision_all = []
+        #     recall_all    = []
+        #     f1_all        = []
+        #     accuracy_all  = []
 
-            for plume_score_threshold in thresholds:
-                print(f"Processing plume_score_threshold = {plume_score_threshold}")
+        #     for plume_score_threshold in thresholds:
+        #         print(f"Processing plume_score_threshold = {plume_score_threshold}")
 
-                precision_vals = []
-                recall_vals = []
-                f1_vals = []
-                accuracy_vals = []
+        #         precision_vals = []
+        #         recall_vals = []
+        #         f1_vals = []
+        #         accuracy_vals = []
 
-                for start in range(0, time_steps, chunk_size):
-                    end = min(start + chunk_size, time_steps)
+        #         for start in range(0, time_steps, chunk_size):
+        #             end = min(start + chunk_size, time_steps)
 
-                    data_chunk = data_set[start:end, :, :, :]
-                    reconstructed_chunk = data_reconstructed[start:end, :, :, :]
+        #             data_chunk = data_set[start:end, :, :, :]
+        #             reconstructed_chunk = data_reconstructed[start:end, :, :, :]
 
-                    # Calculate active arrays for this chunk
-                    active_array_score, active_array_reconstructed_score, mask_score, mask_reconstructed_score = active_array_calc_prob(
-                        data_chunk, reconstructed_chunk, z, RH_min, RH_max, w_min, w_max, b_anom_min, b_anom_max, plume_score_threshold)
+        #             # Calculate active arrays for this chunk
+        #             active_array_score, active_array_reconstructed_score, mask_score, mask_reconstructed_score = active_array_calc_prob(
+        #                 data_chunk, reconstructed_chunk, z, RH_min, RH_max, w_min, w_max, b_anom_min, b_anom_max, plume_score_threshold)
 
-                    # Flatten the relevant chunks of true and reconstructed active arrays
-                    flatten_true = active_array[start:end].flatten().astype(int)
-                    flatten_recon = active_array_reconstructed_score.flatten().astype(int)
+        #             # Flatten the relevant chunks of true and reconstructed active arrays
+        #             flatten_true = active_array[start:end].flatten().astype(int)
+        #             flatten_recon = active_array_reconstructed_score.flatten().astype(int)
 
-                    # Compute metrics for this chunk
-                    precision_vals.append(precision_score(flatten_true, flatten_recon))
-                    recall_vals.append(recall_score(flatten_true, flatten_recon))
-                    f1_vals.append(f1_score(flatten_true, flatten_recon))
-                    accuracy_vals.append(accuracy_score(flatten_true, flatten_recon))
+        #             # Compute metrics for this chunk
+        #             precision_vals.append(precision_score(flatten_true, flatten_recon))
+        #             recall_vals.append(recall_score(flatten_true, flatten_recon))
+        #             f1_vals.append(f1_score(flatten_true, flatten_recon))
+        #             accuracy_vals.append(accuracy_score(flatten_true, flatten_recon))
 
-                    if start == 0:
-                        cmap_b = ListedColormap(['white', 'red'])
-                        bounds = [-0.5, 0.5, 1.5]
-                        norm = BoundaryNorm(bounds, cmap_b.N)
+        #             if start == 0:
+        #                 cmap_b = ListedColormap(['white', 'red'])
+        #                 bounds = [-0.5, 0.5, 1.5]
+        #                 norm = BoundaryNorm(bounds, cmap_b.N)
 
-                        fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
-                        c1 = ax[0].pcolormesh(time_vals[:1000], x, active_array[:1000,:, 32].T, cmap='Reds')
-                        #fig.colorbar(c1, ax=ax[0])
-                        ax[0].set_title('True Active Points')
-                        c2 = ax[1].pcolormesh(time_vals[:1000], x, active_array_reconstructed_score[:1000,:, 32].T, cmap='Reds')
-                        #fig.colorbar(c1, ax=ax[1])
-                        ax[1].set_title('Reconstruction Scored Points')
-                        for v in range(2):
-                            ax[v].set_xlabel('time')
-                            ax[v].set_ylabel('x')
-                        fig.savefig(output_path+f"/active_plumes_true_new11200_binary{plume_score_threshold}_{c_names[index]}.png")
-                        plt.close()
+        #                 fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
+        #                 c1 = ax[0].pcolormesh(time_vals[:1000], x, active_array[:1000,:, 32].T, cmap='Reds')
+        #                 #fig.colorbar(c1, ax=ax[0])
+        #                 ax[0].set_title('True Active Points')
+        #                 c2 = ax[1].pcolormesh(time_vals[:1000], x, active_array_reconstructed_score[:1000,:, 32].T, cmap='Reds')
+        #                 #fig.colorbar(c1, ax=ax[1])
+        #                 ax[1].set_title('Reconstruction Scored Points')
+        #                 for v in range(2):
+        #                     ax[v].set_xlabel('time')
+        #                     ax[v].set_ylabel('x')
+        #                 fig.savefig(output_path+f"/active_plumes_true_new11200_binary{plume_score_threshold}_{c_names[index]}.png")
+        #                 plt.close()
 
-                        fig, ax = plt.subplots(3, figsize=(12,12), tight_layout=True)
-                        c1 = ax[0].pcolormesh(time_vals[:1000], x, active_array[:1000,:, 32].T, cmap='Reds')
-                        #fig.colorbar(c1, ax=ax[0])
-                        ax[0].set_title('True Active Points')
-                        c2 = ax[1].pcolormesh(time_vals[:1000], x, active_array_reconstructed[:1000,:, 32].T, cmap='Reds')
-                        #fig.colorbar(c1, ax=ax[1])
-                        ax[1].set_title('Reconstruction Points from Criteria')
-                        c3 = ax[2].pcolormesh(time_vals[:1000], x, active_array_reconstructed_score[:1000,:, 32].T, cmap='Reds')
-                        #fig.colorbar(c1, ax=ax[1])
-                        ax[2].set_title('Reconstruction Points from Plume Score')
-                        for v in range(3):
-                            ax[v].set_xlabel('time')
-                            ax[v].set_ylabel('x')
-                        fig.savefig(output_path+f"/active_plumes_true_new11200_binary_plusold{plume_score_threshold}_{c_names[index]}.png")
-                        plt.close()
+        #                 fig, ax = plt.subplots(3, figsize=(12,12), tight_layout=True)
+        #                 c1 = ax[0].pcolormesh(time_vals[:1000], x, active_array[:1000,:, 32].T, cmap='Reds')
+        #                 #fig.colorbar(c1, ax=ax[0])
+        #                 ax[0].set_title('True Active Points')
+        #                 c2 = ax[1].pcolormesh(time_vals[:1000], x, active_array_reconstructed[:1000,:, 32].T, cmap='Reds')
+        #                 #fig.colorbar(c1, ax=ax[1])
+        #                 ax[1].set_title('Reconstruction Points from Criteria')
+        #                 c3 = ax[2].pcolormesh(time_vals[:1000], x, active_array_reconstructed_score[:1000,:, 32].T, cmap='Reds')
+        #                 #fig.colorbar(c1, ax=ax[1])
+        #                 ax[2].set_title('Reconstruction Points from Plume Score')
+        #                 for v in range(3):
+        #                     ax[v].set_xlabel('time')
+        #                     ax[v].set_ylabel('x')
+        #                 fig.savefig(output_path+f"/active_plumes_true_new11200_binary_plusold{plume_score_threshold}_{c_names[index]}.png")
+        #                 plt.close()
 
 
 
-                    # Free memory
-                    del active_array_score, active_array_reconstructed_score, mask_score, mask_reconstructed_score
-                    gc.collect()
+        #             # Free memory
+        #             del active_array_score, active_array_reconstructed_score, mask_score, mask_reconstructed_score
+        #             gc.collect()
 
-                # After all chunks for this threshold, average metrics
-                print(f"Threshold: {plume_score_threshold:.2f} | "
-                    f"Precision: {np.mean(precision_vals):.3f} | "
-                    f"Recall: {np.mean(recall_vals):.3f} | "
-                    f"F1: {np.mean(f1_vals):.3f} | "
-                    f"Accuracy: {np.mean(accuracy_vals):.3f}\n")
+        #         # After all chunks for this threshold, average metrics
+        #         print(f"Threshold: {plume_score_threshold:.2f} | "
+        #             f"Precision: {np.mean(precision_vals):.3f} | "
+        #             f"Recall: {np.mean(recall_vals):.3f} | "
+        #             f"F1: {np.mean(f1_vals):.3f} | "
+        #             f"Accuracy: {np.mean(accuracy_vals):.3f}\n")
                 
-                precision_all.append(np.mean(precision_vals))
-                recall_all.append(np.mean(recall_vals))
-                f1_all.append(np.mean(f1_vals))
-                accuracy_all.append(np.mean(accuracy_vals))
+        #         precision_all.append(np.mean(precision_vals))
+        #         recall_all.append(np.mean(recall_vals))
+        #         f1_all.append(np.mean(f1_vals))
+        #         accuracy_all.append(np.mean(accuracy_vals))
 
-            fig, ax = plt.subplots(1,4,figsize=(12,3), tight_layout=True)
-            ax[0].plot(thresholds, precision_all, marker='x')
-            ax[0].set_ylabel('Precision')
-            ax[1].plot(thresholds, recall_all, marker='x')
-            ax[1].set_ylabel('Recall')
-            ax[2].plot(thresholds, f1_all, marker='x')
-            ax[2].set_ylabel('F1')
-            ax[3].plot(thresholds, accuracy_all,  marker='x')
-            ax[3].set_ylabel('Accuracy')
-            for v in range(4):
-                ax[v].set_xlabel('Threshold')
-                ax[v].grid()
-            fig.savefig(output_path+'/metric_scores_new112000.png')
+        #     fig, ax = plt.subplots(1,4,figsize=(12,3), tight_layout=True)
+        #     ax[0].plot(thresholds, precision_all, marker='x')
+        #     ax[0].set_ylabel('Precision')
+        #     ax[1].plot(thresholds, recall_all, marker='x')
+        #     ax[1].set_ylabel('Recall')
+        #     ax[2].plot(thresholds, f1_all, marker='x')
+        #     ax[2].set_ylabel('F1')
+        #     ax[3].plot(thresholds, accuracy_all,  marker='x')
+        #     ax[3].set_ylabel('Accuracy')
+        #     for v in range(4):
+        #         ax[v].set_xlabel('Threshold')
+        #         ax[v].grid()
+        #     fig.savefig(output_path+'/metric_scores_new112000.png')
 
-        else:
-            nrmse_plume = np.inf
-            nrmse_sep_plume = np.inf
+        # else:
+        #     nrmse_plume = np.inf
+        #     nrmse_sep_plume = np.inf
 
         # ### plt part of domain ###
         # if reduce_data_set:
