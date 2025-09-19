@@ -491,6 +491,7 @@ def hovmoller_plus_plume_sincospos(truth_data, prediction_data, truth_features, 
     ax[-1].set_xlabel('Time [Lyapunov Times]')
 
     fig.savefig(file_name+f"_ens{j}_test{i}_cleaned{threshold_predictions}.png")
+    fig.savefig(file_name+f"_ens{j}_test{i}_cleaned{threshold_predictions}.eps")
     plt.close(fig)
 
 def plot_barchart_errors2(bins, vals, x_label, bar_width, fig, ax, color1='tab:blue', color2='black', marker2='o'):

@@ -993,6 +993,7 @@ def extract_plume_positions(features, x_domain=(0,20), max_plumes=3, threshold_p
         feats = clean_strengths(feats, KE_threshold, KE_threshold)
 
     x_positions = np.full((T, 3), np.nan)
+    x_strengths = np.full((T, 3), np.nan)
 
     for v in range(3):
         cos_vals = feats[:, v*3]      # cos
@@ -1007,8 +1008,9 @@ def extract_plume_positions(features, x_domain=(0,20), max_plumes=3, threshold_p
         valid_mask = strength > 0
 
         x_positions[valid_mask,v] = x_vals[valid_mask]
+        x_strengths[valid_mask,v] = strength[valid_mask]
 
-    return x_positions
+    return x_positions, x_strengths
 
 from collections import Counter
 def score_plumes(truth_positions, pred_positions, N_lyap,
@@ -1355,3 +1357,123 @@ def truth_at_location(true_pos,                # (T, P) array of true plume x (n
     if np.isscalar(x_query):
         return int(truth[0])
     return truth
+
+def find_initiations_truth(x_positions_truth):
+    """
+    Find plume initiations (including re-activations) in truth array,
+    but ignore cases where the plume is already active at t=0.
+
+    x_positions_truth : ndarray (T, P)
+        True plume positions over time. NaN if no plume.
+
+    Returns:
+    initiations : list of (t_init, x_init, p)
+        One entry per plume slot per initiation event:
+        - t_init = time index when plume first appears after being absent
+        - x_init = plume position at that time
+        - p      = slot index
+    """
+    T, P = x_positions_truth.shape
+    initiations = []
+
+    for p in range(P):
+        active = ~np.isnan(x_positions_truth[:, p])
+        if not active.any():
+            continue
+
+        was_active = False
+        for t in range(T):
+            if active[t]:
+                if not was_active:
+                    if t > 0:  # <-- skip initiations at t=0
+                        x0 = x_positions_truth[t, p]
+                        initiations.append((t, x0, p))
+                    was_active = True
+            else:
+                was_active = False  # reset when plume goes away
+
+    return initiations
+
+def extract_plume_positions_by_strength(new_array, new_ke, x_full, x_downsample, z_downsample, z_range=(5, 10), max_plumes=3, x_domain=(0,20), active_threshold=0):
+    """
+    Extract plume features: (cos(x), sin(x), strength) for up to `max_plumes` per timestep.
+
+    Parameters:
+        new_array : (time, nx, nz) binary plume mask (1/0)
+        new_ke    : (time, nx, nz) downsampled KE array
+        x_downsample : array of x coordinates for the downsampled grid
+        z_range   : tuple of z indices to consider for centroids
+        max_plumes: max number of plumes to encode per timestep
+
+    Returns:
+        features : (time, 3*max_plumes) array where each plume is (cos(x), sin(x), strength)
+    """
+    time_steps, nx, nz = new_array.shape
+    x_min, x_max = x_domain
+
+    # Storage for features
+    positions = np.zeros((time_steps, 3*max_plumes), dtype=float)  # x-centroids of up to 6 plumes
+
+    # Use 8-connectivity for labeling
+    structure = np.ones((3, 3))
+
+    for t in range(time_steps):
+        # Slice relevant z-range
+        z_start, z_end = z_range
+        subgrid = new_array[t, :, z_start:z_end]  # shape (64, 5)
+        ke_subgrid = new_ke[t, :, z_start:z_end]
+
+        # Make binary
+        binary_mask = (subgrid > active_threshold).astype(int)
+
+        # Connected component labeling
+        labeled, num_plumes = label(binary_mask, structure=structure)
+        if num_plumes == 0:
+            continue
+
+        #  Centroids in downsampled index space
+        centroids = center_of_mass(binary_mask, labeled, range(1, num_plumes + 1))
+        x_centroids_idx = np.array([c[0] for c in centroids])
+
+        # Map downsampled centroid index to physical x value
+        # Assume evenly spaced downsampled x_full for new_array
+        x_spacing = x_full[1] - x_full[0]  # spacing of full grid
+        x_centroids_val = x_full[(x_centroids_idx * (len(x_full)/nx)).astype(int)]
+
+        # Strengths (max KE per labeled plume)
+        strengths = np.array([ke_subgrid[labeled==i].max() for i in range(1, num_plumes+1)])
+
+        #sort by strength 
+        sorted_indices = np.argsort(strengths)[::-1]
+        x_sorted = x_centroids_val[sorted_indices]
+        strength_sorted = strengths[sorted_indices]
+
+        # Fill features array
+        for i in range(min(max_plumes, len(x_sorted))):
+            angle = 2 * np.pi * (x_sorted[i] - x_min) / (x_max - x_min)
+            positions[t, i*3 + 0] = np.cos(angle)
+            positions[t, i*3 + 1] = np.sin(angle)
+            positions[t, i*3 + 2] = strength_sorted[i]
+
+    return positions  # shape (time, 9)
+
+def downsample_max_KE(KE, block_size=(4, 4)):
+    t, nx, nz = KE.shape
+    bx, bz = block_size
+    
+    # Ensure nx and nz are divisible by block size
+    nx_trim = (nx // bx) * bx
+    nz_trim = (nz // bz) * bz
+    KE_trimmed = KE[:, :nx_trim, :nz_trim]  # shape: (t, nx_trim, nz_trim)
+    
+    # Reshape into blocks
+    KE_blocks = KE_trimmed.reshape(
+        t,
+        nx_trim // bx, bx,
+        nz_trim // bz, bz
+    )
+    
+    # Take max over the 2 block dimensions
+    KE_downsampled = KE_blocks.max(axis=(2, 4))  # shape: (t, nx//bx, nz//bz)
+    
+    return KE_downsampled

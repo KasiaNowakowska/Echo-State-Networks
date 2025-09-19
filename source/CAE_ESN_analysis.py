@@ -649,6 +649,7 @@ if encoded_data:
         # Go two directories up from output_path and construct the path
         base_dir = os.path.abspath(os.path.join(output_path, '..', '..', '..'))
         encoded_file = os.path.join(base_dir, f'encoded_data{N_latent}.h5')
+        print(f"encoding data in base directory:{base_dir}")
         with h5py.File(encoded_file, 'r') as df:
             U_enc = np.array(df['U_enc'])
 else:
@@ -863,7 +864,7 @@ global_stds = [np.std(train_data[..., c]) for c in range(train_data.shape[-1])]
 
 if validation_interval:
     print('VALIDATION (TEST)')
-    N_test   = 12 #N_fo=63                   #number of intervals in the test set
+    N_test   = 50 #N_fo=63                   #number of intervals in the test set
     if reduce_domain2:
         N_tstart = N_washout
     else:
@@ -1672,10 +1673,18 @@ if initiation_score_interval:
 
     ensemble_test = 5
 
-    ens_pred             = np.zeros((N_intt, dim, ensemble_test))
-    ens_PH               = np.zeros((N_test, ensemble_test))
+    ens_truth              = np.zeros((N_intt, len(x), len(z), len(variables), N_test))
+    ens_pred               = np.zeros((N_intt, len(x), len(z), len(variables), N_test, ensemble_test))
+    ens_PH                 = np.zeros((N_test, ensemble_test))
+    x_positions_truth_all  = np.zeros((N_intt, 3, N_test, ensemble_test))
+    x_positions_pred_all   = np.zeros((N_intt, 3, N_test, ensemble_test))
+    x_strength_truth_all   = np.zeros((N_intt, 3, N_test, ensemble_test))
+    x_strength_pred_all    = np.zeros((N_intt, 3, N_test, ensemble_test))
 
     all_scores = {}
+    all_scores_extended = {}
+    all_probs = {}
+    truths    = {}
 
     images_test_path = init_path+'/test_images/'
     if not os.path.exists(images_test_path):
@@ -1690,6 +1699,7 @@ if initiation_score_interval:
 
         print('Realization    :',j+1)
         all_scores[j] = {}
+        all_scores_extended[j] = {}
 
         #load matrices and hyperparameters
         Wout     = Woutt[j].copy()
@@ -1763,99 +1773,207 @@ if initiation_score_interval:
 
             if Data == 'RB_plume':
                 if plumetype == 'sincospositions':
-                    x_positions_truth = extract_plume_positions(plume_features_truth, x_domain=(0,20), max_plumes=3, threshold_predictions=False, KE_threshold=0.00005)
-                    x_positions_pred  = extract_plume_positions(plume_features_predictions, x_domain=(0,20), max_plumes=3, threshold_predictions=True, KE_threshold=0.00005)
+                    x_positions_truth, x_strength_truth = extract_plume_positions(plume_features_truth, x_domain=(0,20), max_plumes=3, threshold_predictions=False, KE_threshold=0.00005)
+                    x_positions_pred, x_strength_pred  = extract_plume_positions(plume_features_predictions, x_domain=(0,20), max_plumes=3, threshold_predictions=True, KE_threshold=0.00005)
 
-                    scores = score_plumes(x_positions_truth, x_positions_pred, N_lyap,
+                    x_positions_truth_all[:, :, i, j] = x_positions_truth
+                    x_positions_pred_all[:, :, i, j]  = x_positions_pred
+
+                    x_strength_truth_all[:, :, i, j] = x_strength_truth
+                    x_strength_pred_all[:, :, i, j]  = x_strength_pred
+
+                    scores_extended = score_plumes2(x_positions_truth, x_positions_pred, N_lyap,
                                             checkpoints=(0.5, 1.0, 1.5, 2.0, 2.5),
-                                            thresholds=(1,3,10),  # very good, good, medium
-                                            weights=None)
+                                            thresholds=(1,3,5))
+                    all_scores_extended[j][i] = scores_extended
+                    if j == 0:
+                        print(scores_extended)
+
+            if Data == 'RBplusActive':
+                print(np.shape(reconstructed_truth))
+                print(np.shape(reconstructed_predictions))
+                w_true = reconstructed_truth[..., 1]
+                w_pred = reconstructed_predictions[..., 1]
+                KE_true = 0.5*w_true*w_true
+                KE_pred = 0.5*w_pred*w_pred
+
+                active_truth = reconstructed_truth[...,-1]
+                active_pred  = reconstructed_predictions[...,-1]
+
+                if i==4:
+                    if j==0:
+                        np.save(init_path+'/active_truth.npy', active_truth)
+                        np.save(init_path+'/active_pred.npy', active_pred)
+                        np.save(init_path+'/KE_truth.npy', KE_true)
+                        np.save(init_path+'/KE_pred.npy', KE_pred)
+
+                new_KE_true = downsample_max_KE(KE_true, block_size=(4,4))
+                new_KE_pred = downsample_max_KE(KE_pred, block_size=(4,4))
+
+                nT, nx, nz = active_truth.shape[0], active_truth.shape[1], active_truth.shape[2]
+
+                # Trim to multiples of 4
+                nx_trim = (nx // 4) * 4
+                nz_trim = (nz // 4) * 4
+                active_trimmed_truth = active_truth[:, :nx_trim, :nz_trim]
+                active_trimmed_pred  = active_pred[:, :nx_trim, :nz_trim]
+
+                # Reshape into 4x4 blocks
+                blocks_truth = active_trimmed_truth.reshape(nT, nx_trim//4, 4, nz_trim//4, 4)
+                blocks_pred  = active_trimmed_pred.reshape(nT, nx_trim//4, 4, nz_trim//4, 4)
+
+                # Take max (equivalent to np.any) over the 4x4 subgrid
+                new_array_truth = blocks_truth.max(axis=(2, 4))
+                new_array_pred  = blocks_pred.max(axis=(2, 4))
+                
+                # Downsampled coordinates
+                x_downsample = x[:nx_trim:4]
+                z_downsample = z[:nz_trim:4]
+
+                positions_truth = extract_plume_positions_by_strength(new_array_truth, new_KE_true, x, x_downsample, z_downsample, active_threshold=0.05)               
+                positions_pred = extract_plume_positions_by_strength(new_array_pred, new_KE_pred, x, x_downsample, z_downsample, active_threshold=0.05)               
+
+                x_positions_truth, x_strength_truth = extract_plume_positions(positions_truth, x_domain=(0,20), max_plumes=3, threshold_predictions=False, KE_threshold=0.00005)
+                x_positions_pred, x_strength_pred  = extract_plume_positions(positions_pred, x_domain=(0,20), max_plumes=3, threshold_predictions=False, KE_threshold=0.00005)
+
+                if i==4:
+                    if j==0:
+                        np.save(init_path+'/positions_truth.npy', positions_truth)
+                        np.save(init_path+'/positions_pred.npy', positions_pred)
+                        np.save(init_path+'/x_positions_truth.npy', x_positions_truth)
+                        np.save(init_path+'/x_positions_pred.npy', x_positions_pred)
+
+                        # Example: choose a specific time index
+                        z_ = 8
+
+                        # Mask: 1 where active_pred > 0, else 0
+                        mask_true = (new_array_truth[:,:,z_] > 0.05).astype(int)   # shape (nx, nz)
+                        mask_pred = (new_array_pred[:,:,z_] > 0.05).astype(int)   # shape (nx, nz)
+
+                        # Plot contourf
+                        fig, ax =plt.subplots(2, figsize=(12,6))
+                        X, Z = np.meshgrid(np.arange(mask_true.shape[0]), np.arange(mask_true.shape[1]))
+
+                        # contourf expects X, Z, values
+                        c0=ax[0].contourf(X, Z, mask_true.T, levels=[-0.5, 0.5, 1.5], cmap="Reds")
+                        c1=ax[1].contourf(X, Z, mask_pred.T, levels=[-0.5, 0.5, 1.5], cmap="Reds")
+                        fig.colorbar(c0, ax=ax[0])
+                        fig.colorbar(c1, ax=ax[1])
+                        fig.savefig(init_path+'/test4ens0_acitvedownsampled.png')
+
+                x_positions_truth_all[:, :, i, j] = x_positions_truth
+                x_positions_pred_all[:, :, i, j]  = x_positions_pred
+
+                print("Active_pred downsampled max:", new_array_pred.max())
+                print("Active_pred in z-range:", (new_array_pred[:, :, 5:10] > 0).any())
+
+                scores_extended = score_plumes2(x_positions_truth, x_positions_pred, N_lyap,
+                                        checkpoints=(0.5, 1.0, 1.5, 2.0, 2.5),
+                                        thresholds=(1,3,5))
+                
+                all_scores_extended[j][i] = scores_extended
+                if j == 0:
+                    print(scores_extended)
+
+    #                 scores = score_plumes(x_positions_truth, x_positions_pred, N_lyap,
+    #                                         checkpoints=(0.5, 1.0, 1.5, 2.0, 2.5),
+    #                                         thresholds=(1,3,10),  # very good, good, medium
+    #                                         weights=None)
                     
-                    all_scores[j][i] = scores
-                    if j ==0:
-                        print(scores)
+    #                 all_scores[j][i] = scores
+    #                 if j ==0:
+    #                     print(scores)
 
-            if plot:
-                #left column has the washout (open-loop) and right column the prediction (closed-loop)
-                # only first n_plot test set intervals are plotted
-                 if i<n_plot:
-                    if j % 5 == 0:
-                        categories = ['very good', 'good', 'medium', 'FN', 'FP', 'TN']
-                        lts = sorted(scores.keys())  # [0.5, 1.0, 1.5, 2.0, 2.5]
-                        print("lts:", lts)
-                        lts_labels = np.array(lts)/N_lyap
-                        lts_labels  = [f"{lt:.1f}" for lt in lts_labels]
-                        # Extract counts for each category at each LT
-                        counts_per_category = {cat: [] for cat in categories}
-                        overalls            = []
+    #         if plot:
+    #             #left column has the washout (open-loop) and right column the prediction (closed-loop)
+    #             # only first n_plot test set intervals are plotted
+    #              if i<n_plot:
+    #                 if j % 5 == 0:
+    #                     categories = ['very good', 'good', 'medium', 'FN', 'FP', 'TN']
+    #                     lts = sorted(scores.keys())  # [0.5, 1.0, 1.5, 2.0, 2.5]
+    #                     print("lts:", lts)
+    #                     lts_labels = np.array(lts)/N_lyap
+    #                     lts_labels  = [f"{lt:.1f}" for lt in lts_labels]
+    #                     # Extract counts for each category at each LT
+    #                     counts_per_category = {cat: [] for cat in categories}
+    #                     overalls            = []
 
-                        for lt in lts:
-                            counter = scores[lt]['counts']
-                            for cat in categories:
-                                counts_per_category[cat].append(counter.get(cat, 0))  # default 0 if missing
-                            overalls.append(scores[lt]['overall_score'])
+    #                     for lt in lts:
+    #                         counter = scores[lt]['counts']
+    #                         for cat in categories:
+    #                             counts_per_category[cat].append(counter.get(cat, 0))  # default 0 if missing
+    #                         overalls.append(scores[lt]['overall_score'])
 
-                        print(f"ens{j}: {overalls}")
-                        # Plot grouped bar chart
-                        x_range = range(len(lts))
-                        width = 0.15
-                        fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
-                        for k, cat in enumerate(categories):
-                            ax.bar([xi + k*width for xi in x_range], counts_per_category[cat], width=width, label=cat)
-                        ax.plot([xi + width*2 for xi in x_range], overalls, color='black', marker='o', linestyle='-', label='Overall Score')
-                        ax.set_xticks([xi + width*2 for xi in x_range])
-                        ax.set_xticklabels(lts_labels)
-                        ax.set_xlabel('Lead Times [LTs]')
-                        ax.set_ylabel('Number')
-                        ax.legend()
-                        ax.grid()
-                        fig.savefig(images_test_path+f"/plume_scores_ens{j}_test{i}.png")
-                        plt.close()
+    #                     print(f"ens{j}: {overalls}")
+    #                     # Plot grouped bar chart
+    #                     x_range = range(len(lts))
+    #                     width = 0.15
+    #                     fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
+    #                     for k, cat in enumerate(categories):
+    #                         ax.bar([xi + k*width for xi in x_range], counts_per_category[cat], width=width, label=cat)
+    #                     ax.plot([xi + width*2 for xi in x_range], overalls, color='black', marker='o', linestyle='-', label='Overall Score')
+    #                     ax.set_xticks([xi + width*2 for xi in x_range])
+    #                     ax.set_xticklabels(lts_labels)
+    #                     ax.set_xlabel('Lead Times [LTs]')
+    #                     ax.set_ylabel('Number')
+    #                     ax.legend()
+    #                     ax.grid()
+    #                     fig.savefig(images_test_path+f"/plume_scores_ens{j}_test{i}.png")
+    #                     plt.close()
 
-    ensemble_stats = {}
+    # ensemble_stats = {}
 
-    for j in range(ensemble_test):
-        all_test_scores = []
-        for i in range(N_test):
-            scores_dict = all_scores[j][i]
-            overall_scores = [v['overall_score'] for v in scores_dict.values()]
-            all_test_scores.append(overall_scores)
-        all_test_scores = np.array(all_test_scores)
-        ensemble_stats[j] = {
-            'mean_per_checkpoint': np.mean(all_test_scores, axis=0),
-            'median_per_checkpoint': np.median(all_test_scores, axis=0),
-            'std_per_checkpoint': np.std(all_test_scores, axis=0),
-            'UQ_per_checkpoint': np.percentile(all_test_scores, 75, axis=0),
-            'LQ_per_checkpoint': np.percentile(all_test_scores, 25, axis=0)
-        }
+    # for j in range(ensemble_test):
+    #     all_test_scores = []
+    #     for i in range(N_test):
+    #         scores_dict = all_scores[j][i]
+    #         overall_scores = [v['overall_score'] for v in scores_dict.values()]
+    #         all_test_scores.append(overall_scores)
+    #     all_test_scores = np.array(all_test_scores)
+    #     ensemble_stats[j] = {
+    #         'mean_per_checkpoint': np.mean(all_test_scores, axis=0),
+    #         'median_per_checkpoint': np.median(all_test_scores, axis=0),
+    #         'std_per_checkpoint': np.std(all_test_scores, axis=0),
+    #         'UQ_per_checkpoint': np.percentile(all_test_scores, 75, axis=0),
+    #         'LQ_per_checkpoint': np.percentile(all_test_scores, 25, axis=0)
+    #     }
 
-    checkpoints=(0.5, 1.0, 1.5, 2.0, 2.5)
-    for j in range(ensemble_test):
-        stats = ensemble_stats[j]
-        print(f"ens {j} stats: {stats['mean_per_checkpoint']}")
-        fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
-        plot_barchart_errors(checkpoints, stats['median_per_checkpoint'], stats['mean_per_checkpoint'], stats['LQ_per_checkpoint'], stats['UQ_per_checkpoint'], 'Lead Time', 0.4, fig, ax, color1='tab:blue', color2='black', marker2='o')
-        ax.set_ylabel('Score')
-        fig.savefig(init_path+f"/Score_ens{j}.png")
-        plt.close()
+    # checkpoints=(0.5, 1.0, 1.5, 2.0, 2.5)
+    # for j in range(ensemble_test):
+    #     stats = ensemble_stats[j]
+    #     print(f"ens {j} stats: {stats['mean_per_checkpoint']}")
+    #     fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
+    #     plot_barchart_errors(checkpoints, stats['median_per_checkpoint'], stats['mean_per_checkpoint'], stats['LQ_per_checkpoint'], stats['UQ_per_checkpoint'], 'Lead Time', 0.4, fig, ax, color1='tab:blue', color2='black', marker2='o')
+    #     ax.set_ylabel('Score')
+    #     fig.savefig(init_path+f"/Score_ens{j}.png")
+    #     plt.close()
     
-    all_means    = np.array([ensemble_stats[j]['mean_per_checkpoint'] for j in range(ensemble_test)])
-    all_medians  = np.array([ensemble_stats[j]['median_per_checkpoint'] for j in range(ensemble_test)])
-    all_UQs      = np.array([ensemble_stats[j]['UQ_per_checkpoint'] for j in range(ensemble_test)])
-    all_LQs      = np.array([ensemble_stats[j]['LQ_per_checkpoint'] for j in range(ensemble_test)])
-    avg_mean_across_ensembles   = np.nanmean(all_means, axis=0)
-    avg_median_across_ensembles = np.nanmean(all_medians, axis=0)
-    avg_UQ_across_ensembles = np.nanmean(all_UQs, axis=0)
-    avg_LQ_across_ensembles = np.nanmean(all_LQs, axis=0)
+    # all_means    = np.array([ensemble_stats[j]['mean_per_checkpoint'] for j in range(ensemble_test)])
+    # all_medians  = np.array([ensemble_stats[j]['median_per_checkpoint'] for j in range(ensemble_test)])
+    # all_UQs      = np.array([ensemble_stats[j]['UQ_per_checkpoint'] for j in range(ensemble_test)])
+    # all_LQs      = np.array([ensemble_stats[j]['LQ_per_checkpoint'] for j in range(ensemble_test)])
+    # avg_mean_across_ensembles   = np.nanmean(all_means, axis=0)
+    # avg_median_across_ensembles = np.nanmean(all_medians, axis=0)
+    # avg_UQ_across_ensembles = np.nanmean(all_UQs, axis=0)
+    # avg_LQ_across_ensembles = np.nanmean(all_LQs, axis=0)
 
-    fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
-    plot_barchart_errors(checkpoints, avg_median_across_ensembles, avg_mean_across_ensembles, avg_LQ_across_ensembles, avg_UQ_across_ensembles, 'Lead Time', 0.4, fig, ax, color1='tab:blue', color2='black', marker2='o')
-    ax.set_ylabel('Score')
-    fig.savefig(init_path+f"/Score_avg_ens.png")
+    # fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
+    # plot_barchart_errors(checkpoints, avg_median_across_ensembles, avg_mean_across_ensembles, avg_LQ_across_ensembles, avg_UQ_across_ensembles, 'Lead Time', 0.4, fig, ax, color1='tab:blue', color2='black', marker2='o')
+    # ax.set_ylabel('Score')
+    # fig.savefig(init_path+f"/Score_avg_ens.png")
 
-    # Save the dictionary
-    with open(init_path+'/all_scores.pkl', 'wb') as f:
-        pickle.dump(all_scores, f)
+    # # Save the dictionary
+    # with open(init_path+'/all_scores.pkl', 'wb') as f:
+    #     pickle.dump(all_scores, f)
+
+    #Save the dictionary
+    with open(init_path+'/all_scores_extended.pkl', 'wb') as f:
+        pickle.dump(all_scores_extended, f)
+
+    np.save(init_path+'/x_positions_truth_all.npy', x_positions_truth_all)
+    np.save(init_path+'/x_positions_pred_all.npy', x_positions_pred_all)
+    np.save(init_path+'/x_strength_truth_all.npy', x_strength_truth_all)
+    np.save(init_path+'/x_strength_pred_all.npy', x_strength_pred_all)
 
 
 def FFT1D(signal, x1):
