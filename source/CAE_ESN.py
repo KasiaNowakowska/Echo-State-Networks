@@ -1076,7 +1076,7 @@ if validation_interval:
     else:
         N_tstart = N_washout                    #where the first test interval starts
     N_intt   = test_len*N_lyap            #length of each test set interval
-    N_gap    = int(3*N_lyap)
+    N_gap    = N_intt
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))

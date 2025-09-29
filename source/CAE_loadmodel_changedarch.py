@@ -30,6 +30,7 @@ from matplotlib.colors import TwoSlopeNorm
 import numpy as np
 import h5py
 import yaml
+import math
 
 from docopt import docopt
 args = docopt(__doc__)
@@ -51,6 +52,7 @@ from pathlib import Path
 from sklearn.preprocessing import StandardScaler
 from Eval_Functions import *
 from Plotting_Functions import *
+from sklearn.metrics import precision_score, recall_score, f1_score
 
 import sys
 sys.stdout.reconfigure(line_buffering=True)
@@ -154,7 +156,7 @@ def load_data_set_RB_act(file, names, snapshots):
     return data, time_vals
 
 #### LOAD DATA ####
-Data = 'RBplusActive'
+Data = 'RB'
 if Data == 'ToyData':
     name = names = variables = ['combined']
     n_components = 3
@@ -412,6 +414,13 @@ U_vv        = np.array(U[b_size*n_batches*skip:
 U_tv        = np.array(U[b_size*n_batches*skip+b_size*val_batches*skip:
                             b_size*n_batches*skip+b_size*val_batches*skip+b_size*test_batches*skip])
 
+time_vals_tt = np.array(time_vals[:b_size*n_batches*skip]) 
+time_vals_vv = np.array(time_vals[b_size*n_batches*skip:
+                            b_size*n_batches*skip+b_size*val_batches*skip])
+time_vals_tv = np.array(time_vals[b_size*n_batches*skip+b_size*val_batches*skip:
+                            b_size*n_batches*skip+b_size*val_batches*skip+b_size*test_batches*skip])
+
+
 U_tt_reshape = U_tt.reshape(-1, U_tt.shape[-1])
 U_vv_reshape = U_vv.reshape(-1, U_vv.shape[-1])
 U_tv_reshape = U_tv.reshape(-1, U_tv.shape[-1])
@@ -439,7 +448,7 @@ U_val       = split_data(U_vv_scaled, b_size, val_batches).astype('float32')
 
 global_stds = [np.std(U_tt[..., c]) for c in range(U_tt.shape[-1])]
 
-del U_vv, U_tt, U_tt_scaled
+del U_vv, U_tt
 
 ## scale all the data ##
 U_scaled = ss_transform(U, scaler)
@@ -564,6 +573,8 @@ for j in range(N_parallel):
 for j in range(N_parallel):
     dec_mods[j].summary()
 
+Loss_Mse    = tf.keras.losses.MeanSquaredError()
+
 ##### Visualise Error #####
 
 # Load best model
@@ -579,19 +590,20 @@ for i in range(N_parallel):
     b[i] = tf.keras.models.load_model(models_dir + '/dec_mod'+str(ker_size[i])+'_'+str(N_latent)+'.h5',
                                             custom_objects={"PerPad2D": PerPad2D})
 
-validation_data = True
+validation_data = False
 test_data = False
-all_data = True
+all_data = False
+train_data = True
 visualisation = False
 encoded_data_investigation = False
 
 if validation_data:
-    output_path = output_path+'/valset/'
-    if not os.path.exists(output_path):
-        os.makedirs(output_path)
+    output_path_val = output_path+'/valset/'
+    if not os.path.exists(output_path_val):
+        os.makedirs(output_path_val)
         print('made directory')
     print('VALIDATION DATA')
-    truth = U_vv_scaled[:1001]
+    truth = U_vv_scaled
     decoded = model(truth,a,b)[1]
     print(np.shape(decoded), np.shape(truth))
 
@@ -618,6 +630,9 @@ if validation_data:
         nrmse = NRMSE(truth_unscaled, decoded_unscaled)
         evr = EVR_recon(truth_unscaled, decoded_unscaled)
         nrmse_sep = NRMSE_per_channel(truth_unscaled, decoded_unscaled)
+        loss       = train_step(U_vv_scaled, enc_mods, dec_mods,train=False)
+        print(loss)
+        print(np.shape(loss))
 
     print("nrmse:", nrmse)
     print("mse:", mse)
@@ -655,7 +670,7 @@ if validation_data:
     # Full path for saving the file
     output_file = "validation_metrics.json"
 
-    output_path_met = os.path.join(output_path, output_file)
+    output_path_met = os.path.join(output_path_val, output_file)
 
     metrics = {
         "MSE": mse,
@@ -664,6 +679,7 @@ if validation_data:
         "EVR": evr,
         "NRMSE sep": nrmse_sep,
         "NRMSE sep plume": nrmse_sep_plume,
+        "loss": np.float(loss),
     }
 
     with open(output_path_met, "w") as file:
@@ -674,7 +690,7 @@ if validation_data:
         truth_unscaled[:500],
         decoded_unscaled[:500],
         32, 10, x, z, time_vals[:500], variables,
-        output_path+f"/validation_all"
+        output_path_val+f"/validation_all"
     )
 
     fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
@@ -687,14 +703,14 @@ if validation_data:
     for v in range(2):
         ax[v].set_xlabel('time')
         ax[v].set_ylabel('x')
-    fig.savefig(output_path+f"/active_plumes.png")
+    fig.savefig(output_path_val+f"/active_plumes.png")
     plt.close()
 
 #### TESTING UNSEEN DATA ####
 if test_data:
-    output_path = output_path+'/testset/'
-    if not os.path.exists(output_path):
-        os.makedirs(output_path)
+    output_path_test = output_path+'/testset/'
+    if not os.path.exists(output_path_test):
+        os.makedirs(output_path_test)
         print('made directory')
 
     print('TEST DATA')
@@ -738,6 +754,9 @@ if test_data:
             nrmse = NRMSE(truth_unscaled, decoded_unscaled)
             evr = EVR_recon(truth_unscaled, decoded_unscaled)
             nrmse_sep = NRMSE_per_channel(truth_unscaled, decoded_unscaled)
+            loss       = train_step(U_scaled, enc_mods, dec_mods,train=False)
+            print(loss)
+            print(np.shape(loss))
 
         chunk_metrics = {
             "chunk": chunk_idx,
@@ -746,6 +765,7 @@ if test_data:
             "SSIM": test_ssim,
             "EVR": evr,
             "NRMSE sep": nrmse_sep,
+            "test loss": np.float(loss),
         }
 
         # Optional plume NRMSE if variables == 4
@@ -766,7 +786,7 @@ if test_data:
 
         else:
             if len(variables) == 4:
-                _, _, mask, _ = active_array_calc(truth_unscaled, decoded_unscaled, z)
+                active_array, active_array_reconstructed, mask, _ = active_array_calc(truth_unscaled, decoded_unscaled, z)
                 print('shape of masked area', np.shape(truth_unscaled[mask]))
                 nrmse_plume = NRMSE(truth_unscaled[mask], decoded_unscaled[mask])
 
@@ -787,8 +807,8 @@ if test_data:
             plot_reconstruction_and_error(
                 truth_unscaled[:500],
                 decoded_unscaled[:500],
-                32, 75, x, z, time_vals[:500], variables,
-                output_path+f"/test_all_chunk_{chunk_idx}"
+                32, 75, x, z, time_vals_tv[:500], variables,
+                output_path_test+f"/test_all_chunk_{chunk_idx}", type='CAE'
             )
 
             #np.save(output_path+'/CAE_decoded.npy', decoded_unscaled)
@@ -798,24 +818,24 @@ if test_data:
             ax.plot(decoded_unscaled[0, :, 32, 0], label='dec')
             ax.plot(truth_unscaled[0, :, 32, 0], label='true')
             plt.legend()
-            fig.savefig(os.path.join(output_path, f'lines_chunk_{chunk_idx}.png'))
+            fig.savefig(os.path.join(output_path_test, f'lines_chunk_{chunk_idx}.png'))
 
             fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
-            c1 = ax[0].contourf(time_vals[:1000], x, active_array[:1000,:, 32].T, cmap='Reds')
+            c1 = ax[0].contourf(time_vals_tv[:1000], x, active_array[:1000,:, 32].T, cmap='Reds')
             fig.colorbar(c1, ax=ax[0])
             ax[0].set_title('True Active Points')
-            c2 = ax[1].contourf(time_vals[:1000], x, active_array_reconstructed[:1000,:, 32].T, cmap='Reds')
+            c2 = ax[1].contourf(time_vals_tv[:1000], x, active_array_reconstructed[:1000,:, 32].T, cmap='Reds')
             fig.colorbar(c1, ax=ax[1])
             ax[1].set_title('Reconstruction Active Points')
             for v in range(2):
                 ax[v].set_xlabel('time')
                 ax[v].set_ylabel('x')
-            fig.savefig(output_path+f"/active_plumes.png")
+            fig.savefig(output_path_test+f"/active_plumes.png")
             plt.close()
 
     # Save all metrics to JSON after loop
     output_file = "test_metrics_testdata_data_chunked.json"
-    output_path_met = os.path.join(output_path, output_file)
+    output_path_met = os.path.join(output_path_test, output_file)
 
     with open(output_path_met, "w") as f:
         json.dump(metrics_list, f, indent=4)
@@ -908,10 +928,9 @@ if all_data:
 
             mask_original                      = mask[..., 0]
             chunk_metrics["plume sep NRMSE"]   = NRMSE_per_channel_masked(truth_unscaled, decoded_unscaled, mask_original, global_stds) 
-
         else:
             if len(variables) == 4:
-                _, _, mask, _ = active_array_calc(truth_unscaled, decoded_unscaled, z)
+                active_array, active_array_reconstructed, mask, _ = active_array_calc(truth_unscaled, decoded_unscaled, z)
                 print('shape of masked area', np.shape(truth_unscaled[mask]))
                 nrmse_plume = NRMSE(truth_unscaled[mask], decoded_unscaled[mask])
 
@@ -920,6 +939,11 @@ if all_data:
 
                 chunk_metrics["plume NRMSE"] = nrmse_plume
                 chunk_metrics["plume sep NRMSE"] = nrmse_sep_plume
+
+                precision = precision_score(active_array, active_array_reconstructed)
+                recall    = recall_score(active_array, active_array_reconstructed)
+                f1        = f1_score(active_array, active_array_reconstructed)
+
             else:
                 chunk_metrics["plume NRMSE"] = 0
                 chunk_metrics["plume sep NRMSE"] = 0
@@ -982,6 +1006,152 @@ if all_data:
     # Save to JSON
     output_file = "test_metrics_all_data_chunked.json"
     output_path_met = os.path.join(output_path, output_file)
+
+    with open(output_path_met, "w") as f:
+        json.dump(final_metrics, f, indent=4)
+
+    print("Saved averaged and per-chunk metrics.")
+
+if train_data:
+    output_path_train = output_path+'/train_set/'
+    if not os.path.exists(output_path_train):
+        os.makedirs(output_path_train)
+        print('made directory')
+
+    chunk_size = 1000
+    timesteps = U_tt_scaled.shape[0]
+    total_chunks = math.ceil(timesteps / chunk_size)
+
+    metrics_list = [] 
+    for chunk_idx in range(total_chunks):
+        start = chunk_idx * chunk_size
+        end = min(start + chunk_size, timesteps)# clip at array length
+        if start >= timesteps: # safety guard
+            break
+
+        print(f"Processing chunk {chunk_idx+1}/{total_chunks}: timesteps {start} to {end}")
+
+        U_scaled = U_tt_scaled[start:end]
+        truth = U_scaled
+
+        decoded = model(U_scaled, a, b)[1].numpy()
+        decoded_unscaled = ss_inverse_transform(decoded, scaler)
+        truth_unscaled = ss_inverse_transform(truth, scaler)
+
+        # Compute metrics
+        print('shape of decoded unscaled', np.shape(decoded_unscaled))
+        print('shape of truth_unscaled', np.shape(truth_unscaled))
+        if Data == 'RBplusActive':
+            test_ssim = compute_ssim_for_4d(truth_unscaled[...,:4], decoded_unscaled[...,:4])
+            mse = MSE(truth_unscaled[...,:4], decoded_unscaled[...,:4])
+            nrmse = NRMSE(truth_unscaled[...,:4], decoded_unscaled[...,:4])
+            evr = EVR_recon(truth_unscaled[...,:4], decoded_unscaled[...,:4])
+            nrmse_sep = NRMSE_per_channel(truth_unscaled[...,:4], decoded_unscaled[...,:4])
+        else:
+            test_ssim = compute_ssim_for_4d(truth_unscaled, decoded_unscaled)
+            mse = MSE(truth_unscaled, decoded_unscaled)
+            nrmse = NRMSE(truth_unscaled, decoded_unscaled)
+            evr = EVR_recon(truth_unscaled, decoded_unscaled)
+            nrmse_sep = NRMSE_per_channel(truth_unscaled, decoded_unscaled)
+
+        chunk_metrics = {
+            "chunk": chunk_idx,
+            "MSE": mse,
+            "NRMSE": nrmse,
+            "SSIM": test_ssim,
+            "EVR": evr,
+            "NRMSE sep": nrmse_sep,
+        }
+
+        # Optional plume NRMSE if variables == 4
+        if Data == 'RBplusActive':
+            active_array               = truth_unscaled[...,4]
+            active_array_reconstructed = decoded_unscaled[...,4]
+            mask                       = (active_array == 1)
+            mask_reconstructed         = (active_array_reconstructed == 1)
+
+            # Expand the mask to cover all features (optional, depending on use case)
+            mask               =  np.repeat(mask[:, :, :, np.newaxis], 4, axis=-1)  # Shape: (256, 64, 1)
+            mask_reconstructed =  np.repeat(mask_reconstructed[:, :, :, np.newaxis], 4, axis=-1) # Shape: (256, 64, 1)
+            
+            chunk_metrics["plume NRMSE"]       = NRMSE(truth_unscaled[:,:,:,:4][mask], decoded_unscaled[:,:,:,:4][mask])
+
+            mask_original                      = mask[..., 0]
+            chunk_metrics["plume sep NRMSE"]   = NRMSE_per_channel_masked(truth_unscaled, decoded_unscaled, mask_original, global_stds) 
+
+        else:
+            if len(variables) == 4:
+                active_array, active_array_reconstructed, mask, _ = active_array_calc(truth_unscaled, decoded_unscaled, z)
+                print('shape of masked area', np.shape(truth_unscaled[mask]))
+                nrmse_plume = NRMSE(truth_unscaled[mask], decoded_unscaled[mask])
+
+                mask_original     = mask[..., 0]
+                nrmse_sep_plume   = NRMSE_per_channel_masked(truth_unscaled, decoded_unscaled, mask_original, global_stds) 
+
+                chunk_metrics["plume NRMSE"] = nrmse_plume
+                chunk_metrics["plume sep NRMSE"] = nrmse_sep_plume
+            else:
+                chunk_metrics["plume NRMSE"] = 0
+                chunk_metrics["plume sep NRMSE"] = 0
+
+        # Save metrics per chunk
+        metrics_list.append(chunk_metrics)
+
+        # Save reconstruction plot and line plot for a sample timestep
+        if chunk_idx == 0:  # Example: only for first chunk
+            plot_reconstruction_and_error(
+                truth_unscaled[:500],
+                decoded_unscaled[:500],
+                32, 75, x, z, time_vals_tt[:500], variables,
+                output_path_train+f"/test_all_chunk_{chunk_idx}"
+            )
+
+            fig, ax = plt.subplots(2, figsize=(12,12), tight_layout=True)
+            c1 = ax[0].contourf(time_vals_tt[:1000], x, active_array[:1000,:, 32].T, cmap='Reds')
+            fig.colorbar(c1, ax=ax[0])
+            ax[0].set_title('True Active Points')
+            c2 = ax[1].contourf(time_vals_tt[:1000], x, active_array_reconstructed[:1000,:, 32].T, cmap='Reds')
+            fig.colorbar(c1, ax=ax[1])
+            ax[1].set_title('Reconstruction Active Points')
+            for v in range(2):
+                ax[v].set_xlabel('time')
+                ax[v].set_ylabel('x')
+            fig.savefig(output_path_train+f"/active_plumes.png")
+            plt.close()
+
+            #np.save(output_path+'/CAE_decoded.npy', decoded_unscaled)
+            #np.save(output_path+'/true_data.npy', truth_unscaled)
+
+            fig, ax = plt.subplots(1)
+            ax.plot(decoded_unscaled[0, :, 32, 0], label='dec')
+            ax.plot(truth_unscaled[0, :, 32, 0], label='true')
+            plt.legend()
+            fig.savefig(os.path.join(output_path_train, f'lines_chunk_{chunk_idx}.png'))
+
+        # Save all metrics to JSON after loop
+        output_file = "test_metrics_train_data_chunked.json"
+        output_path_met = os.path.join(output_path_train, output_file)
+
+        with open(output_path_met, "w") as f:
+            json.dump(metrics_list, f, indent=4)
+
+    # Compute averaged metrics across all chunks
+    average_metrics = {}
+    metric_keys = [k for k in metrics_list[0].keys() if k != "chunk"]
+
+    for key in metric_keys:
+        values = [m[key] for m in metrics_list if key in m]
+        average_metrics[key] = sum(values) / len(values)
+
+    # Save both raw chunk metrics and averages
+    final_metrics = {
+        "chunk_metrics": metrics_list,
+        "average_metrics": average_metrics
+    }
+
+    # Save to JSON
+    output_file = "test_metrics_train_data_chunked.json"
+    output_path_met = os.path.join(output_path_train, output_file)
 
     with open(output_path_met, "w") as f:
         json.dump(final_metrics, f, indent=4)

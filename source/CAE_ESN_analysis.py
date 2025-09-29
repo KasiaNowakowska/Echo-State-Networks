@@ -851,10 +851,10 @@ print('norm:', norm)
 print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
-test_interval = False
-validation_interval = False
+test_interval = True
+validation_interval = True
 statistics_interval = False
-initiation_score_interval = True
+initiation_score_interval = False
 fourier = False
 vertical_profiles = False
 reservoir_investigation = False
@@ -869,8 +869,10 @@ if validation_interval:
         N_tstart = N_washout
     else:
         N_tstart = int(N_washout)                    #where the first test interval starts
-    N_intt   = int(test_len*N_lyap)            #length of each test set interval
+    N_intt   = test_len*N_lyap            #length of each test set interval
     N_gap    = int(3*N_lyap)
+
+    threshold_ph = 0.1 # for validation and testing
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
@@ -891,11 +893,11 @@ if validation_interval:
     ens_nrmse_ch_pl = np.zeros((ensemble_test))
     ens_pl_acc      = np.zeros((ensemble_test))
 
-    images_val_path = output_path+'/validation_images/'
+    images_val_path = output_path+'/validation_images_3/'
     if not os.path.exists(images_val_path):
         os.makedirs(images_val_path)
         print('made directory')
-    metrics_val_path = output_path+'/validation_metrics/'
+    metrics_val_path = output_path+'/validation_metrics_3/'
     if not os.path.exists(metrics_val_path):
         os.makedirs(metrics_val_path)
         print('made directory')
@@ -1079,10 +1081,13 @@ if validation_interval:
                         xx = np.arange(U_wash[:,0].shape[0])/N_lyap
                         plot_modes_washout(U_wash, Uh_wash, xx, i, j, indexes_to_plot, images_val_path+'/washout_validation', Modes=False)
 
+                        xx_washout = np.arange(U_wash[:,0].shape[0])/N_lyap
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
                         plot_modes_prediction(Y_t, Yh_t, xx, i, j, indexes_to_plot, images_val_path+'/prediction_validation', Modes=False)
                         plot_PH(Y_err, threshold_ph, xx, i, j, images_val_path+'/PH_validation')
-                        
+                        plot_modes_washoutprediction(U_wash, Uh_wash, Y_t, Yh_t, xx_washout, xx, i, j, indexes_to_plot, images_val_path+'/washout_prediction_test', Modes=False)
+                        plot_modes_prediction_FFT(Y_t, Yh_t, xx, i, j, indexes_to_plot, images_val_path+'/prediction_FFT_test', Modes=False)
+
                         plot_reservoir_states_norm(Xa1, Xa2, time_vals, N_tstart, N_washout_val, i, j, N_gap, N_intt, N_units, images_val_path+'/resnorm_validation')
                         plot_input_states_norm(U_wash, Y_t, time_vals, N_tstart, N_washout_val, i, j, N_gap, N_intt, images_val_path+'/inputnorm_validation')
 
@@ -1152,10 +1157,11 @@ if test_interval:
         N_tstart = N_train + N_washout_val
     else:
         N_tstart = int(N_train + N_washout) #850    #where the first test interval starts
-    N_intt   = int(test_len*N_lyap)             #length of each test set interval
+    N_intt   = 3*N_lyap             #length of each test set interval
     N_gap    = int(N_lyap)
 
     print('N_intt=', N_intt)
+    threshold_ph = 0.1 # for validation and testing
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
@@ -1410,10 +1416,15 @@ if test_interval:
                         xx = np.arange(U_wash[:,0].shape[0])/N_lyap
                         plot_modes_washout(U_wash, Uh_wash, xx, i, j, indexes_to_plot, images_test_path+'/washout_test', Modes=False)
 
+                        xx_washout = np.arange(U_wash[:,0].shape[0])/N_lyap
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
                         plot_modes_prediction(Y_t, Yh_t, xx, i, j, indexes_to_plot, images_test_path+'/prediction_test', Modes=False)
                         plot_PH(Y_err, threshold_ph, xx, i, j, images_test_path+'/PH_test')
-                        
+                        plot_modes_washoutprediction(U_wash, Uh_wash, Y_t, Yh_t, xx_washout, xx, i, j, indexes_to_plot, images_test_path+'/washout_prediction_test', Modes=False)
+                        plot_modes_prediction_FFT(Y_t, Yh_t, xx, i, j, indexes_to_plot, images_test_path+'/prediction_FFT_test', Modes=False)
+
+
+
                         plot_reservoir_states_norm(Xa1, Xa2, time_vals, N_tstart, N_washout_val, i, j, N_gap, N_intt, N_units, images_test_path+'/resnorm_test')
                         plot_input_states_norm(U_wash, Y_t, time_vals, N_tstart, N_washout_val, i, j, N_gap, N_intt, images_test_path+'/inputnorm_test')
 
@@ -1830,8 +1841,8 @@ if initiation_score_interval:
                 x_downsample = x[:nx_trim:4]
                 z_downsample = z[:nz_trim:4]
 
-                positions_truth = extract_plume_positions_by_strength(new_array_truth, new_KE_true, x, x_downsample, z_downsample, active_threshold=0.05)               
-                positions_pred = extract_plume_positions_by_strength(new_array_pred, new_KE_pred, x, x_downsample, z_downsample, active_threshold=0.05)               
+                positions_truth = extract_plume_positions_by_strength(new_array_truth, new_KE_true, x, x_downsample, z_downsample, active_threshold=0.1)               
+                positions_pred = extract_plume_positions_by_strength(new_array_pred, new_KE_pred, x, x_downsample, z_downsample, active_threshold=0.1)               
 
                 x_positions_truth, x_strength_truth = extract_plume_positions(positions_truth, x_domain=(0,20), max_plumes=3, threshold_predictions=False, KE_threshold=0.00005)
                 x_positions_pred, x_strength_pred  = extract_plume_positions(positions_pred, x_domain=(0,20), max_plumes=3, threshold_predictions=False, KE_threshold=0.00005)
@@ -1863,6 +1874,9 @@ if initiation_score_interval:
 
                 x_positions_truth_all[:, :, i, j] = x_positions_truth
                 x_positions_pred_all[:, :, i, j]  = x_positions_pred
+                x_strength_truth_all[:, :, i, j]  = x_strength_truth
+                x_strength_pred_all[:, :, i, j]  = x_strength_pred
+
 
                 print("Active_pred downsampled max:", new_array_pred.max())
                 print("Active_pred in z-range:", (new_array_pred[:, :, 5:10] > 0).any())

@@ -198,7 +198,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             vmax_res = np.max(np.abs(residual[t_value,:,:,i]))  # Get maximum absolute value
             vmin_res = -vmax_res
             c1 = ax[0].pcolormesh(x, z, original[t_value,:,:,i].T, vmin=minm, vmax=maxm, rasterized=True, zorder=0, edgecolors='none')
-            fig.colorbar(c1, ax=ax[0], label=names[v])
+            fig.colorbar(c1, ax=ax[0], label=name)
             if type == 'Recon':
                 ax[0].set_title('Reconstruction', fontsize=18)
             elif type == 'CAE':
@@ -206,7 +206,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             elif type == 'POD':
                 ax[0].set_title('POD Reconstruction (True)', fontsize=18)
             c2 = ax[1].pcolormesh(x, z, reconstruction[t_value,:,:,i].T, vmin=minm, vmax=maxm, rasterized=True, zorder=0, edgecolors='none')
-            fig.colorbar(c2, ax=ax[1], label=names[v])
+            fig.colorbar(c2, ax=ax[1], label=name)
             if type == 'Recon':
                 ax[1].set_title('Reconstruction', fontsize=18)
             elif type == 'CAE':
@@ -214,7 +214,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             elif type == 'POD':
                 ax[1].set_title('POD Reconstruction (ESN)', fontsize=18)
             c3 = ax[2].pcolormesh(x, z, residual[t_value,:,:, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res, rasterized=True, zorder=0, edgecolors='none')
-            fig.colorbar(c3, ax=ax[2], label=names[v])
+            fig.colorbar(c3, ax=ax[2], label=name)
             ax[2].set_title('Error', fontsize=18)
             for v in range(3):
                 ax[v].set_ylabel('z', fontsize=16)
@@ -236,7 +236,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             print("x shape:", np.shape(x))
             print("original[:, :, z_value] shape:", original[:, :, z_value,i].T.shape)
             c1 = ax[0].pcolormesh(time_vals, x, original[:, :, z_value, i].T, vmin=minm, vmax=maxm, rasterized=True, zorder=0, edgecolors='none')
-            fig.colorbar(c1, ax=ax[0], label=names[v])
+            fig.colorbar(c1, ax=ax[0], label=name)
             if type == 'Recon':
                 ax[0].set_title('Reconstruction', fontsize=18)
             elif type == 'CAE':
@@ -244,7 +244,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             elif type == 'POD':
                 ax[0].set_title('POD Reconstruction (True)', fontsize=18)
             c2 = ax[1].pcolormesh(time_vals, x, reconstruction[:, :, z_value, i].T, vmin=minm, vmax=maxm, rasterized=True, zorder=0, edgecolors='none')
-            fig.colorbar(c2, ax=ax[1], label=names[v])
+            fig.colorbar(c2, ax=ax[1], label=name)
             if type == 'Recon':
                 ax[1].set_title('Reconstruction', fontsize=18)
             elif type == 'CAE':
@@ -252,7 +252,7 @@ def plot_reconstruction_and_error(original, reconstruction, z_value, t_value, x,
             elif type == 'POD':
                 ax[1].set_title('POD Reconstruction (ESN)', fontsize=18)
             c3 = ax[2].pcolormesh(time_vals, x,  residual[:,:,z_value, i].T, cmap='RdBu_r', vmin=vmin_res, vmax=vmax_res, rasterized=True, zorder=0, edgecolors='none')
-            fig.colorbar(c3, ax=ax[2], label=names[v])
+            fig.colorbar(c3, ax=ax[2], label=name)
             ax[2].set_title('Error', fontsize=18)
             for v in range(3):
                 ax[v].set_ylabel('x', fontsize=16)
@@ -1477,3 +1477,15 @@ def downsample_max_KE(KE, block_size=(4, 4)):
     KE_downsampled = KE_blocks.max(axis=(2, 4))  # shape: (t, nx//bx, nz//bz)
     
     return KE_downsampled
+
+def fft(variable, x):
+    variable = variable - np.mean(variable)
+    fft = np.fft.fft(variable)
+    fft = np.fft.fftshift(fft)
+    end = x[-1]
+    start = x[0]
+    m = np.fft.fftfreq(len(x), d=(end-start)/len(x))
+    m = np.fft.fftshift(m)
+    m = 2*np.pi*m  # angular frequency [rad/s]
+    magnitude_w = np.abs(fft)**2 / len(x)   # PSD estimate (normalize)
+    return magnitude_w, m

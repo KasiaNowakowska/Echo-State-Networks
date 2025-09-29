@@ -494,7 +494,7 @@ print('norm:', norm)
 print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
-test_interval = True
+test_interval = False
 validation_interval = False
 statistics_interval = False
 initiation_interval = False
@@ -504,6 +504,20 @@ initiation_score_interval = False
 train_data = data_set[:int(N_washout+N_train)]
 global_stds = [np.std(train_data[..., c]) for c in range(train_data.shape[-1])]
 
+if Data == 'RB_plume':
+    U_tv_position = U_tv[:,n_components:]
+    x_positions_training = extract_plume_positions(U_tv_position, x_domain=(0,20), max_plumes=3, threshold_predictions=False, KE_threshold=0.00005)
+    np.save(output_path+'/x_positions_training.npy', x_positions_training)
+
+fig, ax = plt.subplots(1, figsize=(12,3))
+N_washput = int(N_washout)
+N_train   = int(N_train)
+time_vals_tv = time_vals[N_washout:N_washout+N_train-1] #inputs
+for i in range(len(indexes_to_plot)):
+    index_i = indexes_to_plot[i]
+    ax.plot(time_vals_tv, U_tv[:, index_i], label=f"Mode={index_i}")
+    fig.savefig(output_path+f"/training_data_modes.png")
+
 if validation_interval:
     print('VALIDATION (TEST)')
     N_test   = 50                    #number of intervals in the test set
@@ -512,7 +526,7 @@ if validation_interval:
     else:
         N_tstart = int(N_washout)                 #where the first test interval starts
     N_intt   = test_len*N_lyap            #length of each test set interval
-    N_gap    = int(3*N_lyap)
+    N_gap    = int(n_forward*N_lyap)
     val_indexes = []
 
     # #prediction horizon normalization factor and threshold
@@ -534,11 +548,11 @@ if validation_interval:
     ens_nrmse_ch_pl = np.zeros((ensemble_test))
     ens_pl_acc      = np.zeros((ensemble_test))
 
-    images_val_path = output_path+'/validation_images/'
+    images_val_path = output_path+'/validation_images2/'
     if not os.path.exists(images_val_path):
         os.makedirs(images_val_path)
         print('made directory')
-    metrics_val_path = output_path+'/validation_metrics/'
+    metrics_val_path = output_path+'/validation_metrics2/'
     if not os.path.exists(metrics_val_path):
         os.makedirs(metrics_val_path)
         print('made directory')
@@ -575,8 +589,9 @@ if validation_interval:
                 #val_indexes.append(N_tstart + i*N_gap)
             print('start time of test', time_vals[N_tstart + i*N_gap])
             # data for washout and target in each interval
-            U_wash    = U[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap].copy()
-            Y_t       = U[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt].copy()
+            p = N_tstart + i*N_gap
+            U_wash    = U[           p : N_tstart + p].copy()
+            Y_t       = U[N_tstart + p : N_tstart + p + N_intt].copy()
 
             #washout for each interval
             Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
@@ -950,6 +965,13 @@ if test_interval:
             else:
                 plume_count_accuracy = 0.0
 
+            def check_arr(arr):
+                v1, v2, v3 = arr[:,0], arr[:,1], arr[:,2]
+                condition = (v1 != 0) & (v2 != 0) & (v3 <= 0)
+                return not np.any(condition) 
+            
+            is_true = check_arr(plume_features_predictions[:,0:3])
+
             print('NRMSE', nrmse)
             print('MSE', mse)
             print('EVR_recon', evr)
@@ -958,6 +980,10 @@ if test_interval:
             print('NRMSE per channel', nrmse_ch)
             print('NRMSE per channel in plume', nrmse_sep_plume)
             print('no plume accuracy', plume_count_accuracy)
+            print('minm of features', np.min(plume_features_predictions))
+            print('maxm of features', np.max(plume_features_predictions))
+            print(' plumes have no location when KE <0', is_true)
+            
 
             ## global parameters ##
             if Data == 'ToyData':
@@ -1746,8 +1772,12 @@ if initiation_score_interval:
 
     ensemble_test = 5
 
-    ens_pred             = np.zeros((N_intt, dim, ensemble_test))
-    ens_PH               = np.zeros((N_test, ensemble_test))
+    ens_pred               = np.zeros((N_intt, dim, ensemble_test))
+    ens_PH                 = np.zeros((N_test, ensemble_test))
+    x_positions_truth_all  = np.zeros((N_intt, 3, N_test, ensemble_test))
+    x_positions_pred_all   = np.zeros((N_intt, 3, N_test, ensemble_test))
+    x_strength_truth_all   = np.zeros((N_intt, 3, N_test, ensemble_test))
+    x_strength_pred_all    = np.zeros((N_intt, 3, N_test, ensemble_test))
 
     all_scores = {}
     all_scores_extended = {}
@@ -1830,140 +1860,154 @@ if initiation_score_interval:
 
             if Data == 'RB_plume':
                 if plumetype == 'sincospositions':
-                    x_positions_truth = extract_plume_positions(plume_features_truth, x_domain=(0,20), max_plumes=3, threshold_predictions=False, KE_threshold=0.00005)
-                    x_positions_pred  = extract_plume_positions(plume_features_predictions, x_domain=(0,20), max_plumes=3, threshold_predictions=True, KE_threshold=0.00005)
+                    x_positions_truth, x_strength_truth = extract_plume_positions(plume_features_truth, x_domain=(0,20), max_plumes=3, threshold_predictions=False, KE_threshold=0.00005)
+                    x_positions_pred, x_strength_pred  = extract_plume_positions(plume_features_predictions, x_domain=(0,20), max_plumes=3, threshold_predictions=True, KE_threshold=0.00005)
 
-                    scores = score_plumes(x_positions_truth, x_positions_pred, N_lyap,
-                                            checkpoints=(0.5, 1.0, 1.5, 2.0, 2.5),
-                                            thresholds=(1,3,10),  # very good, good, medium
-                                            weights=None)
+                    x_positions_truth_all[:, :, i, j] = x_positions_truth
+                    x_positions_pred_all[:, :, i, j]  = x_positions_pred
+
+                    x_strength_truth_all[:, :, i, j] = x_strength_truth
+                    x_strength_pred_all[:, :, i, j]  = x_strength_pred
+
+                    # scores = score_plumes(x_positions_truth, x_positions_pred, N_lyap,
+                    #                         checkpoints=(0.5, 1.0, 1.5, 2.0, 2.5),
+                    #                         thresholds=(1,3,10),  # very good, good, medium
+                    #                         weights=None)
                     
-                    all_scores[j][i] = scores
-                    if j ==0:
-                        print(scores)
+                    # all_scores[j][i] = scores
+                    # if j ==0:
+                    #     print(scores)
 
                     scores_extended = score_plumes2(x_positions_truth, x_positions_pred, N_lyap,
                                             checkpoints=(0.5, 1.0, 1.5, 2.0, 2.5),
-                                            thresholds=(1,2,3,4,5,6,7,8,9,10))
+                                            thresholds=(1,3,5))
                     all_scores_extended[j][i] = scores_extended
                     if j == 0:
                         print(scores_extended)
 
                     # --- NEW: probability at fixed x positions ---
-                    checkpoints  = (0.5, 1.0, 1.5, 2.0, 2.5)   # in Lyapunov times
-                    x_queries    = np.arange(0, 20, 2)         # positions 0,2,...,18   
+                    # checkpoints  = (0.5, 1.0, 1.5, 2.0, 2.5)   # in Lyapunov times
+                    # x_queries    = np.arange(0, 20, 2)         # positions 0,2,...,18   
                     
-                    all_probs[j][i] = {}
-                    for ck in checkpoints:
-                        ck_step = int(ck * N_lyap)  # convert to time index
-                        prob, score = probability_at_location(
-                            pred_pos      = x_positions_pred,
-                            pred_strength = None,  # or pass strengths if you have them
-                            ck_step       = ck_step,
-                            x_query       = x_queries,
-                            x_domain      = (0,20),
-                            sigma_x       = 1.0,
-                            temporal_radius = 2,   # or >0 to include neighbors
-                            sigma_t       = 1.0,
-                            use_strength  = False
-                        )
-                        all_probs[j][i][ck] = {"probs": prob, "scores": score}
+                    # all_probs[j][i] = {}
+                    # for ck in checkpoints:
+                    #     ck_step = int(ck * N_lyap)  # convert to time index
+                    #     prob, score = probability_at_location(
+                    #         pred_pos      = x_positions_pred,
+                    #         pred_strength = None,  # or pass strengths if you have them
+                    #         ck_step       = ck_step,
+                    #         x_query       = x_queries,
+                    #         x_domain      = (0,20),
+                    #         sigma_x       = 1.0,
+                    #         temporal_radius = 2,   # or >0 to include neighbors
+                    #         sigma_t       = 1.0,
+                    #         use_strength  = False
+                    #     )
+                    #     all_probs[j][i][ck] = {"probs": prob, "scores": score}
 
-                    for ck in checkpoints:
-                        ck_step = int(ck * N_lyap)  # convert to time index
-                        truth_val = probability_at_location(x_positions_truth,                # (T, P) array of true plume x (np.nan if absent)
-                                        ck_step,
-                                        x_queries,
-                                        x_domain=(0.0,20.0),
-                                        label_radius=1.0,
-                                        temporal_radius=0)
-                        truths[j][i][ck] = truth_val
+                    # for ck in checkpoints:
+                    #     ck_step = int(ck * N_lyap)  # convert to time index
+                    #     truth_val = probability_at_location(x_positions_truth,                # (T, P) array of true plume x (np.nan if absent)
+                    #                     ck_step,
+                    #                     x_queries,
+                    #                     x_domain=(0.0,20.0),
+                    #                     label_radius=1.0,
+                    #                     temporal_radius=0)
+                    #     truths[j][i][ck] = truth_val
+
+                    ## initiation socres
                         
-            if plot:
-                #left column has the washout (open-loop) and right column the prediction (closed-loop)
-                # only first n_plot test set intervals are plotted
-                 if i<n_plot:
-                    if j % 5 == 0:
-                        categories = ['very good', 'good', 'medium', 'FN', 'FP', 'TN']
-                        lts = sorted(scores.keys())  # [0.5, 1.0, 1.5, 2.0, 2.5]
-                        print("lts:", lts)
-                        lts_labels = np.array(lts)/N_lyap
-                        lts_labels  = [f"{lt:.1f}" for lt in lts_labels]
-                        # Extract counts for each category at each LT
-                        counts_per_category = {cat: [] for cat in categories}
-                        overalls            = []
+    #         if plot:
+    #             #left column has the washout (open-loop) and right column the prediction (closed-loop)
+    #             # only first n_plot test set intervals are plotted
+    #              if i<n_plot:
+    #                 if j % 5 == 0:
+    #                     categories = ['very good', 'good', 'medium', 'FN', 'FP', 'TN']
+    #                     lts = sorted(scores.keys())  # [0.5, 1.0, 1.5, 2.0, 2.5]
+    #                     print("lts:", lts)
+    #                     lts_labels = np.array(lts)/N_lyap
+    #                     lts_labels  = [f"{lt:.1f}" for lt in lts_labels]
+    #                     # Extract counts for each category at each LT
+    #                     counts_per_category = {cat: [] for cat in categories}
+    #                     overalls            = []
 
-                        for lt in lts:
-                            counter = scores[lt]['counts']
-                            for cat in categories:
-                                counts_per_category[cat].append(counter.get(cat, 0))  # default 0 if missing
-                            overalls.append(scores[lt]['overall_score'])
+    #                     for lt in lts:
+    #                         counter = scores[lt]['counts']
+    #                         for cat in categories:
+    #                             counts_per_category[cat].append(counter.get(cat, 0))  # default 0 if missing
+    #                         overalls.append(scores[lt]['overall_score'])
 
-                        print(f"ens{j}: {overalls}")
-                        # Plot grouped bar chart
-                        x_range = range(len(lts))
-                        width = 0.15
-                        fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
-                        for k, cat in enumerate(categories):
-                            ax.bar([xi + k*width for xi in x_range], counts_per_category[cat], width=width, label=cat)
-                        ax.plot([xi + width*2 for xi in x_range], overalls, color='black', marker='o', linestyle='-', label='Overall Score')
-                        ax.set_xticks([xi + width*2 for xi in x_range])
-                        ax.set_xticklabels(lts_labels)
-                        ax.set_xlabel('Lead Times [LTs]')
-                        ax.set_ylabel('Number')
-                        ax.legend()
-                        ax.grid()
-                        fig.savefig(images_test_path+f"/plume_scores_ens{j}_test{i}.png")
-                        plt.close()
+    #                     print(f"ens{j}: {overalls}")
+    #                     # Plot grouped bar chart
+    #                     x_range = range(len(lts))
+    #                     width = 0.15
+    #                     fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
+    #                     for k, cat in enumerate(categories):
+    #                         ax.bar([xi + k*width for xi in x_range], counts_per_category[cat], width=width, label=cat)
+    #                     ax.plot([xi + width*2 for xi in x_range], overalls, color='black', marker='o', linestyle='-', label='Overall Score')
+    #                     ax.set_xticks([xi + width*2 for xi in x_range])
+    #                     ax.set_xticklabels(lts_labels)
+    #                     ax.set_xlabel('Lead Times [LTs]')
+    #                     ax.set_ylabel('Number')
+    #                     ax.legend()
+    #                     ax.grid()
+    #                     fig.savefig(images_test_path+f"/plume_scores_ens{j}_test{i}.png")
+    #                     plt.close()
 
-    ensemble_stats = {}
+    # ensemble_stats = {}
 
-    for j in range(ensemble_test):
-        all_test_scores = []
-        for i in range(N_test):
-            scores_dict = all_scores[j][i]
-            overall_scores = [v['overall_score'] for v in scores_dict.values()]
-            all_test_scores.append(overall_scores)
-        all_test_scores = np.array(all_test_scores)
-        ensemble_stats[j] = {
-            'mean_per_checkpoint': np.mean(all_test_scores, axis=0),
-            'median_per_checkpoint': np.median(all_test_scores, axis=0),
-            'std_per_checkpoint': np.std(all_test_scores, axis=0),
-            'UQ_per_checkpoint': np.percentile(all_test_scores, 75, axis=0),
-            'LQ_per_checkpoint': np.percentile(all_test_scores, 25, axis=0)
-        }
+    # for j in range(ensemble_test):
+    #     all_test_scores = []
+    #     for i in range(N_test):
+    #         scores_dict = all_scores[j][i]
+    #         overall_scores = [v['overall_score'] for v in scores_dict.values()]
+    #         all_test_scores.append(overall_scores)
+    #     all_test_scores = np.array(all_test_scores)
+    #     ensemble_stats[j] = {
+    #         'mean_per_checkpoint': np.mean(all_test_scores, axis=0),
+    #         'median_per_checkpoint': np.median(all_test_scores, axis=0),
+    #         'std_per_checkpoint': np.std(all_test_scores, axis=0),
+    #         'UQ_per_checkpoint': np.percentile(all_test_scores, 75, axis=0),
+    #         'LQ_per_checkpoint': np.percentile(all_test_scores, 25, axis=0)
+    #     }
 
-    checkpoints=(0.5, 1.0, 1.5, 2.0, 2.5)
-    for j in range(ensemble_test):
-        stats = ensemble_stats[j]
-        print(f"ens {j} stats: {stats['mean_per_checkpoint']}")
-        fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
-        plot_barchart_errors(checkpoints, stats['median_per_checkpoint'], stats['mean_per_checkpoint'], stats['LQ_per_checkpoint'], stats['UQ_per_checkpoint'], 'Lead Time', 0.4, fig, ax, color1='tab:blue', color2='black', marker2='o')
-        ax.set_ylabel('Score')
-        fig.savefig(init_path+f"/Score_ens{j}.png")
-        plt.close()
+    # checkpoints=(0.5, 1.0, 1.5, 2.0, 2.5)
+    # for j in range(ensemble_test):
+    #     stats = ensemble_stats[j]
+    #     print(f"ens {j} stats: {stats['mean_per_checkpoint']}")
+    #     fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
+    #     plot_barchart_errors(checkpoints, stats['median_per_checkpoint'], stats['mean_per_checkpoint'], stats['LQ_per_checkpoint'], stats['UQ_per_checkpoint'], 'Lead Time', 0.4, fig, ax, color1='tab:blue', color2='black', marker2='o')
+    #     ax.set_ylabel('Score')
+    #     fig.savefig(init_path+f"/Score_ens{j}.png")
+    #     plt.close()
     
-    all_means    = np.array([ensemble_stats[j]['mean_per_checkpoint'] for j in range(ensemble_test)])
-    all_medians  = np.array([ensemble_stats[j]['median_per_checkpoint'] for j in range(ensemble_test)])
-    all_UQs      = np.array([ensemble_stats[j]['UQ_per_checkpoint'] for j in range(ensemble_test)])
-    all_LQs      = np.array([ensemble_stats[j]['LQ_per_checkpoint'] for j in range(ensemble_test)])
-    avg_mean_across_ensembles   = np.nanmean(all_means, axis=0)
-    avg_median_across_ensembles = np.nanmean(all_medians, axis=0)
-    avg_UQ_across_ensembles = np.nanmean(all_UQs, axis=0)
-    avg_LQ_across_ensembles = np.nanmean(all_LQs, axis=0)
+    # all_means    = np.array([ensemble_stats[j]['mean_per_checkpoint'] for j in range(ensemble_test)])
+    # all_medians  = np.array([ensemble_stats[j]['median_per_checkpoint'] for j in range(ensemble_test)])
+    # all_UQs      = np.array([ensemble_stats[j]['UQ_per_checkpoint'] for j in range(ensemble_test)])
+    # all_LQs      = np.array([ensemble_stats[j]['LQ_per_checkpoint'] for j in range(ensemble_test)])
+    # avg_mean_across_ensembles   = np.nanmean(all_means, axis=0)
+    # avg_median_across_ensembles = np.nanmean(all_medians, axis=0)
+    # avg_UQ_across_ensembles = np.nanmean(all_UQs, axis=0)
+    # avg_LQ_across_ensembles = np.nanmean(all_LQs, axis=0)
 
-    fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
-    plot_barchart_errors(checkpoints, avg_median_across_ensembles, avg_mean_across_ensembles, avg_LQ_across_ensembles, avg_UQ_across_ensembles, 'Lead Time', 0.4, fig, ax, color1='tab:blue', color2='black', marker2='o')
-    ax.set_ylabel('Score')
-    fig.savefig(init_path+f"/Score_avg_ens.png")
+    # fig, ax = plt.subplots(1, figsize=(12,3), constrained_layout=True)
+    # plot_barchart_errors(checkpoints, avg_median_across_ensembles, avg_mean_across_ensembles, avg_LQ_across_ensembles, avg_UQ_across_ensembles, 'Lead Time', 0.4, fig, ax, color1='tab:blue', color2='black', marker2='o')
+    # ax.set_ylabel('Score')
+    # fig.savefig(init_path+f"/Score_avg_ens.png")
 
-    # Save the dictionary
-    with open(init_path+'/all_scores.pkl', 'wb') as f:
-        pickle.dump(all_scores, f)
+    # # Save the dictionary
+    # with open(init_path+'/all_scores.pkl', 'wb') as f:
+    #     pickle.dump(all_scores, f)
 
     # Save the dictionary
     with open(init_path+'/all_scores_extended.pkl', 'wb') as f:
         pickle.dump(all_scores_extended, f)
+
+    # np.save(init_path+'/x_positions_truth_all.npy', x_positions_truth_all)
+    # np.save(init_path+'/x_positions_pred_all.npy', x_positions_pred_all)
+
+    np.save(init_path+'/x_strength_truth_all.npy', x_strength_truth_all)
+    np.save(init_path+'/x_strength_pred_all.npy', x_strength_pred_all)
 
 if initiation_interval2:
     #### INITIATION ####
