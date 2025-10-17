@@ -555,7 +555,7 @@ def active_array_calc(original_data, reconstructed_data, z):
     
     return active_array, active_array_reconstructed, mask_expanded, mask_expanded_recon
 
-def active_array_calc_softer(original_data, reconstructed_data, z, RH_threshold=0.8, w_threshold=0, b_threshold=0):
+def active_array_calc_softer(original_data, reconstructed_data, z, RH_threshold=0.8, w_threshold=0, b_threshold=0, both_soft=False):
     beta = 1.201
     alpha = 3.0
     T = original_data[:,:,:,3] - beta*z
@@ -571,9 +571,13 @@ def active_array_calc_softer(original_data, reconstructed_data, z, RH_threshold=
     w = original_data[:,:,:,1]
     w_reconstructed = reconstructed_data[:,:,:,1]
     
-    mask = (rh[:, :, :] >= 1) & (w[:, :, :] > 0) & (b_anom[:, :, :] > 0)
-    mask_reconstructed = (rh_reconstructed[:, :, :] >= RH_threshold) & (w_reconstructed[:, :, :] > w_threshold) & (b_anom_reconstructed[:, :, :] > b_threshold)
-    
+    if both_soft:
+        mask = (rh[:, :, :] >= RH_threshold) & (w[:, :, :] > w_threshold) & (b_anom[:, :, :] > b_threshold)
+        mask_reconstructed = (rh_reconstructed[:, :, :] >= RH_threshold) & (w_reconstructed[:, :, :] > w_threshold) & (b_anom_reconstructed[:, :, :] > b_threshold)
+    else:   
+        mask = (rh[:, :, :] >= 1) & (w[:, :, :] > 0) & (b_anom[:, :, :] > 0)
+        mask_reconstructed = (rh_reconstructed[:, :, :] >= RH_threshold) & (w_reconstructed[:, :, :] > w_threshold) & (b_anom_reconstructed[:, :, :] > b_threshold)
+        
     active_array = np.zeros((original_data.shape[0], original_data.shape[1], len(z)))
     active_array[mask] = 1
     active_array_reconstructed = np.zeros((original_data.shape[0], original_data.shape[1], len(z)))
@@ -1489,3 +1493,67 @@ def fft(variable, x):
     m = 2*np.pi*m  # angular frequency [rad/s]
     magnitude_w = np.abs(fft)**2 / len(x)   # PSD estimate (normalize)
     return magnitude_w, m
+
+def plume_detection_metrics(new_array, new_array_reconstructed):
+    TP = np.sum((new_array == 1) & (new_array_reconstructed == 1))
+    FP = np.sum((new_array == 0) & (new_array_reconstructed == 1))
+    FN = np.sum((new_array == 1) & (new_array_reconstructed == 0))
+    TN = np.sum((new_array == 0) & (new_array_reconstructed == 0))
+
+    precision = TP / (TP + FP + 1e-8)   # of predicted plumes, how many are real
+    recall    = TP / (TP + FN + 1e-8)   # of real plumes, how many are captured
+    f1  = 2 * precision * recall / (precision + recall + 1e-8)
+
+    csi = TP / (TP + FP + FN + 1e-8)
+
+    return {
+        'TP': TP, 'FP': FP, 'FN': FN, 'TN': TN,
+        'precision': precision,
+        'recall': recall,
+        'f1': f1,
+        'csi': csi
+    }
+
+from scipy.ndimage import uniform_filter
+def fss_asymmetric(obs, pred, window_list):
+    """
+    Compute Fractional Skill Score (FSS) for binary plume arrays with asymmetric windows.
+
+    Parameters:
+    -----------
+    obs : np.ndarray
+        Binary array of true plumes, shape (T, nx, nz) or (nx, nz)
+    pred : np.ndarray
+        Binary array of predicted/reconstructed plumes, same shape as obs
+    window_list : list of tuples
+        List of asymmetric windows [(w_x1, w_z1), (w_x2, w_z2), ...]
+        w_x = number of cells in x-direction (columns)
+        w_z = number of cells in z-direction (rows)
+
+    Returns:
+    --------
+    fss_dict : dict
+        Dictionary mapping window (x,z) -> FSS value (averaged over time if 3D)
+    """
+    obs = obs.astype(float)
+    pred = pred.astype(float)
+
+    fss_dict = {}
+    for w_x, w_z in window_list:
+        if obs.ndim == 3:
+            fss_time = []
+            for t in range(obs.shape[0]):
+                f_obs = uniform_filter(obs[t], size=(w_z, w_x), mode='reflect')
+                f_pred = uniform_filter(pred[t], size=(w_z, w_x), mode='reflect')
+                num = np.sum((f_pred - f_obs)**2)
+                den = np.sum(f_pred**2 + f_obs**2)
+                fss_time.append(1 - num / (den + 1e-12))
+            fss_dict[(w_x, w_z)] = np.mean(fss_time)
+        else:
+            f_obs = uniform_filter(obs, size=(w_z, w_x), mode='reflect')
+            f_pred = uniform_filter(pred, size=(w_z, w_x), mode='reflect')
+            num = np.sum((f_pred - f_obs)**2)
+            den = np.sum(f_pred**2 + f_obs**2)
+            fss_dict[(w_x, w_z)] = 1 - num / (den + 1e-12)
+    
+    return fss_dict

@@ -751,7 +751,7 @@ Y_tv  = U[N_washout+1:N_washout+N_train].copy() #data to match at next timestep
 if Data == 'ToyData':
     indexes_to_plot = np.array([1, 2, 3, 4] ) -1
 else:
-    indexes_to_plot = np.array([1, 2, 8, 16, 32, 64] ) -1
+    indexes_to_plot = np.array([1, 2, 10, 32, 64] ) -1
 indexes_to_plot = indexes_to_plot[indexes_to_plot <= (n_components-1)]
 
 # adding noise to training set inputs with sigma_n the noise of the data
@@ -851,13 +851,14 @@ print('norm:', norm)
 print('u_mean:', u_mean)
 print('shape of norm:', np.shape(norm))
 
-test_interval = True
-validation_interval = True
+test_interval = False
+validation_interval = False
 statistics_interval = False
 initiation_score_interval = False
 fourier = False
 vertical_profiles = False
 reservoir_investigation = False
+active_thresholds = True
 
 train_data = data_set[:int(N_washout+N_train)]
 global_stds = [np.std(train_data[..., c]) for c in range(train_data.shape[-1])]
@@ -872,7 +873,7 @@ if validation_interval:
     N_intt   = test_len*N_lyap            #length of each test set interval
     N_gap    = int(3*N_lyap)
 
-    threshold_ph = 0.1 # for validation and testing
+    #threshold_ph = 0.1 # for validation and testing
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
@@ -1158,19 +1159,25 @@ if test_interval:
     else:
         N_tstart = int(N_train + N_washout) #850    #where the first test interval starts
     N_intt   = 3*N_lyap             #length of each test set interval
-    N_gap    = int(N_lyap)
+    N_gap    = int(1*N_lyap)
 
     print('N_intt=', N_intt)
-    threshold_ph = 0.1 # for validation and testing
+    #threshold_ph = 0.1 # for validation and testing
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
     sigma_ph_modes = np.sqrt(np.mean(np.var(U[:,:n_components],axis=1)))
     ensemble_test = ens
 
+    plume_at_t0 = [6, 7, 8, 9, 10, 11, 12, 16, 17, 18, 19, 20, 27, 28, 29, 30, 31, 32, 33, 34, 36, 37, 38, 39]
+    no_plumes   = [0, 1, 2, 21, 22, 23]
+    plume_init  = [3, 4, 5, 13, 14, 15, 24, 25, 26, 35]
+
     ens_pred        = np.zeros((N_intt, dim, ensemble_test))
     ens_PH          = np.zeros((N_test, ensemble_test))
     ens_PH_modes    = np.zeros((N_test, ensemble_test))
+    ens_NRMSE       = np.zeros((N_test, ensemble_test))
+    ens_pNRMSE      = np.zeros((N_test, ensemble_test))
     ens_PH2         = np.zeros((ensemble_test))
     ens_nrmse       = np.zeros((ensemble_test))
     ens_ssim        = np.zeros((ensemble_test))
@@ -1405,6 +1412,9 @@ if test_interval:
             ens_pl_acc[j]      += plume_count_accuracy
             ens_nrmse_inPHregion[j] += nrmse_inPHreg
 
+            ens_NRMSE[i, j] = nrmse_ch
+            ens_pNRMSE[i, j] = nrmse_sep_plume
+
             if plot:
                 #left column has the washout (open-loop) and right column the prediction (closed-loop)
                 # only first n_plot test set intervals are plotted
@@ -1416,7 +1426,7 @@ if test_interval:
                         xx = np.arange(U_wash[:,0].shape[0])/N_lyap
                         plot_modes_washout(U_wash, Uh_wash, xx, i, j, indexes_to_plot, images_test_path+'/washout_test', Modes=False)
 
-                        xx_washout = np.arange(U_wash[:,0].shape[0])/N_lyap
+                        xx_washout = np.arange(U_wash[:,0].shape[0]) / N_lyap - (U_wash[:,0].shape[0]) / N_lyap
                         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
                         plot_modes_prediction(Y_t, Yh_t, xx, i, j, indexes_to_plot, images_test_path+'/prediction_test', Modes=False)
                         plot_PH(Y_err, threshold_ph, xx, i, j, images_test_path+'/PH_test')
@@ -1461,6 +1471,31 @@ if test_interval:
 
     output_path_met_ALL = os.path.join(output_path, output_file_ALL)
 
+    # Create separate arrays for each category
+    ens_PH_plume_at_t0 = ens_PH[plume_at_t0, :]      # shape = (len(plume_at_t0), ensemble_test)
+    ens_PH_no_plumes   = ens_PH[no_plumes, :]        # shape = (len(no_plumes), ensemble_test)
+    ens_PH_plume_init  = ens_PH[plume_init, :]       # shape = (len(plume_init), ensemble_test)
+
+    flatten_plume_at_t0 = ens_PH_plume_at_t0.flatten()
+    flatten_no_plumes   = ens_PH_no_plumes.flatten()
+    flatten_plume_init  = ens_PH_plume_init.flatten()
+
+    ens_NRMSE_plume_at_t0 = ens_NRMSE[plume_at_t0, :]      # shape = (len(plume_at_t0), ensemble_test)
+    ens_NRMSE_no_plumes   = ens_NRMSE[no_plumes, :]        # shape = (len(no_plumes), ensemble_test)
+    ens_NRMSE_plume_init  = ens_NRMSE[plume_init, :]  
+
+    NMRSE_flatten_plume_at_t0 = ens_NRMSE_plume_at_t0.flatten()
+    NRMSE_flatten_no_plumes   = ens_NRMSE_no_plumes.flatten()
+    NRMSE_flatten_plume_init  = ens_NRMSE_plume_init.flatten()
+
+    ens_pNRMSE_plume_at_t0 = ens_pNRMSE[plume_at_t0, :]      # shape = (len(plume_at_t0), ensemble_test)
+    ens_pNRMSE_no_plumes   = ens_pNRMSE[no_plumes, :]        # shape = (len(no_plumes), ensemble_test)
+    ens_pNRMSE_plume_init  = ens_pNRMSE[plume_init, :]  
+
+    pNMRSE_flatten_plume_at_t0 = ens_pNRMSE_plume_at_t0.flatten()
+    pNRMSE_flatten_no_plumes   = ens_pNRMSE_no_plumes.flatten()
+    pNRMSE_flatten_plume_init  = ens_pNRMSE_plume_init.flatten()
+
     flatten_PH       = ens_PH.flatten()
     flatten_PH_modes = ens_PH_modes.flatten()
     print('flat PH', flatten_PH)
@@ -1483,6 +1518,15 @@ if test_interval:
     "lower PH (modes)": np.quantile(flatten_PH_modes, 0.75),
     "upper PH (modes)": np.quantile(flatten_PH_modes, 0.25),
     "median PH (modes)": np.median(flatten_PH_modes),
+    "mean_PH_plume_at_t0": np.mean(flatten_plume_at_t0),
+    "mean_PH_no_plumes": np.mean(flatten_no_plumes),
+    "mean_PH_plume_init": np.mean(flatten_plume_init),
+    "mean_NRMSE_plume_at_t0": np.mean(NMRSE_flatten_plume_at_t0),
+    "mean_NRMSE_no_plumes": np.mean(NRMSE_flatten_no_plumes),
+    "mean_NRMSE_plume_init": np.mean(NRMSE_flatten_plume_init),
+    "mean_pNRMSE_plume_at_t0": np.mean(pNMRSE_flatten_plume_at_t0),
+    "mean_pNRMSE_no_plumes": np.mean(pNRMSE_flatten_no_plumes),
+    "mean_pNRMSE_plume_init": np.mean(pNRMSE_flatten_plume_init)
     }
 
     with open(output_path_met_ALL, "w") as file:
@@ -1780,6 +1824,11 @@ if initiation_score_interval:
                 # 3. scale back
                 reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
                 reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
+
+            if j ==0:
+                if i == 15 or i == 26 or i == 34:
+                    np.save(init_path+f"/reconstructed_truth_ens{j}_test{i}.npy", reconstructed_truth)
+                    np.save(init_path+f"/reconstructed_pred_ens{j}_test{i}.npy", reconstructed_predictions)
 
 
             if Data == 'RB_plume':
@@ -2290,3 +2339,185 @@ if reservoir_investigation:
             fig.savefig(output_path+'/res_states_FFT.png')
 
 
+if active_thresholds:
+    print('active thresholds .. ')
+    N_washout = int(N_washout)
+    N_test   = 40                  #number of intervals in the test set
+    if reduce_domain2:
+        N_tstart = int(N_washout + N_train)
+    else:
+        N_tstart = int(N_washout + N_train)  #where the first test interval starts
+    N_intt   = 3*N_lyap             #length of each test set interval
+    N_gap    = int(1*N_lyap)
+    #N_washout_val = 4*N_lyap
+    test_indexes = []
+
+    ensemble_test = ens
+
+    # Asymmetric windows for FSS
+    windows = [(1,1), (3,1), (5,3), (9,3)]
+
+    ensemble_results = []
+
+    active_path = output_path+'/active_thresholds/'
+    if not os.path.exists(active_path):
+        os.makedirs(active_path)
+        print('made directory')
+
+    for j in range(ensemble_test):
+
+        print('Realization    :',j+1)
+
+        #load matrices and hyperparameters
+        Wout     = Woutt[j].copy()
+        Win      = Winn[j] #csr_matrix(Winn[j])
+        W        = Ws[j]   #csr_matrix(Ws[j])
+        rho      = opt_hyp[j,0].copy()
+        sigma_in = opt_hyp[j,1].copy()
+        print('Hyperparameters:',rho, sigma_in)
+
+        # to store prediction horizon in the test set
+        PH             = np.zeros(N_test)
+        nrmse_error    = np.zeros((N_test, N_intt))
+
+        # To store results per test interval
+        test_metrics_original = []
+        test_metrics_softer = []
+
+        # to plot results
+        plot = True
+        Plotting = True
+        if plot:
+            n_plot = 18
+            plt.rcParams["figure.figsize"] = (15,3*n_plot)
+            plt.figure()
+            plt.tight_layout()
+
+        #run different test intervals
+        for i in range(N_test):
+            print(f'Starting test interval {i+1}/{N_test}')
+            start_idx = N_tstart + i*N_gap
+            end_idx   = start_idx + N_intt
+
+            # --- Extract data ---
+            U_wash = U[start_idx - N_washout_val : start_idx].copy()
+            Y_t    = U[start_idx:end_idx].copy()
+            data_set_Y_t = data_set[start_idx:end_idx]
+            time_vals_Y_t = time_vals[start_idx:end_idx]
+
+            # --- Washout ---
+            Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
+            Uh_wash = np.dot(Xa1, Wout)
+
+            # --- Prediction ---
+            Yh_t, _, Xa2 = closed_loop(N_intt-1, Xa1[-1], Wout, sigma_in, rho)
+
+            # --- Reconstruct ---
+            ##### reconstructions ####
+            if Data == 'RB_plume':
+                plume_features_truth         = Y_t[:,N_latent:]
+                plume_features_predictions   = Yh_t[:,N_latent:]
+
+                # 1. reshape for decoder
+                Y_t_reshaped = Y_t[:,:N_latent].reshape(Y_t.shape[0], N_1[1], N_1[2], N_1[3])
+                Yh_t_reshaped = Yh_t[:,:N_latent].reshape(Yh_t.shape[0], N_1[1], N_1[2], N_1[3])
+                # 2. put through decoder
+                reconstructed_truth = Decoder(Y_t_reshaped,b).numpy()
+                reconstructed_predictions = Decoder(Yh_t_reshaped,b).numpy()
+                # 3. scale back
+                reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
+                reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
+
+            else:
+                # 1. reshape for decoder
+                Y_t_reshaped = Y_t.reshape(Y_t.shape[0], N_1[1], N_1[2], N_1[3])
+                Yh_t_reshaped = Yh_t.reshape(Yh_t.shape[0], N_1[1], N_1[2], N_1[3])
+                # 2. put through decoder
+                reconstructed_truth = Decoder(Y_t_reshaped,b).numpy()
+                reconstructed_predictions = Decoder(Yh_t_reshaped,b).numpy()
+                # 3. scale back
+                reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
+                reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
+
+            if Data == 'RB':
+                # --- ORIGINAL THRESHOLDS ---
+                active_array, active_array_reconstructed, mask_expanded, mask_reconstructed = active_array_calc(reconstructed_truth, reconstructed_predictions, z)
+
+                # Downsample 4x4
+                nx_new, nz_new = len(x)//4, len(z)//4
+                new_array_reconstructed = active_array_reconstructed.reshape(len(time_vals_Y_t), nx_new,4,nz_new,4).max(axis=(2,4))
+                new_array = active_array.reshape(len(time_vals_Y_t), nx_new,4,nz_new,4).max(axis=(2,4))
+
+                # Plume metrics
+                metrics_original = plume_detection_metrics(new_array, new_array_reconstructed)
+
+                # FSS
+                fss_scores = fss_asymmetric(active_array, active_array_reconstructed, windows)
+                metrics_original['fss'] = fss_scores
+                test_metrics_original.append(metrics_original)
+
+                # --- SOFTER THRESHOLDS ---
+                RH_thresh, w_thresh, b_thresh = 0.93, -0.01, 0.0
+                active_array, active_array_reconstructed, mask_expanded, mask_reconstructed = active_array_calc_softer(reconstructed_truth, reconstructed_predictions, z, RH_threshold=RH_thresh, w_threshold=w_thresh, b_threshold=b_thresh, both_soft=True)
+
+                # Downsample again
+                new_array_reconstructed = active_array_reconstructed.reshape(len(time_vals_Y_t), nx_new,4,nz_new,4).max(axis=(2,4))
+                new_array = active_array.reshape(len(time_vals_Y_t), nx_new,4,nz_new,4).max(axis=(2,4))
+
+                # Plume metrics
+                metrics_softer = plume_detection_metrics(new_array, new_array_reconstructed)
+
+                # FSS
+                fss_scores = fss_asymmetric(active_array, active_array_reconstructed, windows)
+                metrics_softer['fss'] = fss_scores
+                test_metrics_softer.append(metrics_softer)
+
+        # --- Average over test intervals ---
+        def average_metrics(metrics_list):
+            if not metrics_list:
+                return {}
+            keys = [k for k in metrics_list[0].keys() if k != 'fss']
+            avg = {k: np.mean([m[k] for m in metrics_list]) for k in keys}
+            std = {k+"_std": np.std([m[k] for m in metrics_list]) for k in keys}
+            # Average FSS per window
+            fss_keys = metrics_list[0]['fss'].keys()
+            fss_avg = {f"fss_{w[0]}x{w[1]}": np.mean([m['fss'][w] for m in metrics_list]) for w in fss_keys}
+            fss_std = {f"fss_{w[0]}x{w[1]}_std": np.std([m['fss'][w] for m in metrics_list]) for w in fss_keys}
+            return {**avg, **std, **fss_avg, **fss_std}
+
+        avg_original = average_metrics(test_metrics_original)
+        avg_softer   = average_metrics(test_metrics_softer)
+        avg_original['ensemble_id'] = j
+        avg_softer['ensemble_id'] = j
+
+        ensemble_results.append({'original': avg_original, 'softer': avg_softer})
+
+    # --- Average across ensembles ---
+    def ensemble_average(results_list):
+        keys = results_list[0].keys()
+        avg = {k: np.mean([r[k] for r in results_list]) for k in keys}
+        std = {k+"_std": np.std([r[k] for r in results_list]) for k in keys}
+        return {**avg, **std}
+
+    ensemble_avg_original = ensemble_average([e['original'] for e in ensemble_results])
+    ensemble_avg_softer   = ensemble_average([e['softer'] for e in ensemble_results])
+
+    print("\n=== Mean metrics over all ensembles ===")
+    print("Original thresholds:", ensemble_avg_original)
+    print("Softer thresholds  :", ensemble_avg_softer)
+
+    # --- Save JSON ---
+    save_path = os.path.join(active_path, "plume_metrics_ensemble.json")
+    with open(save_path, 'w') as f:
+        json.dump(ensemble_results, f, indent=4)
+    print(f"Saved metrics and FSS to {save_path}")
+
+    save_path = os.path.join(active_path, "plume_metrics_original.json")
+    with open(save_path, 'w') as f:
+        json.dump(ensemble_avg_original, f, indent=4)
+    print(f"Saved metrics and FSS to {save_path}")
+
+    save_path = os.path.join(active_path, "plume_metrics_softer.json")
+    with open(save_path, 'w') as f:
+        json.dump(ensemble_avg_softer, f, indent=4)
+    print(f"Saved metrics and FSS to {save_path}")
