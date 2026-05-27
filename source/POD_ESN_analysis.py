@@ -48,6 +48,7 @@ import pickle
 from Eval_Functions import *
 from Plotting_Functions import *
 from POD_functions import *
+import joblib
 
 import json
 import time as time
@@ -2109,70 +2110,74 @@ if corrections:
         os.makedirs(metrics_test_path)
         print('made directory')
 
-    print(f"start time for data set {time_vals[0]}, index {0}")
-    print(f"end time for data set {time_vals[-1]}, index {-1}")
+    true_records = joblib.load('scratch/tau02/CAPECIN/true_plume_initiation_records.pkl')
+    print(f"Loaded {len(true_records)} true validation events.")
 
-    test_start_index = N_tstart + 0*N_gap 
-    test_end_index   = N_tstart + 39*N_gap + N_intt
 
-    all_test_data = data_set[test_start_index: test_end_index,:,:,:n_components]
-    #_, all_test_data       = inverse_POD(all_test_U[:,:n_components], pca_)
-    print(f"shape of all test data = {np.shape(all_test_data)}")
-    all_plume_features_truth         = plume_features[test_start_index  : test_end_index, :]
-    print(f"shape of all plume features truth {np.shape(all_plume_features_truth)}")
-    all_x_positions_truth, all_x_strength_truth = extract_plume_positions(all_plume_features_truth, x_domain=(0,20), max_plumes=3, threshold_predictions=False, KE_threshold=0.00005)
-    print(f"shape of all pos data = {np.shape(all_x_positions_truth)}")
-    print(f"shape of all strength data = {np.shape(all_x_strength_truth)}")
-    print(f"start time for test data {time_vals[test_start_index]}, index {test_start_index}")
-    print(f"end time for test data {time_vals[test_end_index]}, index {test_end_index}")
+    # print(f"start time for data set {time_vals[0]}, index {0}")
+    # print(f"end time for data set {time_vals[-1]}, index {-1}")
 
-    variables_alt = ['dudx', 'temp_vertical', 'anom_b']
-    names_alt = ['dudx', 'temp_vertical', 'anom_b']
-    data_set_alt, time_vals_alt = load_data_set_RB(input_path+'/alternative_data.h5', variables_alt, snapshots_load)
-    print('shape of alt dataset', np.shape(data_set_alt))
-    print(f"start time {time_vals_alt[0]}, index {0}")
-    print(f"end time {time_vals_alt[-51]}, index {-51}")
-    print(time_vals_alt[-50:])
-    fig, ax = plt.subplots(1)
-    ax.plot(time_vals_alt[:-50])
-    fig.savefig(images_test_path+'/timevals.png')
+    # test_start_index = N_tstart + 0*N_gap 
+    # test_end_index   = N_tstart + 39*N_gap + N_intt
 
-    all_test_alt = data_set_alt[test_start_index -5000           : test_end_index -5000]
-    print(f"shape of all alt data = {np.shape(all_test_alt)}")
-    print(f"start time {time_vals_alt[test_start_index-5000]}, index {test_start_index-5000}")
-    print(f"end time {time_vals_alt[test_end_index - 5000]}, index {test_end_index - 5000}")
+    # all_test_data = data_set[test_start_index: test_end_index,:,:,:n_components]
+    # #_, all_test_data       = inverse_POD(all_test_U[:,:n_components], pca_)
+    # print(f"shape of all test data = {np.shape(all_test_data)}")
+    # all_plume_features_truth         = plume_features[test_start_index  : test_end_index, :]
+    # print(f"shape of all plume features truth {np.shape(all_plume_features_truth)}")
+    # all_x_positions_truth, all_x_strength_truth = extract_plume_positions(all_plume_features_truth, x_domain=(0,20), max_plumes=3, threshold_predictions=False, KE_threshold=0.00005)
+    # print(f"shape of all pos data = {np.shape(all_x_positions_truth)}")
+    # print(f"shape of all strength data = {np.shape(all_x_strength_truth)}")
+    # print(f"start time for test data {time_vals[test_start_index]}, index {test_start_index}")
+    # print(f"end time for test data {time_vals[test_end_index]}, index {test_end_index}")
 
-    time_main = time_vals[test_start_index]
-    time_alt  = time_vals_alt[test_start_index - 5000]
+    # variables_alt = ['dudx', 'temp_vertical', 'anom_b']
+    # names_alt = ['dudx', 'temp_vertical', 'anom_b']
+    # data_set_alt, time_vals_alt = load_data_set_RB(input_path+'/alternative_data.h5', variables_alt, snapshots_load)
+    # print('shape of alt dataset', np.shape(data_set_alt))
+    # print(f"start time {time_vals_alt[0]}, index {0}")
+    # print(f"end time {time_vals_alt[-51]}, index {-51}")
+    # print(time_vals_alt[-50:])
+    # fig, ax = plt.subplots(1)
+    # ax.plot(time_vals_alt[:-50])
+    # fig.savefig(images_test_path+'/timevals.png')
 
-    print(f"Aligning timelines... Main: {time_main} | Alt: {time_alt}")
-    assert np.isclose(time_main, time_alt), "Timeline offset mismatch! Your variables are from different simulation times."
+    # all_test_alt = data_set_alt[test_start_index -5000           : test_end_index -5000]
+    # print(f"shape of all alt data = {np.shape(all_test_alt)}")
+    # print(f"start time {time_vals_alt[test_start_index-5000]}, index {test_start_index-5000}")
+    # print(f"end time {time_vals_alt[test_end_index - 5000]}, index {test_end_index - 5000}")
 
-    np.save(init_path+'/alternative_test_data.npy', all_test_alt)
-    np.save(init_path+'/all_x_positions_truth.npy', all_x_positions_truth)
-    np.save(init_path+'/all_x_strength_truth.npy', all_x_strength_truth)
-    np.save(init_path+'/all_test_data.npy', all_test_data)
-    np.save(init_path+'/test_time_vals.npy', time_vals[test_start_index:test_end_index])
+    # time_main = time_vals[test_start_index]
+    # time_alt  = time_vals_alt[test_start_index - 5000]
 
-    formatted_cape_file = os.path.join(init_path, 'formatted_for_cape.h5')
-    print(f"\nWriting formatted master arrays directly to: {formatted_cape_file}")
+    # print(f"Aligning timelines... Main: {time_main} | Alt: {time_alt}")
+    # assert np.isclose(time_main, time_alt), "Timeline offset mismatch! Your variables are from different simulation times."
 
-    q_data = all_test_data[..., 0]
-    b_data = all_test_data[..., 3]
-    t_data = all_test_alt[..., 1]
+    # np.save(init_path+'/alternative_test_data.npy', all_test_alt)
+    # np.save(init_path+'/all_x_positions_truth.npy', all_x_positions_truth)
+    # np.save(init_path+'/all_x_strength_truth.npy', all_x_strength_truth)
+    # np.save(init_path+'/all_test_data.npy', all_test_data)
+    # np.save(init_path+'/test_time_vals.npy', time_vals[test_start_index:test_end_index])
 
-    with h5py.File(formatted_cape_file, 'w') as out:
-        # Standard structural grids expected by the parallel script
-        out.create_dataset('x', data=x)
-        out.create_dataset('z', data=z)
-        out.create_dataset('total_time', data=time_vals[test_start_index:test_end_index])
+    # formatted_cape_file = os.path.join(init_path, 'formatted_for_cape.h5')
+    # print(f"\nWriting formatted master arrays directly to: {formatted_cape_file}")
+
+    # q_data = all_test_data[..., 0]
+    # b_data = all_test_data[..., 3]
+    # t_data = all_test_alt[..., 1]
+
+    # with h5py.File(formatted_cape_file, 'w') as out:
+    #     # Standard structural grids expected by the parallel script
+    #     out.create_dataset('x', data=x)
+    #     out.create_dataset('z', data=z)
+    #     out.create_dataset('total_time', data=time_vals[test_start_index:test_end_index])
         
-        # Parallel script lookup keys
-        out.create_dataset('q_vertical', data=q_data, dtype='f')
-        out.create_dataset('b_vertical', data=b_data, dtype='f')
-        out.create_dataset('temp_vertical', data=t_data, dtype='f')
+    #     # Parallel script lookup keys
+    #     out.create_dataset('q_vertical', data=q_data, dtype='f')
+    #     out.create_dataset('b_vertical', data=b_data, dtype='f')
+    #     out.create_dataset('temp_vertical', data=t_data, dtype='f')
 
-    print("Formatted dataset successfully written. Ready for mpiexec!")
+    # print("Formatted dataset successfully written. Ready for mpiexec!")
 
     # for j in range(ensemble_test):
 
