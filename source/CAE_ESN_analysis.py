@@ -854,11 +854,11 @@ print('shape of norm:', np.shape(norm))
 test_interval = False
 validation_interval = False
 statistics_interval = False
-initiation_score_interval = False
+initiation_score_interval = True
 fourier = False
 vertical_profiles = False
 reservoir_investigation = False
-active_thresholds = True
+active_thresholds = False
 
 train_data = data_set[:int(N_washout+N_train)]
 global_stds = [np.std(train_data[..., c]) for c in range(train_data.shape[-1])]
@@ -1706,15 +1706,15 @@ if statistics_interval:
 
 if initiation_score_interval:
     #### INITIATION ####
-    init_path = output_path + '/initation_score/'
+    init_path = output_path + '/initation_score_corrections_longer/'
     if not os.path.exists(init_path):
         os.makedirs(init_path)
         print('made directory')
 
     #test_indexes = [210, 420, 555]
-    N_test   = 40                    #number of intervals in the test set
+    N_test   = 30                    #number of intervals in the test set
     N_tstart = int(N_washout + N_train)   #where the first test interval starts
-    N_intt   = 3*N_lyap             #length of each test set interval
+    N_intt   = 9*N_lyap             #length of each test set interval
     N_washout = int(N_washout)
     N_gap = int(1*N_lyap)
 
@@ -1843,7 +1843,7 @@ if initiation_score_interval:
                     x_strength_pred_all[:, :, i, j]  = x_strength_pred
 
                     scores_extended = score_plumes2(x_positions_truth, x_positions_pred, N_lyap,
-                                            checkpoints=(0.5, 1.0, 1.5, 2.0, 2.5),
+                                            checkpoints=(0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5),
                                             thresholds=(1,3,5))
                     all_scores_extended[j][i] = scores_extended
                     if j == 0:

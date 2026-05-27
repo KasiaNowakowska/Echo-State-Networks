@@ -131,7 +131,12 @@ def load_data_set_TD(file, names, snapshots):
 def load_data_set_RB(file, names, snapshots):
     with h5py.File(file, 'r') as hf:
         print(hf.keys())
-        time_vals = np.array(hf['total_time_all'][:snapshots])
+        if 'total_time' in hf.keys():
+            time_vals = np.array(hf['total_time'][:snapshots])
+        elif 'total_time_all' in hf.keys():
+            time_vals = np.array(hf['total_time_all'][:snapshots])
+        else:
+            raise KeyError(f"Could not find a valid time dataset in the HDF5 file. Available keys: {list(hf.keys())}")
         
         data = np.zeros((len(time_vals), len(x), len(z), len(names)))
         
@@ -140,7 +145,10 @@ def load_data_set_RB(file, names, snapshots):
             print(name)
             print(hf[name])
             Var = np.array(hf[name])
-            data[:,:,:,index] = Var[:snapshots,:,0,:]
+            if np.shape(Var) == 4:
+                data[:,:,:,index] = Var[:snapshots,:,0,:]
+            else: 
+                data[:,:,:,index] = Var[:snapshots,:,:]
             index+=1
 
     return data, time_vals
@@ -501,7 +509,8 @@ statistics_interval = False
 initiation_interval = False
 initiation_interval2 = False
 initiation_score_interval = False
-active_thresholds = True
+active_thresholds = False
+corrections = True
 
 train_data = data_set[:int(N_washout+N_train)]
 global_stds = [np.std(train_data[..., c]) for c in range(train_data.shape[-1])]
@@ -1795,15 +1804,15 @@ if initiation_interval:
 
 if initiation_score_interval:
     #### INITIATION ####
-    init_path = output_path + '/initation_score/'
+    init_path = output_path + '/initation_score_corrections_longer/'
     if not os.path.exists(init_path):
         os.makedirs(init_path)
         print('made directory')
 
     #test_indexes = [210, 420, 555]
-    N_test   = 40                    #number of intervals in the test set
+    N_test   = 30                    #number of intervals in the test set
     N_tstart = int(N_washout + N_train)   #where the first test interval starts
-    N_intt   = 3*N_lyap             #length of each test set interval
+    N_intt   = 9*N_lyap             #length of each test set interval
     N_washout = int(N_washout)
     N_gap = int(1*N_lyap)
 
@@ -1929,7 +1938,7 @@ if initiation_score_interval:
                     #     print(scores)
 
                     scores_extended = score_plumes2(x_positions_truth, x_positions_pred, N_lyap,
-                                            checkpoints=(0.5, 1.0, 1.5, 2.0, 2.5),
+                                            checkpoints=(0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5),
                                             thresholds=(1,3,5))
                     all_scores_extended[j][i] = scores_extended
                     if j == 0:
@@ -2053,11 +2062,204 @@ if initiation_score_interval:
     with open(init_path+'/all_scores_extended.pkl', 'wb') as f:
         pickle.dump(all_scores_extended, f)
 
-    # np.save(init_path+'/x_positions_truth_all.npy', x_positions_truth_all)
-    # np.save(init_path+'/x_positions_pred_all.npy', x_positions_pred_all)
+    np.save(init_path+'/x_positions_truth_all.npy', x_positions_truth_all)
+    np.save(init_path+'/x_positions_pred_all.npy', x_positions_pred_all)
 
     np.save(init_path+'/x_strength_truth_all.npy', x_strength_truth_all)
     np.save(init_path+'/x_strength_pred_all.npy', x_strength_pred_all)
+
+if corrections:
+    init_path = output_path + '/corrections_clusters/'
+    if not os.path.exists(init_path):
+        os.makedirs(init_path)
+        print('made directory')
+
+    #test_indexes = [210, 420, 555]
+    N_test   = 40                    #number of intervals in the test set
+    N_tstart = int(N_washout + N_train)   #where the first test interval starts
+    N_intt   = 3*N_lyap             #length of each test set interval
+    N_washout = int(N_washout)
+    N_gap = int(1*N_lyap)
+
+    print('N_tstart:', N_tstart)
+    print('N_intt:', N_intt)
+    print('N_washout:', N_washout)
+
+    # #prediction horizon normalization factor and threshold
+    sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
+    threshold_ph = threshold_ph
+
+    ensemble_test = 1
+
+    ens_pred               = np.zeros((N_intt, dim, ensemble_test))
+    ens_PH                 = np.zeros((N_test, ensemble_test))
+    x_positions_truth_all  = np.zeros((N_intt, 3, N_test, ensemble_test))
+    x_positions_pred_all   = np.zeros((N_intt, 3, N_test, ensemble_test))
+    x_strength_truth_all   = np.zeros((N_intt, 3, N_test, ensemble_test))
+    x_strength_pred_all    = np.zeros((N_intt, 3, N_test, ensemble_test))
+    reconstructed_truth_all = np.zeros((N_intt, 4, N_test))
+    #reconstructed_pred_all = np.zeros((N_intt, 4, N_test, ensemble_test))
+
+    images_test_path = init_path+'/test_images/'
+    if not os.path.exists(images_test_path):
+        os.makedirs(images_test_path)
+        print('made directory')
+    metrics_test_path = init_path+'/test_metrics/'
+    if not os.path.exists(metrics_test_path):
+        os.makedirs(metrics_test_path)
+        print('made directory')
+
+    print(f"start time for data set {time_vals[0]}, index {0}")
+    print(f"end time for data set {time_vals[-1]}, index {-1}")
+
+    test_start_index = N_tstart + 0*N_gap 
+    test_end_index   = N_tstart + 39*N_gap + N_intt
+
+    all_test_data = data_set[test_start_index: test_end_index,:,:,:n_components]
+    #_, all_test_data       = inverse_POD(all_test_U[:,:n_components], pca_)
+    print(f"shape of all test data = {np.shape(all_test_data)}")
+    all_plume_features_truth         = plume_features[test_start_index  : test_end_index, :]
+    print(f"shape of all plume features truth {np.shape(all_plume_features_truth)}")
+    all_x_positions_truth, all_x_strength_truth = extract_plume_positions(all_plume_features_truth, x_domain=(0,20), max_plumes=3, threshold_predictions=False, KE_threshold=0.00005)
+    print(f"shape of all pos data = {np.shape(all_x_positions_truth)}")
+    print(f"shape of all strength data = {np.shape(all_x_strength_truth)}")
+    print(f"start time for test data {time_vals[test_start_index]}, index {test_start_index}")
+    print(f"end time for test data {time_vals[test_end_index]}, index {test_end_index}")
+
+    variables_alt = ['dudx', 'temp_vertical', 'anom_b']
+    names_alt = ['dudx', 'temp_vertical', 'anom_b']
+    data_set_alt, time_vals_alt = load_data_set_RB(input_path+'/alternative_data.h5', variables_alt, snapshots_load)
+    print('shape of alt dataset', np.shape(data_set_alt))
+    print(f"start time {time_vals_alt[0]}, index {0}")
+    print(f"end time {time_vals_alt[-51]}, index {-51}")
+    print(time_vals_alt[-50:])
+    fig, ax = plt.subplots(1)
+    ax.plot(time_vals_alt[:-50])
+    fig.savefig(images_test_path+'/timevals.png')
+
+    all_test_alt = data_set_alt[test_start_index -5000           : test_end_index -5000]
+    print(f"shape of all alt data = {np.shape(all_test_alt)}")
+    print(f"start time {time_vals_alt[test_start_index-5000]}, index {test_start_index-5000}")
+    print(f"end time {time_vals_alt[test_end_index - 5000]}, index {test_end_index - 5000}")
+
+    time_main = time_vals[test_start_index]
+    time_alt  = time_vals_alt[test_start_index - 5000]
+
+    print(f"Aligning timelines... Main: {time_main} | Alt: {time_alt}")
+    assert np.isclose(time_main, time_alt), "Timeline offset mismatch! Your variables are from different simulation times."
+
+    np.save(init_path+'/alternative_test_data.npy', all_test_alt)
+    np.save(init_path+'/all_x_positions_truth.npy', all_x_positions_truth)
+    np.save(init_path+'/all_x_strength_truth.npy', all_x_strength_truth)
+    np.save(init_path+'/all_test_data.npy', all_test_data)
+    np.save(init_path+'/test_time_vals.npy', time_vals[test_start_index:test_end_index])
+
+    formatted_cape_file = os.path.join(init_path, 'formatted_for_cape.h5')
+    print(f"\nWriting formatted master arrays directly to: {formatted_cape_file}")
+
+    q_data = all_test_data[..., 0]
+    b_data = all_test_data[..., 3]
+    t_data = all_test_alt[..., 1]
+
+    with h5py.File(formatted_cape_file, 'w') as out:
+        # Standard structural grids expected by the parallel script
+        out.create_dataset('x', data=x)
+        out.create_dataset('z', data=z)
+        out.create_dataset('total_time', data=time_vals[test_start_index:test_end_index])
+        
+        # Parallel script lookup keys
+        out.create_dataset('q_vertical', data=q_data, dtype='f')
+        out.create_dataset('b_vertical', data=b_data, dtype='f')
+        out.create_dataset('temp_vertical', data=t_data, dtype='f')
+
+    print("Formatted dataset successfully written. Ready for mpiexec!")
+
+    # for j in range(ensemble_test):
+
+    #     print('Realization    :',j+1)
+    #     all_scores[j] = {}
+    #     all_scores_extended[j] = {}
+    #     all_probs[j] = {}
+    #     truths[j]    = {}
+
+    #     #load matrices and hyperparameters
+    #     Wout     = Woutt[j].copy()
+    #     Win      = Winn[j] #csr_matrix(Winn[j])
+    #     W        = Ws[j]   #csr_matrix(Ws[j])
+    #     rho      = opt_hyp[j,0].copy()
+    #     sigma_in = opt_hyp[j,1].copy()
+    #     print('Hyperparameters:',rho, sigma_in)
+
+    #     # to store prediction horizon in the test set
+    #     PH             = np.zeros(N_test)
+    #     nrmse_error    = np.zeros((N_test, N_intt))
+
+    #     # to plot results
+    #     plot = True
+    #     Plotting = True
+    #     if plot:
+    #         n_plot = N_test
+    #         plt.rcParams["figure.figsize"] = (15,3*n_plot)
+    #         plt.figure()
+    #         plt.tight_layout()
+
+    #     #run different test intervals
+    #     for i in range(N_test):
+    #         print('test', i+1)
+    #         print(N_tstart + i*N_gap)
+    #         print('start time of test', time_vals[N_tstart + i*N_gap])
+    #         # data for washout and target in each interval
+    #         U_wash    = U[N_tstart - N_washout_val +i*N_gap : N_tstart + i*N_gap].copy()
+    #         Y_t       = U[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt].copy()
+    #         data_set_Y_t =  data_set[N_tstart + i*N_gap            : N_tstart + i*N_gap + N_intt]
+
+    #         #washout for each interval
+    #         Xa1     = open_loop(U_wash, np.zeros(N_units), sigma_in, rho)
+    #         Uh_wash = np.dot(Xa1, Wout)
+
+    #         # Prediction Horizon
+    #         Yh_t,_,Xa2        = closed_loop(N_intt-1, Xa1[-1], Wout, sigma_in, rho)
+    #         print(np.shape(Yh_t))
+    #         Y_err       = np.sqrt(np.mean((Y_t-Yh_t)**2,axis=1))/sigma_ph
+    #         PH[i]       = np.argmax(Y_err>threshold_ph)/N_lyap
+    #         if PH[i] == 0 and Y_err[0]<threshold_ph: PH[i] = N_intt/N_lyap #(in case PH is larger than interval)
+    #         ens_PH[i,j] = PH[i]
+
+    #         ##### reconstructions ####
+    #         if Data == 'RB_plume':
+    #             _, reconstructed_truth       = inverse_POD(Y_t[:,:n_components], pca_)
+    #             _, reconstructed_predictions = inverse_POD(Yh_t[:,:n_components], pca_)
+    #             plume_features_truth         = Y_t[:,n_components:]
+    #             plume_features_predictions   = Yh_t[:,n_components:]
+    #         else:
+    #             _, reconstructed_truth       = inverse_POD(Y_t, pca_)
+    #             _, reconstructed_predictions = inverse_POD(Yh_t, pca_)
+
+    #         # rescale
+    #         reconstructed_truth = ss_inverse_transform(reconstructed_truth, scaler)
+    #         reconstructed_predictions = ss_inverse_transform(reconstructed_predictions, scaler)
+
+    #         # add to dataframe
+    #         reconstructed_truth_all[:, :, i] = reconstructed_truth
+
+    #         if Data == 'RB_plume':
+    #             if plumetype == 'sincospositions':
+    #                 x_positions_truth, x_strength_truth = extract_plume_positions(plume_features_truth, x_domain=(0,20), max_plumes=3, threshold_predictions=False, KE_threshold=0.00005)
+    #                 x_positions_pred, x_strength_pred  = extract_plume_positions(plume_features_predictions, x_domain=(0,20), max_plumes=3, threshold_predictions=True, KE_threshold=0.00005)
+
+    #                 x_positions_truth_all[:, :, i, j] = x_positions_truth
+    #                 x_positions_pred_all[:, :, i, j]  = x_positions_pred
+
+    #                 x_strength_truth_all[:, :, i, j] = x_strength_truth
+    #                 x_strength_pred_all[:, :, i, j]  = x_strength_pred
+
+    # np.save(init_path+'/x_positions_truth_all.npy', x_positions_truth_all)
+    # np.save(init_path+'/x_positions_pred_all.npy', x_positions_pred_all)
+
+    # np.save(init_path+'/x_strength_truth_all.npy', x_strength_truth_all)
+    # np.save(init_path+'/x_strength_pred_all.npy', x_strength_pred_all)
+
+
 
 if initiation_interval2:
     #### INITIATION ####

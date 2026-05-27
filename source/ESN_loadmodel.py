@@ -53,7 +53,7 @@ number_of_tests = int(args['--number_of_tests'])
 
 model_path = output_path
 
-output_path = output_path + '/further_analysis/300tests005LT'
+output_path = output_path + '/further_analysis/40tests1LT/Thesis/'
 if not os.path.exists(output_path):
     os.makedirs(output_path)
     print('made directory')
@@ -142,6 +142,57 @@ def pearson_coef(original_data, reconstructed_data):
         correlations[d] = corr
     
     return correlations
+
+def lag_optimised_nrmse(original_data, reconstructed_data, max_lag, sigma_ph):
+    """
+    Lag-optimised NRMSE using the SAME normalisation as:
+        sqrt(mean((Y_t - Yh_t)^2, axis=1)) / sigma_ph
+    
+    original_data:      (T, dim)
+    reconstructed_data: (T, dim)
+    max_lag: integer, max shift
+    sigma_ph: scalar (your global normalisation factor)
+    
+    Returns:
+        best_nrmse  : minimum NRMSE across lags
+        best_lag    : lag that achieved this
+        nrmse_list  : NRMSE(lag) for all lags
+    """
+    
+    assert original_data.ndim == 2 and reconstructed_data.ndim == 2
+    T, dim = original_data.shape
+    assert reconstructed_data.shape == (T, dim)
+
+    # --- your NRMSE formula across the entire interval ---
+    def interval_nrmse(a, b):
+        # MSE across dims -> per time step
+        per_t = np.sqrt(np.mean((a - b)**2, axis=1)) / sigma_ph
+        return np.mean(per_t)  # average over time (consistent global PH approach)
+
+    best_nrmse = np.inf
+    best_lag   = 0
+    nrmse_list = []
+
+    for lag in range(-max_lag, max_lag + 1):
+        
+        if lag < 0:
+            t_true = original_data[:lag]        # 0 .. T+lag
+            t_pred = reconstructed_data[-lag:]  # -lag .. T
+        elif lag > 0:
+            t_true = original_data[lag:]        # lag .. T
+            t_pred = reconstructed_data[:-lag]  # 0 .. T-lag
+        else:
+            t_true = original_data
+            t_pred = reconstructed_data
+
+        val = interval_nrmse(t_true, t_pred)
+        nrmse_list.append(val)
+
+        if val < best_nrmse:
+            best_nrmse = val
+            best_lag   = lag
+
+    return best_nrmse, best_lag, nrmse_list
 
 def ss_transform(data, scaler):
     if data.ndim == 4: #len(time_vals), len(x), len(z), len(var)
@@ -285,7 +336,7 @@ if testing:
     N_tstart = int(N_washout+N_train)   #where the first test interval starts
     N_intt   = test_len*N_lyap             #length of each test set interval
     N_washout = int(N_washout)
-    N_gap = int(0.05*N_lyap)
+    N_gap = int(1*N_lyap)
 
     print('N_tstart:', N_tstart)
     print('N_intt:', N_intt)
@@ -293,7 +344,8 @@ if testing:
 
     # #prediction horizon normalization factor and threshold
     sigma_ph     = np.sqrt(np.mean(np.var(U,axis=1)))
-    threshold_ph = 0.05
+    threshold_ph = 0.2
+    max_lag      = 50
 
     ensemble_test = ens
 
@@ -302,6 +354,10 @@ if testing:
     #errors          = np.zeros((N_intt, N_test, ensemble_test))
     ens_PH          = np.zeros((N_test, ensemble_test))
     ens_MSE         = np.zeros((N_test, ensemble_test))
+    dtw_all         = np.zeros((N_test, ensemble_test))
+    pearson_all     = np.zeros((N_test, ensemble_test))
+    lagopt_nrmse_all = np.zeros((N_test, ensemble_test))
+    lagopt_lag_all   = np.zeros((N_test, ensemble_test))
     ens_nrmse_global= np.zeros((ensemble_test))
     ens_dtw         = np.zeros((ensemble_test))
     ens_pearson     = np.zeros((ensemble_test))
@@ -362,11 +418,20 @@ if testing:
             print('DTW', DTW_val)
             pc           = pearson_coef(Y_t, Yh_t)
             mean_pc      = np.mean(pc)
+            best_nrmse, lag_val, _ = lag_optimised_nrmse(Y_t, Yh_t, max_lag, sigma_ph)
+
+            lagopt_nrmse_all[i, j] = best_nrmse
+            lagopt_lag_all[i, j]   = lag_val
 
 
             ens_nrmse_global[j] += nrmse_global
             ens_dtw[j]          += DTW_val
             ens_pearson[j]      += mean_pc
+            
+            dtw_all[i,j]     = DTW_val
+            pearson_all[i,j] = mean_pc 
+
+
 
             if plot:
                 #left column has the washout (open-loop) and right column the prediction (closed-loop)
@@ -424,83 +489,87 @@ if testing:
     #np.save(output_path+'/errors.npy', errors)
     np.save(output_path+'/ens_pred.npy', ens_pred)
     np.save(output_path+'/truth.npy', true_data)
+    np.save(output_path+'/lagopt_nrmse_all.npy', lagopt_nrmse_all)
+    np.save(output_path+'/lagopt_lag_all.npy', lagopt_lag_all)
+    np.save(output_path+'/dtw_all.npy', dtw_all)
+    np.save(output_path+'/pearson_all.npy', pearson_all)  
 
-    # Full path for saving the file
-    output_file_ALL = 'ESN_test_metrics_all.json' 
+    # # Full path for saving the file
+    # output_file_ALL = 'ESN_test_metrics_all.json' 
 
-    output_path_met_ALL = os.path.join(output_path, output_file_ALL)
+    # output_path_met_ALL = os.path.join(output_path, output_file_ALL)
 
-    metrics_ens_ALL = {
-    "threshold PH": threshold_ph,
-    "mean PH": np.mean(ens_PH),
-    "lower PH": np.round(np.quantile(ens_PH, 0.75), 5),
-    "uppper PH": np.round(np.quantile(ens_PH, 0.25),5),
-    "median PH": np.round(np.median(ens_PH),5),
-    "mean nrmse global": np.sum(ens_nrmse_global)/(N_test*ensemble_test),
-    "Pearson Coeff": np.sum(ens_pearson)/(N_test*ensemble_test),
-    "DTW": np.sum(ens_dtw)/(N_test*ensemble_test),
-    "mean MSE": np.sum(Mean)/(N_test*ensemble_test),
-    }
+    # metrics_ens_ALL = {
+    # "threshold PH": threshold_ph,
+    # "mean PH": np.mean(ens_PH),
+    # "lower PH": np.round(np.quantile(ens_PH, 0.75), 5),
+    # "uppper PH": np.round(np.quantile(ens_PH, 0.25),5),
+    # "median PH": np.round(np.median(ens_PH),5),
+    # "mean nrmse global": np.sum(ens_nrmse_global)/(N_test*ensemble_test),
+    # "Pearson Coeff": np.sum(ens_pearson)/(N_test*ensemble_test),
+    # "DTW": np.sum(ens_dtw)/(N_test*ensemble_test),
+    # "mean MSE": np.sum(Mean)/(N_test*ensemble_test),
+    # }
 
-    with open(output_path_met_ALL, "w") as file:
-        json.dump(metrics_ens_ALL, file, indent=4)
+    # with open(output_path_met_ALL, "w") as file:
+    #     json.dump(metrics_ens_ALL, file, indent=4)
 
-    if Plotting:
-        for i in range(N_test):
-            fig, ax =plt.subplots(2, figsize=(12,6), sharex=True)
-            xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
-            mean_ens = np.mean(ens_pred[:,:,i,:], axis=-1)
-            median_ens = np.percentile(ens_pred[:,:,i,:], 50, axis=-1)
-            lower = np.percentile(ens_pred[:,:,i,:], 5, axis=-1)
-            upper = np.percentile(ens_pred[:,:,i,:], 95, axis=-1)
-            print('shape of mean:', np.shape(mean_ens))
-            #print('shape of truth:', np.shape(true_data[:,v,i]))
-            for v in range(2):
-                ax[v].plot(xx, true_data[:,v,i], color='tab:blue', label='truth')
-                ax[v].plot(xx, median_ens[:,v], color='tab:orange', label='ESN median prediction')
-                ax[v].fill_between(xx, lower[:,v], upper[:,v], color='tab:orange', alpha=0.3, label='ESN 90% confidence interval')
-                ax[v].grid()
-                ax[v].legend()
-            ax[1].set_xlabel('Lyapunov Time')
-            ax[0].set_ylabel('KE')
-            ax[1].set_ylabel('q')
-            fig.savefig(output_path+'/ens_pred_median_test%i.png' % i)
-            plt.close()
+    # if Plotting:
+    #     for i in range(N_test):
+    #         fig, ax =plt.subplots(2, figsize=(12,6), sharex=True)
+    #         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
+    #         mean_ens = np.mean(ens_pred[:,:,i,:], axis=-1)
+    #         median_ens = np.percentile(ens_pred[:,:,i,:], 50, axis=-1)
+    #         lower = np.percentile(ens_pred[:,:,i,:], 5, axis=-1)
+    #         upper = np.percentile(ens_pred[:,:,i,:], 95, axis=-1)
+    #         print('shape of mean:', np.shape(mean_ens))
+    #         #print('shape of truth:', np.shape(true_data[:,v,i]))
+    #         for v in range(2):
+    #             ax[v].plot(xx, true_data[:,v,i], color='tab:blue', label='truth')
+    #             ax[v].plot(xx, median_ens[:,v], color='tab:orange', label='ESN median prediction')
+    #             ax[v].fill_between(xx, lower[:,v], upper[:,v], color='tab:orange', alpha=0.3, label='ESN 90% confidence interval')
+    #             ax[v].grid()
+    #             ax[v].legend()
+    #         ax[1].set_xlabel('Lyapunov Time')
+    #         ax[0].set_ylabel('KE')
+    #         ax[1].set_ylabel('q')
+    #         fig.savefig(output_path+'/ens_pred_median_test%i.png' % i)
+    #         plt.close()
 
-    avg_PH = np.mean(ens_PH, axis=0)
-    np.save(output_path+'/avg_PH.npy', avg_PH)
-    fig, ax =plt.subplots(1, figsize=(3,6), constrained_layout=True)
-    #np.save(output_path+'/avg_PH{:.2f}.npy'.format(element), avg_PH[:,index])
-    # Create a violin plot
-    ax.violinplot(ens_PH[:,:].flatten(), showmeans=False, showmedians=True)
-    ax.set_ylabel('PH')
-    fig.savefig(output_path+'/violin_plot_flatten_test_{:.1f}.png'.format(N_test))
+    # avg_PH = np.mean(ens_PH, axis=0)
+    # np.save(output_path+'/avg_PH.npy', avg_PH)
+    # fig, ax =plt.subplots(1, figsize=(3,6), constrained_layout=True)
+    # #np.save(output_path+'/avg_PH{:.2f}.npy'.format(element), avg_PH[:,index])
+    # # Create a violin plot
+    # ax.violinplot(ens_PH[:,:].flatten(), showmeans=False, showmedians=True)
+    # ax.set_ylabel('PH')
+    # fig.savefig(output_path+'/violin_plot_flatten_test_{:.1f}.png'.format(N_test))
 
-    np.save(output_path+'/ens_PH.npy', ens_PH)
-    np.save(output_path+'/ens_MSE.npy', ens_MSE)
-    if plot:
-        N_tests_list = np.arange(1,N_test+1,1)
-        med_PH  = np.zeros((N_test))
-        lower_PH = np.zeros((N_test))
-        upper_PH = np.zeros((N_test))
-        PH_vals_all = []
-        for i in range(N_test):
-            PH_vals = ens_PH[i,:]
-            PH_vals_all.append(min_f)
+    # np.save(output_path+'/ens_PH.npy', ens_PH)
+    # np.save(output_path+'/ens_MSE.npy', ens_MSE)
+    # if plot:
+    #     N_tests_list = np.arange(1,N_test+1,1)
+    #     med_PH  = np.zeros((N_test))
+    #     lower_PH = np.zeros((N_test))
+    #     upper_PH = np.zeros((N_test))
+    #     PH_vals_all = []
+    #     for i in range(N_test):
+    #         PH_vals = ens_PH[i,:]
+    #         PH_vals_all.append(min_f)
 
-            med_PH[i]   = np.median(minm_f_vals)
-            lower_PH[i] = np.percentile(minm_f_vals, 25)
-            upper_PH[i] = np.percentile(minm_f_vals, 75)
-        fig, ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
-        ax.plot(N_tests_list, med_PH, color='tab:orange')
-        ax.plot(N_tests_list, lower_PH, color='tab:orange', linestyle='--')
-        ax.plot(N_tests_list, upper_PH, color='tab:orange', linestyle='--')
-        ax.fill_between(N_tests_list, lower_PH, upper_PH, color='tab:orange', alpha=0.2)
-        ax.grid()
-        ax.set_xlabel('$N_{tests}$', fontsize=14)
-        ax.set_ylabel('$\overline{PH}$', fontsize=14)
-        ax.tick_params(axis='both', which='major', labelsize=12)
-        fig.savefig(output_path+'/startingpoints.png')
+    #         med_PH[i]   = np.median(minm_f_vals)
+    #         lower_PH[i] = np.percentile(minm_f_vals, 25)
+    #         upper_PH[i] = np.percentile(minm_f_vals, 75)
+    #     fig, ax = plt.subplots(1, figsize=(12,3), tight_layout=True)
+    #     ax.plot(N_tests_list, med_PH, color='tab:orange')
+    #     ax.plot(N_tests_list, lower_PH, color='tab:orange', linestyle='--')
+    #     ax.plot(N_tests_list, upper_PH, color='tab:orange', linestyle='--')
+    #     ax.fill_between(N_tests_list, lower_PH, upper_PH, color='tab:orange', alpha=0.2)
+    #     ax.grid()
+    #     ax.set_xlabel('$N_{tests}$', fontsize=14)
+    #     ax.set_ylabel('$\overline{PH}$', fontsize=14)
+    #     ax.tick_params(axis='both', which='major', labelsize=12)
+    #     fig.savefig(output_path+'/startingpoints.png')
 
 
 
@@ -673,7 +742,7 @@ if validation:
         json.dump(metrics_ens_ALL, file, indent=4)
 
     for i in range(N_test):
-        fig, ax =plt.subplots(2, figsize=(12,6), sharex=True, tight_layout=True)
+        fig, ax =plt.subplots(2, figsize=(12,6), sharex=True, constrained_layout=True)
         xx = np.arange(Y_t[:,-2].shape[0])/N_lyap
         mean_ens = np.mean(ens_pred[:,:,i,:], axis=-1)
         median_ens = np.percentile(ens_pred[:,:,i,:], 50, axis=-1)
@@ -682,16 +751,17 @@ if validation:
         print('shape of mean:', np.shape(mean_ens))
         #print('shape of truth:', np.shape(true_data[:,v,i]))
         for v in range(2):
-            ax[v].plot(xx, true_data[:,v,i], color='tab:blue', label='truth')
+            ax[v].plot(xx, true_data[:,v,i], color='tab:blue', label='Truth')
             ax[v].plot(xx, median_ens[:,v], color='tab:orange', label='ESN median prediction')
             ax[v].fill_between(xx, lower[:,v], upper[:,v], color='tab:orange', alpha=0.3, label='ESN 90% confidence interval')
             ax[v].grid()
-            ax[v].legend(fontsize=12)
-            ax[v].tick_params(axis='both', which='major', labelsize=12)
-        ax[1].set_xlabel('LT', fontsize=14)
-        ax[0].set_ylabel(r'$\overline{KE}$', fontsize=14)
-        ax[1].set_ylabel(r'$\overline{q}$', fontsize=14)
+            ax[v].tick_params(axis='both', which='major', labelsize=14)
+        ax[1].legend(fontsize=14)
+        ax[1].set_xlabel('LT', fontsize=16)
+        ax[0].set_ylabel(r'$\overline{\mathrm{KE}}$', fontsize=16)
+        ax[1].set_ylabel(r'$\overline{q}$', fontsize=16)
         fig.savefig(output_path+'/ens_pred_median_test%i.png' % i)
+        fig.savefig(output_path+'/ens_pred_median_test%i.pdf' % i, facecolor='white', transparent=False, format='pdf', dpi=300)
         plt.close()
 
     avg_PH = np.mean(ens_PH, axis=0)
