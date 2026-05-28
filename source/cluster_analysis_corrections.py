@@ -799,17 +799,7 @@ def stats_to_dataframe(stats_dict, k):
 # print("\n🎉 All wave strength line graphs successfully compiled!")
 
 # ---------- CODE PART 3 -------------
-#POD
-input_path_positions = 'Ra2e8/POD_ESN/Thesis/64modes/Run_n_units1000_ensemble5_normalisationon_washout3_config4101/GP36_4/further_analysis/initation_score'
-
-x_positions_pred_all = np.load(input_path_positions+'/x_positions_pred_all.npy')
-x_positions_truth_all = np.load(input_path_positions+'/x_positions_truth_all.npy')
-
-print(f"shape of x_positions_pred_all {np.shape(x_positions_pred_all)}")
-
-master_export_path = input_path_testdata+'/test_metrics/actual_composite_records.pkl'
-composite_records_all = joblib.load(master_export_path)
-
+# --------- Functions ----------------
 
 def find_initiations_truth_clustered(x_positions_truth, test_idx, composite_records_all, x_min=0, x_max=20):
     """
@@ -1017,71 +1007,231 @@ def match_initiations_hits_clustered(all_pred_inits, true_inits, delta_t=1, delt
 
     return true_no_inits, pred_no_inits, hits_by_cluster, false_alarms, misses_by_cluster
 
-# Initialize metrics tracking lists across the 40 windows
-all_ens_no_true_inits = []
-all_ens_no_pred_inits = []
-all_ens_falsealarms = []
 
-# Separate lists to track hits and misses for each individual cluster archetype
-cluster_hits = {0: [], 1: [], 2: []}
-cluster_misses = {0: [], 1: [], 2: []}
-
-delta_t = 1
-delta_x = 1
-
-for test_idx in range(40):
-    all_ens_x_init_pred = []
-    x_init_truth_old = find_initiations_truth(x_positions_truth_all[:,:,test_idx,0])
-    x_init_truth_new = find_initiations_truth_clustered(x_positions_truth_all[:,:,test_idx,0], test_idx, composite_records_all, x_min=0, x_max=20)
-    print(f"old init: {x_init_truth_old}")
-    print(f"new init: {x_init_truth_new}")
-
-    for ens_idx in range(5):
-        x_init_pred  = find_initiations_pred(x_positions_pred_all[:,:,test_idx,ens_idx], x_positions_truth_all[:,:,test_idx,ens_idx])
-        all_ens_x_init_pred.append(x_init_pred)
-
-    # Run your updated matching function
-    true_no_inits, pred_no_inits, hits_by_c, false_alarms, misses_by_c = match_initiations_hits_clustered(
-        all_ens_x_init_pred, 
-        x_init_truth_new, 
-        delta_t=delta_t, 
-        delta_x=delta_x
-    )
-
-    # Track global totals
-    all_ens_no_true_inits.append(true_no_inits)
-    all_ens_no_pred_inits.append(pred_no_inits)
-    all_ens_falsealarms.append(false_alarms)
+def prf_initiations_clustered(x_positions_truth_all, x_positions_pred_all, composite_records_all, delta_t=1, delta_x=1):
+    """
+    Evaluates ensemble plume initiation forecasts against truth arrays across 40 test windows.
+    Matches true initiations to their respective physical archetypes using composite_records_all.
     
-    # Track independent breakdown lists per cluster type
+    Parameters
+    ----------
+    x_positions_truth_all : ndarray
+        True plume tracking arrays across test and ensemble spaces.
+    x_positions_pred_all : ndarray
+        Predicted plume tracking arrays across test and ensemble spaces.
+    composite_records_all : list of dicts
+        The database containing 'test_interval_id', 'lead_time', 'true_x', and 'cluster'.
+    delta_t : float, optional
+        Temporal matching tolerance window (local index steps). Default is 1.
+    delta_x : float, optional
+        Spatial matching tolerance window (grid units). Default is 1.
+        
+    Returns
+    -------
+    global_summary : dict
+        Total aggregated counts of true entries, assertions, and false alarms.
+    cluster_metrics : dict
+        A nested dictionary mapping cluster IDs (0, 1, 2) to their respective 
+        calculated Precision, Recall, and F1 scores.
+    """
+    total_true_counted = 0
+    total_pred_counted = 0
+    global_false_alarms = 0
+    
+    global_hits_by_cluster = {0: 0, 1: 0, 2: 0}
+    global_misses_by_cluster = {0: 0, 1: 0, 2: 0}
+    
+    # Process each of the 40 independent forecast intervals
+    for test_idx in range(40):
+        # 1. Gather true initiations tagged with their correct cluster index
+        x_init_truth = find_initiations_truth_clustered(
+            x_positions_truth_all[:, :, test_idx, 0], 
+            test_idx=test_idx, 
+            composite_records_all=composite_records_all,
+            x_min=0, 
+            x_max=20
+        )
+        
+        # 2. Gather predictions across all 5 ensemble paths
+        all_ens_x_init_pred = []
+        for ens_idx in range(5):
+            x_init_pred = find_initiations_pred(
+                x_positions_pred_all[:, :, test_idx, ens_idx], 
+                x_positions_truth_all[:, :, test_idx, ens_idx]
+            )
+            all_ens_x_init_pred.append(x_init_pred)
+
+        # 3. Compute spatiotemporal neighborhood matching within this window
+        true_no_inits, pred_no_inits, hits_by_c, false_alarms, misses_by_c = match_initiations_hits_clustered(
+            all_ens_x_init_pred, 
+            x_init_truth, 
+            delta_t=delta_t, 
+            delta_x=delta_x,
+            x_min=0,
+            x_max=20
+        )
+        
+        # 4. Accumulate baseline structural performance counts
+        global_false_alarms += false_alarms
+        total_pred_counted += pred_no_inits
+        total_true_counted += true_no_inits
+        
+        for c in [0, 1, 2]:
+            global_hits_by_cluster[c] += hits_by_c[c]
+            global_misses_by_cluster[c] += misses_by_c[c]
+
+    # --- SUMMARY METRICS COMPUTATION ENGINE ---
+    total_global_hits = sum(global_hits_by_cluster.values())
+    
+    global_summary = {
+        'total_true': total_true_counted,
+        'total_predicted': total_pred_counted,
+        'global_hits': total_global_hits,
+        'global_false_alarms': global_false_alarms
+    }
+    
+    cluster_metrics = {}
+    
     for c in [0, 1, 2]:
-        cluster_hits[c].append(hits_by_c[c])
-        cluster_misses[c].append(misses_by_c[c])
-    
-# --- SUMMARY SCORE RECAP OUTPUT GENERATION ---
-print("="*60)
-print(f"GLOBAL RESULTS MATRIX SUMMARY (delta_t={delta_t}, delta_x={delta_x})")
-print(f"Total True Inits: {sum(all_ens_no_true_inits)} | Total Predictions Assessed: {sum(all_ens_no_pred_inits)}")
-print(f"Global False Alarms: {sum(all_ens_falsealarms)}")
-print("="*60)
+        total_h = global_hits_by_cluster[c]
+        total_m = global_misses_by_cluster[c]
+        
+        # Recall (Capture accuracy for this physical plume archetype)
+        recall_c = total_h / (total_h + total_m) if (total_h + total_m) > 0 else 0.0
+        
+        # Contribution Precision (Proportion of total positive assertions belonging to this cluster hit category)
+        precision_c = total_h / (total_global_hits + global_false_alarms) if (total_global_hits + global_false_alarms) > 0 else 0.0
+        
+        # Harmonic Mean F1 Score
+        f1_c = 2 * precision_c * recall_c / (precision_c + recall_c) if (precision_c + recall_c) > 0 else 0.0
+        
+        cluster_metrics[c] = {
+            'hits': total_h,
+            'misses': total_m,
+            'recall': recall_c,
+            'precision': precision_c,
+            'f1_score': f1_c
+        }
+        
+    return global_summary, cluster_metrics
 
-for c in [0, 1, 2]:
-    total_h = sum(cluster_hits[c])
-    total_m = sum(cluster_misses[c])
-    global_fa = sum(all_ens_falsealarms)
-    global_h = sum(sum(cluster_hits[i]) for i in [0, 1, 2])
+# ----------- CODE -------------------
+N_lyap = 15
+deltas_t = [1, 3, 5, 9, 12, 15]
+deltas_t_LT = [tv/N_lyap for tv in deltas_t]
+deltas_x = [1, 2, 3, 4, 5, 6]
+
+# --- DEFINE PATHS FOR BOTH ARCHITECTURES ---
+paths_config = {
+    'POD-ESN': {
+        'positions': 'Ra2e8/POD_ESN/Thesis/64modes/Run_n_units1000_ensemble5_normalisationon_washout3_config4101/GP36_4/further_analysis/initation_score',
+        'records': 'Ra2e8/POD_ESN/Thesis/64modes/Run_n_units1000_ensemble5_normalisationon_washout3_config4101/GP36_4/further_analysis/corrections_clusters/test_metrics/actual_composite_records.pkl'
+    },
+    'CAE-ESN': {
+        'positions': 'Ra2e8/CAE_ESN/Thesis/LS64/Run_n_units1000_ensemble5_normalisationon_washout3_config8002/GP36_4/further_analysis/initation_score',
+        'records': 'Ra2e8/POD_ESN/Thesis/64modes/Run_n_units1000_ensemble5_normalisationon_washout3_config4101/GP36_4/further_analysis/corrections_clusters/test_metrics/actual_composite_records.pkl'
+    }
+}
+
+# Master structural containers to house independent metric sweeps
+all_models_trackers = {
+    'POD-ESN': {c: {dx: {'recall': []} for dx in deltas_x} for c in [0, 1, 2]},
+    'CAE-ESN': {c: {dx: {'recall': []} for dx in deltas_x} for c in [0, 1, 2]}
+}
+
+# --- DATA HARVESTING EXECUTION LOOP ---
+for model_name, paths in paths_config.items():
+    print(f"Processing evaluation metrics for {model_name}...")
     
-    # Recall (Capture accuracy for this physical plume archetype)
-    recall_c = total_h / (total_h + total_m) if (total_h + total_m) > 0 else 0
+    # Load model-specific arrays and tracking files
+    x_positions_pred_all = np.load(paths['positions'] + '/x_positions_pred_all.npy')
+    x_positions_truth_all = np.load(paths['positions'] + '/x_positions_truth_all.npy')
+    composite_records_all = joblib.load(paths['records'])
     
-    # Precision Contribution (Proportion of total positive assertions belonging to this cluster hit category)
-    precision_c = total_h / (global_h + global_fa) if (global_h + global_fa) > 0 else 0
-    
-    f1_c = 2 * precision_c * recall_c / (precision_c + recall_c) if (precision_c + recall_c) > 0 else 0
-    
-    print(f"Cluster Profile Type {c+1} Performance Metrics:")
-    print(f"  -> Total Caught Hits: {total_h} | Total Missed Plumes: {total_m}")
-    print(f"  -> Conditional Archetype Recall  (R_I): {recall_c:.4f}")
-    print(f"  -> Contribution System Precision (P_I): {precision_c:.4f}")
-    print(f"  -> Calculated Harmonic F1-Score Value  : {f1_c:.4f}")
-    print("-"*60)
+    # Run the spatiotemporal grid tolerance parameter sweep
+    for dt in deltas_t:
+        for dx in deltas_x:
+            summary, metrics = prf_initiations_clustered(
+                x_positions_truth_all, 
+                x_positions_pred_all, 
+                composite_records_all, 
+                delta_t=dt, 
+                delta_x=dx
+            )
+            
+            # Store isolated recall metrics into our master model dictionary
+            for c in [0, 1, 2]:
+                all_models_trackers[model_name][c][dx]['recall'].append(metrics[c]['recall'])
+
+print("Data harvesting complete. Generating visual plots...")
+
+# --- GENERATE THE MODEL COMPARISON RECALL PLOT ---
+dxs = [1,3,5]
+#FIXED_DX = 5    
+fig, axees = plt.subplots(3, 3, figsize=(12,9), sharey=True, sharex=True, constrained_layout=True)   
+for index, FIXED_DX in enumerate(dxs):
+          
+    axes = axees[index, :]
+
+    panel_titles = [
+        'Cluster 1', 
+        'Cluster 2', 
+        'Cluster 3'
+    ]
+
+    # Formatting configurations to map model lines elegantly
+    model_styles = {
+        'POD-ESN': {'color': '#1f77b4', 'marker': 'o', 'linestyle': '-'},
+        'CAE-ESN': {'color': '#ff7f0e', 'marker': 's', 'linestyle': '--'}
+    }
+
+    # Draw 1 panel per isolated physical plume cluster archetype
+    for c in [0, 1, 2]:
+        ax = axes[c]
+        
+        # Plot line trajectory for POD-ESN
+        ax.plot(
+            deltas_t_LT, 
+            all_models_trackers['POD-ESN'][c][FIXED_DX]['recall'], 
+            label='POD-ESN',
+            color=model_styles['POD-ESN']['color'],
+            marker=model_styles['POD-ESN']['marker'],
+            linestyle=model_styles['POD-ESN']['linestyle'],
+            linewidth=2,
+            markersize=6
+        )
+        
+        # Plot line trajectory for CAE-ESN
+        ax.plot(
+            deltas_t_LT, 
+            all_models_trackers['CAE-ESN'][c][FIXED_DX]['recall'], 
+            label='CAE-ESN',
+            color=model_styles['CAE-ESN']['color'],
+            marker=model_styles['CAE-ESN']['marker'],
+            linestyle=model_styles['CAE-ESN']['linestyle'],
+            linewidth=2,
+            markersize=6
+        )
+        
+        if index ==0 :
+            ax.set_title(panel_titles[c], fontsize=14, fontweight='bold')
+        if index ==2:
+            ax.set_xlabel(r"$\delta t$ (LTs)", fontsize=14)
+        
+        if c == 0:
+            ax.set_ylabel(f"$R_c$ ($\delta x = {FIXED_DX}$)", fontsize=14)
+            
+        ax.grid(True, linestyle='--', alpha=0.5)
+        ax.set_xlim(min(deltas_t_LT) - 0.05, max(deltas_t_LT) + 0.05)
+        ax.set_ylim(-0.05, 1.05)
+
+        ax.tick_params(axis='both', which='major', labelsize=12)
+
+# Append clean single legend outside the 3rd panel bounds
+axees[0,2].legend(loc='upper left', frameon=True, fontsize=12)
+
+
+# Save image file to the POD corrections directory path
+output_images_path = paths_config['POD-ESN']['positions'].replace('initation_score', 'corrections_clusters/test_images/')
+fig.savefig(output_images_path + f"/cluster_Recall_POD_vs_CAE_dx_1_3_5.png", dpi=300)
+print(f"Saved direct architecture comparison visualization to: {output_images_path}")
