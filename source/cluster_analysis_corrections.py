@@ -550,164 +550,211 @@ def stats_to_dataframe(stats_dict, k):
 # print(f"Saved portable file to:   {export_file_path}")
 
 # --------------- CODE PART 2 ----------------------------
-# master_export_path = input_path_testdata+'/test_metrics/actual_composite_records.pkl'
-# composite_records_all = joblib.load(master_export_path)
-# images_path = input_path_testdata+'/test_images/'
+master_export_path = input_path_testdata+'/test_metrics/actual_composite_records.pkl'
+composite_records_all = joblib.load(master_export_path)
+images_path = input_path_testdata+'/test_images/'
 
-# print(f"Successfully loaded {len(composite_records_all)} total matched records")
+print(f"Successfully loaded {len(composite_records_all)} total matched records")
 
-# # View the first record in the database
-# sample_record = composite_records_all[0]
-# print("\n --- INSPECTING SINGLE RECORD [0] ---")
-# print(f"Assigned Cluster: {sample_record['cluster']}")
-# print(f"Model Lead Time : {sample_record['lead_time']} steps")
-# print(f"True Time (t0)  : {sample_record['true_time']}")
-# print(f"True X-coord    : {sample_record['true_x']}")
-# print(f"Extracted dudx Shape: {sample_record['dudx'].shape}") # Expected: (20, 64)
+# View the first record in the database
+sample_record = composite_records_all[0]
+print("\n --- INSPECTING SINGLE RECORD [0] ---")
+print(f"Assigned Cluster: {sample_record['cluster']}")
+print(f"Model Lead Time : {sample_record['lead_time']} steps")
+print(f"True Time (t0)  : {sample_record['true_time']}")
+print(f"True X-coord    : {sample_record['true_x']}")
+print(f"Extracted dudx Shape: {sample_record['dudx'].shape}") # Expected: (20, 64)
 
-# n_time_steps, n_x_points = sample_record['dudx'].shape  # Shoud extract (20, 64)
+n_time_steps, n_x_points = sample_record['dudx'].shape  # Shoud extract (20, 64)
 
-# dt = 2.0          # The cadence inside the neighborhood slice (dt=1)
-# dx = 20.0 / 256.0 # Horizontal grid cell resolution spacing
+dt = 2.0          # The cadence inside the neighborhood slice (dt=1)
+dx = 20.0 / 256.0 # Horizontal grid cell resolution spacing
 
-# # Center axes so (0,0) marks the exact initiation focus point
-# time_rel = (np.arange(n_time_steps) - 16) * dt 
-# dist_rel = (np.arange(n_x_points) - (n_x_points // 2)) * dx
+# Center axes so (0,0) marks the exact initiation focus point
+time_rel = (np.arange(n_time_steps) - 16) * dt 
+dist_rel = (np.arange(n_x_points) - (n_x_points // 2)) * dx
 
-# min_lt, max_lt = 30, 45
-# LT = 15
+min_lt, max_lt = 15, 29
+LT = 15
 
-# print(f"Processing Lead Time window: {min_lt/LT} to {max_lt/LT} LTs...")
+print(f"Processing Lead Time window: {min_lt/LT} to {max_lt/LT} LTs...")
 
-# cluster_means = {}
-# global_max_val = 0.0
+cluster_means_dudx = {}
+cluster_means_q = {}
+cluster_means_KE = {}
+global_max_dudx = 0.0
 
-# for i in range(3):
-#     # Select slices that match BOTH the cluster ID and the targeted lead time frame
-#     stack_slices = [
-#         rec['dudx'] for rec in composite_records_all 
-#         if rec['cluster'] == i and min_lt <= rec['lead_time'] <= max_lt
-#     ]
+for i in range(3):
+    # Select slices that match BOTH the cluster ID and the targeted lead time frame
+    stack_dudx = [rec['dudx'] for rec in composite_records_all if rec['cluster'] == i and min_lt <= rec['lead_time'] <= max_lt]
+    stack_q    = [rec['global_q'] for rec in composite_records_all if rec['cluster'] == i and min_lt <= rec['lead_time'] <= max_lt]
+    stack_KE   = [rec['global_KE'] for rec in composite_records_all if rec['cluster'] == i and min_lt <= rec['lead_time'] <= max_lt]
     
-#     if len(stack_slices) > 0:
-#         # Calculate the nan-safe mean structure for this specific cluster
-#         mean_profile = np.nanmean(np.array(stack_slices), axis=0)
-#         cluster_means[i] = mean_profile
+    if len(stack_dudx) > 0:
+        # Calculate nan-safe composite structures
+        cluster_means_dudx[i] = np.nanmean(np.array(stack_dudx), axis=0)
+        cluster_means_q[i]    = np.nanmean(np.array(stack_q), axis=0)
+        cluster_means_KE[i]   = np.nanmean(np.array(stack_KE), axis=0)
         
-#         # Track the absolute maximum to normalize your symmetric color bounds
-#         cluster_max = np.nanmax(np.abs(mean_profile))
-#         if cluster_max > global_max_val:
-#             global_max_val = cluster_max
-#     else:
-#         cluster_means[i] = None
+        # Track maximum limits to bound the symmetric pcolormesh norm
+        cluster_max = np.nanmax(np.abs(cluster_means_dudx[i]))
+        if cluster_max > global_max_dudx:
+            global_max_dudx = cluster_max
+    else:
+        cluster_means_dudx[i] = None
+        cluster_means_q[i]    = None
+        cluster_means_KE[i]   = None
 
-# if global_max_val == 0.0:
-#     global_max_val = 1.0
-#     print("Warning: No plumes matched this lead time criteria across any cluster.")
-# print(f"Global symmetric limit calculated: ±{global_max_val:.4f}")
+if global_max_dudx == 0.0:
+    global_max_dudx = 1.0
+    print("Warning: No plumes matched this lead time criteria across any cluster.")
+print(f"Global symmetric limit calculated: ±{global_max_dudx:.4f}")
 
-# norm = SymLogNorm(linthresh=0.005, linscale=1, vmin=-global_max_val, vmax=global_max_val, base=10)
+norm = SymLogNorm(linthresh=0.005, linscale=1, vmin=-global_max_dudx, vmax=global_max_dudx, base=10)
 
-# labs_top = ['(a)', '(b)', '(c)']
-# fig, ax = plt.subplots(1, 3, figsize=(15, 4), sharey=True, tight_layout=True)
+# Setup 2x3 Figure matrix canvas
+labs_labels = [['(a)', '(b)', '(c)'], ['(d)', '(e)', '(f)']]
+cluster_colors = {0: 'tab:orange', 1: 'tab:green', 2: 'tab:purple'}
+cluster_titles = ['Cluster 1', 'Cluster 2', 'Cluster 3']
 
-# for i in range(3):
-#     # Re-verify the exact slice list for counting purposes
-#     stack_slices = [
-#         rec['dudx'] for rec in composite_records_all 
-#         if rec['cluster'] == i and min_lt <= rec['lead_time'] <= max_lt
-#     ]
-#     n_plumes = len(stack_slices)
+fig, axs = plt.subplots(2, 3, figsize=(18, 9), tight_layout=True)
 
-#     composite_mean_filtered = cluster_means[i]
+for i in range(3):
+    # Recalculate event population counts for specific headers
+    n_plumes = len([rec for rec in composite_records_all if rec['cluster'] == i and min_lt <= rec['lead_time'] <= max_lt])
     
-#     if composite_mean_filtered is not None:
-#         # Render the spatial gradient structure using the global logarithmic norm
-#         im = ax[i].pcolormesh(dist_rel, time_rel, composite_mean_filtered, 
-#                               shading='nearest', 
-#                               cmap='RdBu_r',
-#                               rasterized=True, 
-#                               norm=norm)
-#     else:
-#         # Fill with a gray placeholder background if a cluster has zero events
-#         ax[i].patch.set_facecolor('lightgray')
-#         ax[i].text(0.5, 0.5, 'No Event Slices Matched', 
-#                    transform=ax[i].transAxes, ha='center', va='center')
-#         continue
-
-#     # Add focus crosshair markers at the initiation pivot point
-#     ax[i].scatter(0, 0, color='black', marker='x', s=200, linewidths=2, zorder=5, label='Initiation')
-#     ax[i].axhline(0, color='black', linestyle=':', alpha=0.5)
-#     ax[i].axvline(0, color='black', linestyle=':', alpha=0.5)
-
-#     # Label styling and axis boundaries
-#     ax[i].set_xlabel('Relative Distance', fontsize=16)
-#     ax[i].text(0.02, 0.98, labs_top[i], transform=ax[i].transAxes, fontsize=16, fontweight='bold', va='top')
-#     ax[i].set_ylim(-30, 4)
-#     ax[i].tick_params(axis='both', which='major', labelsize=14)
-#     ax[i].set_title(f"Cluster {i+1} ($n={n_plumes}$)", fontsize=14, pad=10)
-
-# # Build and append a single coordinated global colorbar to axis pane 2
-# cb = fig.colorbar(im, ax=ax[2], pad=0.02)
-# cb.set_label(r'Mean Convergence $\partial u / \partial x$', fontsize=14)
-# cb.ax.tick_params(labelsize=12)
-
-# # Set common shared Y-axis tracking descriptor label
-# ax[0].set_ylabel('Relative Time', fontsize=16)
-
-# # Export the high-res figure asset for presentation/thesis incorporation
-# fig.savefig(images_path+f"/actual_ClusterAnalysis_LT_{min_lt}-{max_lt}.png", facecolor='white', transparent=False, dpi=300)
-
-# print(f"Vector composite plot successfully saved")
-# #plt.show()
-
-# # Define your three lead-time windows
-# lt_windows = [
-#     (0, 14, "Short Lead Times"),
-#     (15, 29, "Mid Lead Times"),
-#     (30, 44, "Long Lead Times")
-# ]
-
-# print("=" * 65)
-# print("     VALIDATION TRACKER: NON-NAN DATA STEPS PER REGIME")
-# print("=" * 65)
-
-# for min_lt, max_lt, label in lt_windows:
-#     before_counts = []
-#     after_counts = []
-#     total_events = 0
+    ax_top = axs[0, i]
+    composite_mean_filtered = cluster_means_dudx[i]
     
-#     for rec in composite_records_all:
-#         if min_lt <= rec['lead_time'] <= max_lt:
-#             total_events += 1
-#             # rec['dudx'] shape is (20, 64)
-#             # Row index 16 is t0 (initiation). 
-#             # Rows 0 to 15 are BEFORE init (16 steps total)
-#             # Rows 16 to 19 are AT/AFTER init (4 steps total)
-#             dudx_block = rec['dudx']
-            
-#             # Count along the time axis (axis 0) if ANY valid numerical value exists in the row
-#             valid_time_mask = ~np.isnan(dudx_block).all(axis=1)
-            
-#             # Split into before and after timelines
-#             valid_before = valid_time_mask[0:16]
-#             valid_after  = valid_time_mask[16:20]
-            
-#             before_counts.append(np.sum(valid_before))
-#             after_counts.append(np.sum(valid_after))
-            
-#     if total_events > 0:
-#         mean_before = np.mean(before_counts)
-#         mean_after  = np.mean(after_counts)
-#         print(f"🔹 {label} (LT {min_lt}-{max_lt} steps) | Samples: n = {total_events}")
-#         print(f"   • Avg steps BEFORE initiation (Max 16): {mean_before:.1f} steps")
-#         print(f"   • Avg steps AFTER initiation  (Max  4): {mean_after:.1f} steps")
-#     else:
-#         print(f"🔹 {label} (LT {min_lt}-{max_lt} steps) | No matching events found.")
-#     print("-" * 65)
+    if composite_mean_filtered is not None:
+        im = ax_top.pcolormesh(dist_rel, time_rel, composite_mean_filtered, 
+                               shading='nearest', 
+                               cmap='RdBu_r',
+                               rasterized=True, 
+                               norm=norm)
+        
+        # Overlay structural pivot point crosshairs
+        ax_top.scatter(0, 0, color='black', marker='x', s=150, linewidths=2, zorder=5)
+        ax_top.axhline(0, color='black', linestyle=':', alpha=0.5)
+        ax_top.axvline(0, color='black', linestyle=':', alpha=0.5)
+        
+        ax_top.set_ylim(-30, 4)
+        ax_top.set_xlabel('Relative Distance ($x$)', fontsize=13)
+        ax_top.set_title(f"{cluster_titles[i]}\nLocal $\partial u / \partial x$ ($n={n_plumes}$)", fontsize=13, fontweight='bold', pad=8)
+    else:
+        ax_top.patch.set_facecolor('lightgray')
+        ax_top.text(0.5, 0.5, 'No Event Slices Matched', transform=ax_top.transAxes, ha='center', va='center')
+        ax_top.set_title(f"{cluster_titles[i]} ($n=0$)", fontsize=13, fontweight='bold', pad=8)
 
-# # S(t)
-# # Define our target lead time strata to loop over
+    ax_top.text(0.02, 0.95, labs_labels[0][i], transform=ax_top.transAxes, fontsize=14, fontweight='bold', va='top')
+    ax_top.tick_params(axis='both', which='major', labelsize=12)
+    
+    # Hide shared y-labels for row 1 except the left column
+    if i == 0:
+        ax_top.set_ylabel('Relative Time ($\delta t$)', fontsize=13)
+    else:
+        ax_top.yaxis.set_tick_params(labelleft=False)
+
+    ax_bot = axs[1, i]
+    q_profile  = cluster_means_q[i]
+    KE_profile = cluster_means_KE[i]
+    
+    if q_profile is not None and KE_profile is not None:
+        color_theme = cluster_colors[i]
+        
+        # 1. Plot continuous phase route line
+        ax_bot.plot(q_profile, KE_profile, color=color_theme, linewidth=3, label='State Path')
+        
+        # 2. Drop historical progression milestones (t_-16, t_0 trigger point, t_+3 end)
+        ax_bot.scatter(q_profile[0], KE_profile[0], color='blue', s=80, marker='o', zorder=5, label='Start ($t_{-16}$)')
+        ax_bot.scatter(q_profile[16], KE_profile[16], color='red', s=140, marker='*', zorder=6, label='Trigger ($t_{0}$)')
+        ax_bot.scatter(q_profile[-1], KE_profile[-1], color='black', s=80, marker='X', zorder=5, label='End ($t_{+3}$)')
+        
+        # 3. Inject explicit directional metadata arrows along the pathway tracking step intervals
+        # for step in range(2, len(q_profile) - 2, 4):
+        #     ax_bot.annotate('  ', xy=(q_profile[step+1], KE_profile[step+1]), 
+        #                     xytext=(q_profile[step], KE_profile[step]),
+        #                     arrowprops=dict(arrowstyle="->", color=color_theme, lw=2, mutation_scale=12))
+            
+        ax_bot.set_xlabel('Global Mean Moisture ($\overline{q}$)', fontsize=13)
+        ax_bot.grid(True, linestyle=':', alpha=0.6)
+        ax_bot.set_title(f"Global Dynamic Phase Space", fontsize=11, style='italic', pad=6)
+        # ax_bot.set_ylim(0.0001, 0.0005)
+        # ax_bot.set_xlim(0.25, 0.31)
+
+        if i == 0:
+            ax_bot.legend(fontsize=10, loc='upper left')
+    else:
+        ax_bot.patch.set_facecolor('lightgray')
+        ax_bot.text(0.5, 0.5, 'No Data Available', transform=ax_bot.transAxes, ha='center', va='center')
+
+    ax_bot.text(0.02, 0.95, labs_labels[1][i], transform=ax_bot.transAxes, fontsize=14, fontweight='bold', va='top')
+    ax_bot.tick_params(axis='both', which='major', labelsize=12)
+    
+    # Track common Y descriptor averages exclusively for the first column layout
+    if i == 0:
+        ax_bot.set_ylabel('Global Kinetic Energy ($\overline{KE}$)', fontsize=13)
+
+# Anchor a master unified colorbar corresponding tightly onto axis pane row 1, col 3
+if cluster_means_dudx[2] is not None:
+    cb = fig.colorbar(im, ax=axs[0, 2], pad=0.02)
+    cb.set_label(r'Mean Spatial Convergence $\partial u / \partial x$', fontsize=13)
+    cb.ax.tick_params(labelsize=11)
+
+print(min_lt, max_lt)
+# Export the high-res figure asset for presentation/thesis incorporation
+fig.savefig(images_path+f"/actual_ClusterAnalysis_LT_{min_lt}-{max_lt}_withglobals.png", dpi=300)
+
+print(f"Vector composite plot successfully saved")
+#plt.show()
+
+# Define your three lead-time windows
+lt_windows = [
+    (0, 14, "Short Lead Times"),
+    (15, 29, "Mid Lead Times"),
+    (30, 44, "Long Lead Times")
+]
+
+print("=" * 65)
+print("     VALIDATION TRACKER: NON-NAN DATA STEPS PER REGIME")
+print("=" * 65)
+
+for min_lt, max_lt, label in lt_windows:
+    before_counts = []
+    after_counts = []
+    total_events = 0
+    
+    for rec in composite_records_all:
+        if min_lt <= rec['lead_time'] <= max_lt:
+            total_events += 1
+            # rec['dudx'] shape is (20, 64)
+            # Row index 16 is t0 (initiation). 
+            # Rows 0 to 15 are BEFORE init (16 steps total)
+            # Rows 16 to 19 are AT/AFTER init (4 steps total)
+            dudx_block = rec['dudx']
+            
+            # Count along the time axis (axis 0) if ANY valid numerical value exists in the row
+            valid_time_mask = ~np.isnan(dudx_block).all(axis=1)
+            
+            # Split into before and after timelines
+            valid_before = valid_time_mask[0:16]
+            valid_after  = valid_time_mask[16:20]
+            
+            before_counts.append(np.sum(valid_before))
+            after_counts.append(np.sum(valid_after))
+            
+    if total_events > 0:
+        mean_before = np.mean(before_counts)
+        mean_after  = np.mean(after_counts)
+        print(f"🔹 {label} (LT {min_lt}-{max_lt} steps) | Samples: n = {total_events}")
+        print(f"   • Avg steps BEFORE initiation (Max 16): {mean_before:.1f} steps")
+        print(f"   • Avg steps AFTER initiation  (Max  4): {mean_after:.1f} steps")
+    else:
+        print(f"🔹 {label} (LT {min_lt}-{max_lt} steps) | No matching events found.")
+    print("-" * 65)
+
+# S(t)
+# Define our target lead time strata to loop over
 # lt_windows = [
 #     (0, 14, "Short_Lead_Times_0-14"),
 #     (15, 29, "Mid_Lead_Times_15-29"),
@@ -801,437 +848,438 @@ def stats_to_dataframe(stats_dict, k):
 # ---------- CODE PART 3 -------------
 # --------- Functions ----------------
 
-def find_initiations_truth_clustered(x_positions_truth, test_idx, composite_records_all, x_min=0, x_max=20):
-    """
-    Find plume initiations in truth array and append their corresponding cluster ID 
-    by looking up matches in composite_records_all using a periodic spatiotemporal threshold.
+# def find_initiations_truth_clustered(x_positions_truth, test_idx, composite_records_all, x_min=0, x_max=20):
+#     """
+#     Find plume initiations in truth array and append their corresponding cluster ID 
+#     by looking up matches in composite_records_all using a periodic spatiotemporal threshold.
 
-    Returns:
-    -------
-    initiations : list of (t_init, x_init, p, cluster_id)
-    """
-    T, P = x_positions_truth.shape
-    initiations = []
-    L = x_max - x_min
+#     Returns:
+#     -------
+#     initiations : list of (t_init, x_init, p, cluster_id)
+#     """
+#     T, P = x_positions_truth.shape
+#     initiations = []
+#     L = x_max - x_min
 
-    for p in range(P):
-        active = ~np.isnan(x_positions_truth[:, p])
-        if not active.any():
-            continue
+#     for p in range(P):
+#         active = ~np.isnan(x_positions_truth[:, p])
+#         if not active.any():
+#             continue
 
-        was_active = False
-        for t in range(T):
-            if active[t]:
-                if not was_active:
-                    if t > 0:  # <-- skip initiations at t=0
-                        x0 = x_positions_truth[t, p]
+#         was_active = False
+#         for t in range(T):
+#             if active[t]:
+#                 if not was_active:
+#                     if t > 0:  # <-- skip initiations at t=0
+#                         x0 = x_positions_truth[t, p]
                         
-                        # --- NEW LOOKUP LOGIC ---
-                        cluster_id = -1  # Default fallback if no match found
+#                         # --- NEW LOOKUP LOGIC ---
+#                         cluster_id = -1  # Default fallback if no match found
                         
-                        # Search through the grouped composite records
-                        for rec in composite_records_all:
-                            # 1. Match the current test segment interval id
-                            rec_test_id = int(rec.get('test_interval_id', rec.get('test_idx', 0)))
-                            if rec_test_id != test_idx:
-                                continue
+#                         # Search through the grouped composite records
+#                         for rec in composite_records_all:
+#                             # 1. Match the current test segment interval id
+#                             rec_test_id = int(rec.get('test_interval_id', rec.get('test_idx', 0)))
+#                             if rec_test_id != test_idx:
+#                                 continue
                             
-                            # 2. Check for an exact match on the local time index via lead_time
-                            # and a very close spatial match on true_x (handling periodic domain)
-                            if int(rec['lead_time']) == t:
-                                dx_raw = abs(x0 - rec['true_x'])
-                                dx = min(dx_raw, L - dx_raw)
+#                             # 2. Check for an exact match on the local time index via lead_time
+#                             # and a very close spatial match on true_x (handling periodic domain)
+#                             if int(rec['lead_time']) == t:
+#                                 dx_raw = abs(x0 - rec['true_x'])
+#                                 dx = min(dx_raw, L - dx_raw)
                                 
-                                if dx < 0.1:
-                                    cluster_id = int(rec['cluster'])
-                                    break  # Exact match found, exit records loop
+#                                 if dx < 0.1:
+#                                     cluster_id = int(rec['cluster'])
+#                                     break  # Exact match found, exit records loop
                         
-                        # Only include this event if it successfully mapped to your cluster database
-                        if cluster_id != -1:
-                            initiations.append((t, x0, p, cluster_id))
+#                         # Only include this event if it successfully mapped to your cluster database
+#                         if cluster_id != -1:
+#                             initiations.append((t, x0, p, cluster_id))
                             
-                    was_active = True
-            else:
-                was_active = False  # reset when plume goes away
+#                     was_active = True
+#             else:
+#                 was_active = False  # reset when plume goes away
 
-    return initiations
+#     return initiations
 
-def find_initiations_truth(x_positions_truth):
-    """
-    Find plume initiations (including re-activations) in truth array,
-    but ignore cases where the plume is already active at t=0.
+# def find_initiations_truth(x_positions_truth):
+#     """
+#     Find plume initiations (including re-activations) in truth array,
+#     but ignore cases where the plume is already active at t=0.
 
-    x_positions_truth : ndarray (T, P)
-        True plume positions over time. NaN if no plume.
+#     x_positions_truth : ndarray (T, P)
+#         True plume positions over time. NaN if no plume.
 
-    Returns:
-    initiations : list of (t_init, x_init, p)
-        One entry per plume slot per initiation event:
-        - t_init = time index when plume first appears after being absent
-        - x_init = plume position at that time
-        - p      = slot index
-    """
-    T, P = x_positions_truth.shape
-    initiations = []
+#     Returns:
+#     initiations : list of (t_init, x_init, p)
+#         One entry per plume slot per initiation event:
+#         - t_init = time index when plume first appears after being absent
+#         - x_init = plume position at that time
+#         - p      = slot index
+#     """
+#     T, P = x_positions_truth.shape
+#     initiations = []
 
-    for p in range(P):
-        active = ~np.isnan(x_positions_truth[:, p])
-        if not active.any():
-            continue
+#     for p in range(P):
+#         active = ~np.isnan(x_positions_truth[:, p])
+#         if not active.any():
+#             continue
 
-        was_active = False
-        for t in range(T):
-            if active[t]:
-                if not was_active:
-                    if t > 0:  # <-- skip initiations at t=0
-                        x0 = x_positions_truth[t, p]
-                        initiations.append((t, x0, p))
-                    was_active = True
-            else:
-                was_active = False  # reset when plume goes away
+#         was_active = False
+#         for t in range(T):
+#             if active[t]:
+#                 if not was_active:
+#                     if t > 0:  # <-- skip initiations at t=0
+#                         x0 = x_positions_truth[t, p]
+#                         initiations.append((t, x0, p))
+#                     was_active = True
+#             else:
+#                 was_active = False  # reset when plume goes away
 
-    return initiations
+#     return initiations
 
-def find_initiations_pred(x_positions_pred, x_positions_truth):
-    """
-    Find plume initiations (including re-activations) in pred array,
-    but ignore cases where the plume is already active at t=0 if there is a 
-    actual plume at t=0.
+# def find_initiations_pred(x_positions_pred, x_positions_truth):
+#     """
+#     Find plume initiations (including re-activations) in pred array,
+#     but ignore cases where the plume is already active at t=0 if there is a 
+#     actual plume at t=0.
 
-    x_positions_truth : ndarray (T, P)
-        True plume positions over time. NaN if no plume.
+#     x_positions_truth : ndarray (T, P)
+#         True plume positions over time. NaN if no plume.
 
-    Returns:
-    initiations : list of (t_init, x_init, p)
-        One entry per plume slot per initiation event:
-        - t_init = time index when plume first appears after being absent
-        - x_init = plume position at that time
-        - p      = slot index
-    """
-    T, P = x_positions_pred.shape
-    initiations = []
+#     Returns:
+#     initiations : list of (t_init, x_init, p)
+#         One entry per plume slot per initiation event:
+#         - t_init = time index when plume first appears after being absent
+#         - x_init = plume position at that time
+#         - p      = slot index
+#     """
+#     T, P = x_positions_pred.shape
+#     initiations = []
 
-    true_active_at_zero = ~np.isnan(x_positions_truth[0, :])
-    true_active_at_zero_flag = true_active_at_zero.any()
+#     true_active_at_zero = ~np.isnan(x_positions_truth[0, :])
+#     true_active_at_zero_flag = true_active_at_zero.any()
 
-    for p in range(P):
-        active = ~np.isnan(x_positions_pred[:, p])
-        if not active.any():
-            continue
+#     for p in range(P):
+#         active = ~np.isnan(x_positions_pred[:, p])
+#         if not active.any():
+#             continue
 
-        was_active = False
-        for t in range(T):
-            if active[t]:
-                if not was_active:
-                    if true_active_at_zero_flag:
-                        if t > 0:  # <-- skip initiations at t=0
-                            x0 = x_positions_pred[t, p]
-                            initiations.append((t, x0, p))
-                        was_active = True
-                    else:
-                        x0 = x_positions_pred[t, p]
-                        initiations.append((t, x0, p))
-                        was_active = True
-            else:
-                was_active = False  # reset when plume goes away
+#         was_active = False
+#         for t in range(T):
+#             if active[t]:
+#                 if not was_active:
+#                     if true_active_at_zero_flag:
+#                         if t > 0:  # <-- skip initiations at t=0
+#                             x0 = x_positions_pred[t, p]
+#                             initiations.append((t, x0, p))
+#                         was_active = True
+#                     else:
+#                         x0 = x_positions_pred[t, p]
+#                         initiations.append((t, x0, p))
+#                         was_active = True
+#             else:
+#                 was_active = False  # reset when plume goes away
 
-    return initiations
+#     return initiations
 
-def match_initiations_hits_clustered(all_pred_inits, true_inits, delta_t=1, delta_x=1, x_min=0, x_max=20):
-    """
-    Match predicted plume initiations to clustered true initiations (one-to-one matching)
-    and compute hits and misses by cluster index, while tracking global false alarms.
-    """
-    # Flatten all ensemble predictions
-    pred_all = np.array([pt for ens in all_pred_inits for pt in ens])
-    true_all = np.array(true_inits)
+# def match_initiations_hits_clustered(all_pred_inits, true_inits, delta_t=1, delta_x=1, x_min=0, x_max=20):
+#     """
+#     Match predicted plume initiations to clustered true initiations (one-to-one matching)
+#     and compute hits and misses by cluster index, while tracking global false alarms.
+#     """
+#     # Flatten all ensemble predictions
+#     pred_all = np.array([pt for ens in all_pred_inits for pt in ens])
+#     true_all = np.array(true_inits)
     
-    pred_no_inits = len(pred_all)
-    true_no_inits = len(true_all)
+#     pred_no_inits = len(pred_all)
+#     true_no_inits = len(true_all)
 
-    # Initialize dictionaries to hold independent metrics for Cluster 0, 1, and 2
-    hits_by_cluster = {0: 0, 1: 0, 2: 0}
-    misses_by_cluster = {0: 0, 1: 0, 2: 0}
-    false_alarms = 0
+#     # Initialize dictionaries to hold independent metrics for Cluster 0, 1, and 2
+#     hits_by_cluster = {0: 0, 1: 0, 2: 0}
+#     misses_by_cluster = {0: 0, 1: 0, 2: 0}
+#     false_alarms = 0
 
-    # Handle empty cases cleanly
-    if len(pred_all) == 0 and len(true_all) == 0:
-        return true_no_inits, pred_no_inits, hits_by_cluster, 0, misses_by_cluster
+#     # Handle empty cases cleanly
+#     if len(pred_all) == 0 and len(true_all) == 0:
+#         return true_no_inits, pred_no_inits, hits_by_cluster, 0, misses_by_cluster
         
-    if len(true_all) == 0:
-        return true_no_inits, pred_no_inits, hits_by_cluster, len(pred_all), misses_by_cluster
+#     if len(true_all) == 0:
+#         return true_no_inits, pred_no_inits, hits_by_cluster, len(pred_all), misses_by_cluster
         
-    if len(pred_all) == 0:
-        for c in true_all[:, 3].astype(int):
-            misses_by_cluster[c] += 1
-        return true_no_inits, pred_no_inits, hits_by_cluster, 0, misses_by_cluster
+#     if len(pred_all) == 0:
+#         for c in true_all[:, 3].astype(int):
+#             misses_by_cluster[c] += 1
+#         return true_no_inits, pred_no_inits, hits_by_cluster, 0, misses_by_cluster
 
-    # Extract coordinates (true_all has 4 columns: t, x, p, cluster)
-    t_pred, x_pred = pred_all[:, 0], pred_all[:, 1]
-    t_true, x_true, cluster_true = true_all[:, 0], true_all[:, 1], true_all[:, 3].astype(int)
+#     # Extract coordinates (true_all has 4 columns: t, x, p, cluster)
+#     t_pred, x_pred = pred_all[:, 0], pred_all[:, 1]
+#     t_true, x_true, cluster_true = true_all[:, 0], true_all[:, 1], true_all[:, 3].astype(int)
 
-    # Vectorized distance evaluations (Your exact logic)
-    dt = np.abs(t_pred[:, None] - t_true[None, :])
-    L = x_max - x_min
-    dx_raw = np.abs(x_pred[:, None] - x_true[None, :])
-    dx = np.minimum(dx_raw, L - dx_raw)
+#     # Vectorized distance evaluations (Your exact logic)
+#     dt = np.abs(t_pred[:, None] - t_true[None, :])
+#     L = x_max - x_min
+#     dx_raw = np.abs(x_pred[:, None] - x_true[None, :])
+#     dx = np.minimum(dx_raw, L - dx_raw)
 
-    # Determine validation bounding box alignment
-    within_box = (dt <= delta_t) & (dx <= delta_x)
+#     # Determine validation bounding box alignment
+#     within_box = (dt <= delta_t) & (dx <= delta_x)
 
-    # Bookkeeping templates
-    matched_true = np.zeros(len(true_all), dtype=bool)
-    matched_pred = np.zeros(len(pred_all), dtype=bool)
+#     # Bookkeeping templates
+#     matched_true = np.zeros(len(true_all), dtype=bool)
+#     matched_pred = np.zeros(len(pred_all), dtype=bool)
 
-    # Executing strict one-to-one pairing loop
-    for i_pred in range(len(pred_all)):
-        candidates = np.where(within_box[i_pred, :] & (~matched_true))[0]
-        if len(candidates) > 0:
-            best_idx = candidates[np.argmin(np.sqrt(dt[i_pred, candidates]**2 + dx[i_pred, candidates]**2))]
+#     # Executing strict one-to-one pairing loop
+#     for i_pred in range(len(pred_all)):
+#         candidates = np.where(within_box[i_pred, :] & (~matched_true))[0]
+#         if len(candidates) > 0:
+#             best_idx = candidates[np.argmin(np.sqrt(dt[i_pred, candidates]**2 + dx[i_pred, candidates]**2))]
             
-            matched_true[best_idx] = True
-            matched_pred[i_pred] = True
+#             matched_true[best_idx] = True
+#             matched_pred[i_pred] = True
             
-            # Key modification: increment the hit counter for this specific event's cluster type!
-            c_id = cluster_true[best_idx]
-            hits_by_cluster[c_id] += 1
+#             # Key modification: increment the hit counter for this specific event's cluster type!
+#             c_id = cluster_true[best_idx]
+#             hits_by_cluster[c_id] += 1
 
-    # False Alarms remain global (predictions that mapped to absolutely nothing)
-    false_alarms = np.sum(~matched_pred)
+#     # False Alarms remain global (predictions that mapped to absolutely nothing)
+#     false_alarms = np.sum(~matched_pred)
     
-    # Calculate misses by grouping unmatched true profiles into their corresponding cluster archetype
-    unmatched_true_indices = np.where(~matched_true)[0]
-    for idx in unmatched_true_indices:
-        c_id = cluster_true[idx]
-        misses_by_cluster[c_id] += 1
+#     # Calculate misses by grouping unmatched true profiles into their corresponding cluster archetype
+#     unmatched_true_indices = np.where(~matched_true)[0]
+#     for idx in unmatched_true_indices:
+#         c_id = cluster_true[idx]
+#         misses_by_cluster[c_id] += 1
 
-    return true_no_inits, pred_no_inits, hits_by_cluster, false_alarms, misses_by_cluster
+#     return true_no_inits, pred_no_inits, hits_by_cluster, false_alarms, misses_by_cluster
 
 
-def prf_initiations_clustered(x_positions_truth_all, x_positions_pred_all, composite_records_all, delta_t=1, delta_x=1):
-    """
-    Evaluates ensemble plume initiation forecasts against truth arrays across 40 test windows.
-    Matches true initiations to their respective physical archetypes using composite_records_all.
+# def prf_initiations_clustered(x_positions_truth_all, x_positions_pred_all, composite_records_all, delta_t=1, delta_x=1):
+#     """
+#     Evaluates ensemble plume initiation forecasts against truth arrays across 40 test windows.
+#     Matches true initiations to their respective physical archetypes using composite_records_all.
     
-    Parameters
-    ----------
-    x_positions_truth_all : ndarray
-        True plume tracking arrays across test and ensemble spaces.
-    x_positions_pred_all : ndarray
-        Predicted plume tracking arrays across test and ensemble spaces.
-    composite_records_all : list of dicts
-        The database containing 'test_interval_id', 'lead_time', 'true_x', and 'cluster'.
-    delta_t : float, optional
-        Temporal matching tolerance window (local index steps). Default is 1.
-    delta_x : float, optional
-        Spatial matching tolerance window (grid units). Default is 1.
+#     Parameters
+#     ----------
+#     x_positions_truth_all : ndarray
+#         True plume tracking arrays across test and ensemble spaces.
+#     x_positions_pred_all : ndarray
+#         Predicted plume tracking arrays across test and ensemble spaces.
+#     composite_records_all : list of dicts
+#         The database containing 'test_interval_id', 'lead_time', 'true_x', and 'cluster'.
+#     delta_t : float, optional
+#         Temporal matching tolerance window (local index steps). Default is 1.
+#     delta_x : float, optional
+#         Spatial matching tolerance window (grid units). Default is 1.
         
-    Returns
-    -------
-    global_summary : dict
-        Total aggregated counts of true entries, assertions, and false alarms.
-    cluster_metrics : dict
-        A nested dictionary mapping cluster IDs (0, 1, 2) to their respective 
-        calculated Precision, Recall, and F1 scores.
-    """
-    total_true_counted = 0
-    total_pred_counted = 0
-    global_false_alarms = 0
+#     Returns
+#     -------
+#     global_summary : dict
+#         Total aggregated counts of true entries, assertions, and false alarms.
+#     cluster_metrics : dict
+#         A nested dictionary mapping cluster IDs (0, 1, 2) to their respective 
+#         calculated Precision, Recall, and F1 scores.
+#     """
+#     total_true_counted = 0
+#     total_pred_counted = 0
+#     global_false_alarms = 0
     
-    global_hits_by_cluster = {0: 0, 1: 0, 2: 0}
-    global_misses_by_cluster = {0: 0, 1: 0, 2: 0}
+#     global_hits_by_cluster = {0: 0, 1: 0, 2: 0}
+#     global_misses_by_cluster = {0: 0, 1: 0, 2: 0}
     
-    # Process each of the 40 independent forecast intervals
-    for test_idx in range(40):
-        # 1. Gather true initiations tagged with their correct cluster index
-        x_init_truth = find_initiations_truth_clustered(
-            x_positions_truth_all[:, :, test_idx, 0], 
-            test_idx=test_idx, 
-            composite_records_all=composite_records_all,
-            x_min=0, 
-            x_max=20
-        )
+#     # Process each of the 40 independent forecast intervals
+#     for test_idx in range(40):
+#         # 1. Gather true initiations tagged with their correct cluster index
+#         x_init_truth = find_initiations_truth_clustered(
+#             x_positions_truth_all[:, :, test_idx, 0], 
+#             test_idx=test_idx, 
+#             composite_records_all=composite_records_all,
+#             x_min=0, 
+#             x_max=20
+#         )
         
-        # 2. Gather predictions across all 5 ensemble paths
-        all_ens_x_init_pred = []
-        for ens_idx in range(5):
-            x_init_pred = find_initiations_pred(
-                x_positions_pred_all[:, :, test_idx, ens_idx], 
-                x_positions_truth_all[:, :, test_idx, ens_idx]
-            )
-            all_ens_x_init_pred.append(x_init_pred)
+#         # 2. Gather predictions across all 5 ensemble paths
+#         all_ens_x_init_pred = []
+#         for ens_idx in range(5):
+#             x_init_pred = find_initiations_pred(
+#                 x_positions_pred_all[:, :, test_idx, ens_idx], 
+#                 x_positions_truth_all[:, :, test_idx, ens_idx]
+#             )
+#             all_ens_x_init_pred.append(x_init_pred)
 
-        # 3. Compute spatiotemporal neighborhood matching within this window
-        true_no_inits, pred_no_inits, hits_by_c, false_alarms, misses_by_c = match_initiations_hits_clustered(
-            all_ens_x_init_pred, 
-            x_init_truth, 
-            delta_t=delta_t, 
-            delta_x=delta_x,
-            x_min=0,
-            x_max=20
-        )
+#         # 3. Compute spatiotemporal neighborhood matching within this window
+#         true_no_inits, pred_no_inits, hits_by_c, false_alarms, misses_by_c = match_initiations_hits_clustered(
+#             all_ens_x_init_pred, 
+#             x_init_truth, 
+#             delta_t=delta_t, 
+#             delta_x=delta_x,
+#             x_min=0,
+#             x_max=20
+#         )
         
-        # 4. Accumulate baseline structural performance counts
-        global_false_alarms += false_alarms
-        total_pred_counted += pred_no_inits
-        total_true_counted += true_no_inits
+#         # 4. Accumulate baseline structural performance counts
+#         global_false_alarms += false_alarms
+#         total_pred_counted += pred_no_inits
+#         total_true_counted += true_no_inits
         
-        for c in [0, 1, 2]:
-            global_hits_by_cluster[c] += hits_by_c[c]
-            global_misses_by_cluster[c] += misses_by_c[c]
+#         for c in [0, 1, 2]:
+#             global_hits_by_cluster[c] += hits_by_c[c]
+#             global_misses_by_cluster[c] += misses_by_c[c]
 
-    # --- SUMMARY METRICS COMPUTATION ENGINE ---
-    total_global_hits = sum(global_hits_by_cluster.values())
+#     # --- SUMMARY METRICS COMPUTATION ENGINE ---
+#     total_global_hits = sum(global_hits_by_cluster.values())
     
-    global_summary = {
-        'total_true': total_true_counted,
-        'total_predicted': total_pred_counted,
-        'global_hits': total_global_hits,
-        'global_false_alarms': global_false_alarms
-    }
+#     global_summary = {
+#         'total_true': total_true_counted,
+#         'total_predicted': total_pred_counted,
+#         'global_hits': total_global_hits,
+#         'global_false_alarms': global_false_alarms
+#     }
     
-    cluster_metrics = {}
+#     cluster_metrics = {}
     
-    for c in [0, 1, 2]:
-        total_h = global_hits_by_cluster[c]
-        total_m = global_misses_by_cluster[c]
+#     for c in [0, 1, 2]:
+#         total_h = global_hits_by_cluster[c]
+#         total_m = global_misses_by_cluster[c]
         
-        # Recall (Capture accuracy for this physical plume archetype)
-        recall_c = total_h / (total_h + total_m) if (total_h + total_m) > 0 else 0.0
+#         # Recall (Capture accuracy for this physical plume archetype)
+#         recall_c = total_h / (total_h + total_m) if (total_h + total_m) > 0 else 0.0
         
-        # Contribution Precision (Proportion of total positive assertions belonging to this cluster hit category)
-        precision_c = total_h / (total_global_hits + global_false_alarms) if (total_global_hits + global_false_alarms) > 0 else 0.0
+#         # Contribution Precision (Proportion of total positive assertions belonging to this cluster hit category)
+#         precision_c = total_h / (total_global_hits + global_false_alarms) if (total_global_hits + global_false_alarms) > 0 else 0.0
         
-        # Harmonic Mean F1 Score
-        f1_c = 2 * precision_c * recall_c / (precision_c + recall_c) if (precision_c + recall_c) > 0 else 0.0
+#         # Harmonic Mean F1 Score
+#         f1_c = 2 * precision_c * recall_c / (precision_c + recall_c) if (precision_c + recall_c) > 0 else 0.0
         
-        cluster_metrics[c] = {
-            'hits': total_h,
-            'misses': total_m,
-            'recall': recall_c,
-            'precision': precision_c,
-            'f1_score': f1_c
-        }
+#         cluster_metrics[c] = {
+#             'hits': total_h,
+#             'misses': total_m,
+#             'recall': recall_c,
+#             'precision': precision_c,
+#             'f1_score': f1_c
+#         }
         
-    return global_summary, cluster_metrics
+#     return global_summary, cluster_metrics
 
-# ----------- CODE -------------------
-N_lyap = 15
-deltas_t = [1, 3, 5, 9, 12, 15]
-deltas_t_LT = [tv/N_lyap for tv in deltas_t]
-deltas_x = [1, 2, 3, 4, 5, 6]
+# # ----------- CODE -------------------
+# N_lyap = 15
+# deltas_t = [1, 3, 5, 9, 12, 15]
+# deltas_t_LT = [tv/N_lyap for tv in deltas_t]
+# deltas_x = [1, 2, 3, 4, 5, 6]
 
-# --- DEFINE PATHS FOR BOTH ARCHITECTURES ---
-paths_config = {
-    'POD-ESN': {
-        'positions': 'Ra2e8/POD_ESN/Thesis/64modes/Run_n_units1000_ensemble5_normalisationon_washout3_config4101/GP36_4/further_analysis/initation_score',
-        'records': 'Ra2e8/POD_ESN/Thesis/64modes/Run_n_units1000_ensemble5_normalisationon_washout3_config4101/GP36_4/further_analysis/corrections_clusters/test_metrics/actual_composite_records.pkl'
-    },
-    'CAE-ESN': {
-        'positions': 'Ra2e8/CAE_ESN/Thesis/LS64/Run_n_units1000_ensemble5_normalisationon_washout3_config8002/GP36_4/further_analysis/initation_score',
-        'records': 'Ra2e8/POD_ESN/Thesis/64modes/Run_n_units1000_ensemble5_normalisationon_washout3_config4101/GP36_4/further_analysis/corrections_clusters/test_metrics/actual_composite_records.pkl'
-    }
-}
+# # --- DEFINE PATHS FOR BOTH ARCHITECTURES ---
+# paths_config = {
+#     'POD-ESN': {
+#         'positions': 'Ra2e8/POD_ESN/Thesis/64modes/Run_n_units1000_ensemble5_normalisationon_washout3_config4101/GP36_4/further_analysis/initation_score',
+#         'records': 'Ra2e8/POD_ESN/Thesis/64modes/Run_n_units1000_ensemble5_normalisationon_washout3_config4101/GP36_4/further_analysis/corrections_clusters/test_metrics/actual_composite_records.pkl'
+#     },
+#     'CAE-ESN': {
+#         'positions': 'Ra2e8/CAE_ESN/Thesis/LS64/Run_n_units1000_ensemble5_normalisationon_washout3_config8002/GP36_4/further_analysis/initation_score',
+#         'records': 'Ra2e8/POD_ESN/Thesis/64modes/Run_n_units1000_ensemble5_normalisationon_washout3_config4101/GP36_4/further_analysis/corrections_clusters/test_metrics/actual_composite_records.pkl'
+#     }
+# }
 
-# Master structural containers to house independent metric sweeps
-all_models_trackers = {
-    'POD-ESN': {c: {dx: {'recall': []} for dx in deltas_x} for c in [0, 1, 2]},
-    'CAE-ESN': {c: {dx: {'recall': []} for dx in deltas_x} for c in [0, 1, 2]}
-}
+# # Master structural containers to house independent metric sweeps
+# all_models_trackers = {
+#     'POD-ESN': {c: {dx: {'recall': []} for dx in deltas_x} for c in [0, 1, 2]},
+#     'CAE-ESN': {c: {dx: {'recall': []} for dx in deltas_x} for c in [0, 1, 2]}
+# }
 
-# --- DATA HARVESTING EXECUTION LOOP ---
-for model_name, paths in paths_config.items():
-    print(f"Processing evaluation metrics for {model_name}...")
+# # --- DATA HARVESTING EXECUTION LOOP ---
+# for model_name, paths in paths_config.items():
+#     print(f"Processing evaluation metrics for {model_name}...")
     
-    # Load model-specific arrays and tracking files
-    x_positions_pred_all = np.load(paths['positions'] + '/x_positions_pred_all.npy')
-    x_positions_truth_all = np.load(paths['positions'] + '/x_positions_truth_all.npy')
-    composite_records_all = joblib.load(paths['records'])
+#     # Load model-specific arrays and tracking files
+#     x_positions_pred_all = np.load(paths['positions'] + '/x_positions_pred_all.npy')
+#     x_positions_truth_all = np.load(paths['positions'] + '/x_positions_truth_all.npy')
+#     composite_records_all = joblib.load(paths['records'])
     
-    # Run the spatiotemporal grid tolerance parameter sweep
-    for dt in deltas_t:
-        for dx in deltas_x:
-            summary, metrics = prf_initiations_clustered(
-                x_positions_truth_all, 
-                x_positions_pred_all, 
-                composite_records_all, 
-                delta_t=dt, 
-                delta_x=dx
-            )
+#     # Run the spatiotemporal grid tolerance parameter sweep
+#     for dt in deltas_t:
+#         for dx in deltas_x:
+#             summary, metrics = prf_initiations_clustered(
+#                 x_positions_truth_all, 
+#                 x_positions_pred_all, 
+#                 composite_records_all, 
+#                 delta_t=dt, 
+#                 delta_x=dx
+#             )
             
-            # Store isolated recall metrics into our master model dictionary
-            for c in [0, 1, 2]:
-                all_models_trackers[model_name][c][dx]['recall'].append(metrics[c]['recall'])
+#             # Store isolated recall metrics into our master model dictionary
+#             for c in [0, 1, 2]:
+#                 all_models_trackers[model_name][c][dx]['recall'].append(metrics[c]['recall'])
 
-print("Data harvesting complete. Generating visual plots...")
+# print("Data harvesting complete. Generating visual plots...")
 
-# --- GENERATE THE MODEL COMPARISON RECALL PLOT ---
-dxs = [1,3,5]
-#FIXED_DX = 5    
-fig, axees = plt.subplots(3, 3, figsize=(12,9), sharey=True, sharex=True, constrained_layout=True)   
-for index, FIXED_DX in enumerate(dxs):
+# # --- GENERATE THE MODEL COMPARISON RECALL PLOT ---
+# dxs = [1,3,5]
+# #FIXED_DX = 5    
+# fig, axees = plt.subplots(3, 3, figsize=(12,9), sharey=True, sharex=True, constrained_layout=True)   
+# for index, FIXED_DX in enumerate(dxs):
           
-    axes = axees[index, :]
+#     axes = axees[index, :]
 
-    panel_titles = [
-        'Cluster 1', 
-        'Cluster 2', 
-        'Cluster 3'
-    ]
+#     panel_titles = [
+#         'Cluster 1', 
+#         'Cluster 2', 
+#         'Cluster 3'
+#     ]
 
-    # Formatting configurations to map model lines elegantly
-    model_styles = {
-        'POD-ESN': {'color': '#1f77b4', 'marker': 'o', 'linestyle': '-'},
-        'CAE-ESN': {'color': '#ff7f0e', 'marker': 's', 'linestyle': '--'}
-    }
+#     # Formatting configurations to map model lines elegantly
+#     model_styles = {
+#         'POD-ESN': {'color': '#1f77b4', 'marker': 'o', 'linestyle': '-'},
+#         'CAE-ESN': {'color': '#ff7f0e', 'marker': 's', 'linestyle': '--'}
+#     }
 
-    # Draw 1 panel per isolated physical plume cluster archetype
-    for c in [0, 1, 2]:
-        ax = axes[c]
+#     # Draw 1 panel per isolated physical plume cluster archetype
+#     for c in [0, 1, 2]:
+#         ax = axes[c]
         
-        # Plot line trajectory for POD-ESN
-        ax.plot(
-            deltas_t_LT, 
-            all_models_trackers['POD-ESN'][c][FIXED_DX]['recall'], 
-            label='POD-ESN',
-            color=model_styles['POD-ESN']['color'],
-            marker=model_styles['POD-ESN']['marker'],
-            linestyle=model_styles['POD-ESN']['linestyle'],
-            linewidth=2,
-            markersize=6
-        )
+#         # Plot line trajectory for POD-ESN
+#         ax.plot(
+#             deltas_t_LT, 
+#             all_models_trackers['POD-ESN'][c][FIXED_DX]['recall'], 
+#             label='POD-ESN',
+#             color=model_styles['POD-ESN']['color'],
+#             marker=model_styles['POD-ESN']['marker'],
+#             linestyle=model_styles['POD-ESN']['linestyle'],
+#             linewidth=2,
+#             markersize=6
+#         )
         
-        # Plot line trajectory for CAE-ESN
-        ax.plot(
-            deltas_t_LT, 
-            all_models_trackers['CAE-ESN'][c][FIXED_DX]['recall'], 
-            label='CAE-ESN',
-            color=model_styles['CAE-ESN']['color'],
-            marker=model_styles['CAE-ESN']['marker'],
-            linestyle=model_styles['CAE-ESN']['linestyle'],
-            linewidth=2,
-            markersize=6
-        )
+#         # Plot line trajectory for CAE-ESN
+#         ax.plot(
+#             deltas_t_LT, 
+#             all_models_trackers['CAE-ESN'][c][FIXED_DX]['recall'], 
+#             label='CAE-ESN',
+#             color=model_styles['CAE-ESN']['color'],
+#             marker=model_styles['CAE-ESN']['marker'],
+#             linestyle=model_styles['CAE-ESN']['linestyle'],
+#             linewidth=2,
+#             markersize=6
+#         )
         
-        if index ==0 :
-            ax.set_title(panel_titles[c], fontsize=14, fontweight='bold')
-        if index ==2:
-            ax.set_xlabel(r"$\delta t$ (LTs)", fontsize=14)
+#         if index ==0 :
+#             ax.set_title(panel_titles[c], fontsize=14, fontweight='bold')
+#         if index ==2:
+#             ax.set_xlabel(r"$\delta t$ (LTs)", fontsize=14)
         
-        if c == 0:
-            ax.set_ylabel(f"$R_c$ ($\delta x = {FIXED_DX}$)", fontsize=14)
+#         if c == 0:
+#             ax.set_ylabel(f"$R_c$ ($\delta x = {FIXED_DX}$)", fontsize=14)
             
-        ax.grid(True, linestyle='--', alpha=0.5)
-        ax.set_xlim(min(deltas_t_LT) - 0.05, max(deltas_t_LT) + 0.05)
-        ax.set_ylim(-0.05, 1.05)
+#         ax.grid(True, linestyle='--', alpha=0.5)
+#         ax.set_xlim(min(deltas_t_LT) - 0.05, max(deltas_t_LT) + 0.05)
+#         ax.set_ylim(-0.05, 1.05)
 
-        ax.tick_params(axis='both', which='major', labelsize=12)
+#         ax.tick_params(axis='both', which='major', labelsize=12)
 
-# Append clean single legend outside the 3rd panel bounds
-axees[0,2].legend(loc='upper left', frameon=True, fontsize=12)
+# # Append clean single legend outside the 3rd panel bounds
+# axees[0,2].legend(loc='upper left', frameon=True, fontsize=12)
 
 
-# Save image file to the POD corrections directory path
-output_images_path = paths_config['POD-ESN']['positions'].replace('initation_score', 'corrections_clusters/test_images/')
-fig.savefig(output_images_path + f"/cluster_Recall_POD_vs_CAE_dx_1_3_5.png", dpi=300)
-print(f"Saved direct architecture comparison visualization to: {output_images_path}")
+# # Save image file to the POD corrections directory path
+# output_images_path = paths_config['POD-ESN']['positions'].replace('initation_score', 'corrections_clusters/test_images/')
+# #fig.savefig(output_images_path + f"/cluster_Recall_POD_vs_CAE_dx_1_3_5.png", dpi=300)
+# fig.savefig(output_images_path + f"/cluster_Recall_POD_vs_CAE_dx_1_3_5.pdf", dpi=300, format='pdf')
+# print(f"Saved direct architecture comparison visualization to: {output_images_path}")
