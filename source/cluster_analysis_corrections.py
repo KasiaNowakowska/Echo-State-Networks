@@ -550,208 +550,282 @@ def stats_to_dataframe(stats_dict, k):
 # print(f"Saved portable file to:   {export_file_path}")
 
 # --------------- CODE PART 2 ----------------------------
+# --------------- DUDX COMPOSITE --------------------------
+
+# # --- DEFINE PATHS FOR BOTH ARCHITECTURES ---
+paths_config = {
+    'POD-ESN': {
+        'true': 'Ra2e8/POD_ESN/Thesis/64modes/Run_n_units1000_ensemble5_normalisationon_washout3_config4101/GP36_4/further_analysis/corrections_clusters/test_metrics/all_true_composite_records.pkl',
+        'pred': 'Ra2e8/POD_ESN/Thesis/64modes/Run_n_units1000_ensemble5_normalisationon_washout3_config4101/GP36_4/further_analysis/corrections_clusters/test_metrics/all_pred_composite_records.pkl'
+    },
+    'CAE-ESN': {
+        'true': 'Ra2e8/CAE_ESN/Thesis/LS64/Run_n_units1000_ensemble5_normalisationon_washout3_config8002/GP36_4/further_analysis//corrections_clusters/test_metrics/all_true_composite_records.pkl',
+        'pred': 'Ra2e8/CAE_ESN/Thesis/LS64/Run_n_units1000_ensemble5_normalisationon_washout3_config8002/GP36_4/further_analysis//corrections_clusters/test_metrics/all_pred_composite_records.pkl'
+    },
+    'Actual': {
+        'true': 'Ra2e8/POD_ESN/Thesis/64modes/Run_n_units1000_ensemble5_normalisationon_washout3_config4101/GP36_4/further_analysis/corrections_clusters/test_metrics/actual_composite_records.pkl'
+    }
+}
+
+# Define lead-time windows (assuming 15 steps per lead time unit)
+lt_windows = [
+    (0, 14, "0-1_LT"),
+    (15, 29, "1-2_LT"),
+    (30, 44, "2-3_LT")
+]
+
+# Coordinate dimensions derived from your base tracking resolution
+n_time_steps, n_x_points = 20, 64
+dt = 2.0          
+dx = 20.0 / 256.0
+
+# Center coordinate axes around the (0,0) triggering point
+time_rel = (np.arange(n_time_steps) - 16) * dt 
+dist_rel = (np.arange(n_x_points) - (n_x_points // 2)) * dx
+
+cluster_titles = ['Cluster 1', 'Cluster 2', 'Cluster 3']
+
+# Order rows logically to track data processing through the modeling pipeline
+pipeline_order = [
+    ("True Test Baseline", 'Actual', 'true'),
+    ("POD Reconstruction",  'POD-ESN', 'true'),
+    ("CAE Reconstruction",  'CAE-ESN', 'true'),
+    ("POD-ESN Prediction", 'POD-ESN', 'pred'),
+    ("CAE-ESN Prediction", 'CAE-ESN', 'pred')
+]
+
 master_export_path = input_path_testdata+'/test_metrics/actual_composite_records.pkl'
 composite_records_all = joblib.load(master_export_path)
 images_path = input_path_testdata+'/test_images/'
 
-print(f"Successfully loaded {len(composite_records_all)} total matched records")
-
-# View the first record in the database
-sample_record = composite_records_all[0]
-print("\n --- INSPECTING SINGLE RECORD [0] ---")
-print(f"Assigned Cluster: {sample_record['cluster']}")
-print(f"Model Lead Time : {sample_record['lead_time']} steps")
-print(f"True Time (t0)  : {sample_record['true_time']}")
-print(f"True X-coord    : {sample_record['true_x']}")
-print(f"Extracted dudx Shape: {sample_record['dudx'].shape}") # Expected: (20, 64)
-
-n_time_steps, n_x_points = sample_record['dudx'].shape  # Shoud extract (20, 64)
-
-dt = 2.0          # The cadence inside the neighborhood slice (dt=1)
-dx = 20.0 / 256.0 # Horizontal grid cell resolution spacing
-
-# Center axes so (0,0) marks the exact initiation focus point
-time_rel = (np.arange(n_time_steps) - 16) * dt 
-dist_rel = (np.arange(n_x_points) - (n_x_points // 2)) * dx
-
-min_lt, max_lt = 15, 29
+min_lt = 30
+max_lt = 44
 LT = 15
-
+lt_label = f"{min_lt}-{max_lt}_steps"
 print(f"Processing Lead Time window: {min_lt/LT} to {max_lt/LT} LTs...")
 
-cluster_means_dudx = {}
-cluster_means_q = {}
-cluster_means_KE = {}
-global_max_dudx = 0.0
+# Nested dictionaries to store calculated averages and counts
+composites = {stage_name: {i: None for i in range(3)} for stage_name, _, _ in pipeline_order}
+sample_counts = {stage_name: {i: 0 for i in range(3)} for stage_name, _, _ in pipeline_order}
 
-for i in range(3):
-    # Select slices that match BOTH the cluster ID and the targeted lead time frame
-    stack_dudx = [rec['dudx'] for rec in composite_records_all if rec['cluster'] == i and min_lt <= rec['lead_time'] <= max_lt]
-    stack_q    = [rec['global_q'] for rec in composite_records_all if rec['cluster'] == i and min_lt <= rec['lead_time'] <= max_lt]
-    stack_KE   = [rec['global_KE'] for rec in composite_records_all if rec['cluster'] == i and min_lt <= rec['lead_time'] <= max_lt]
+global_max_val = 0.0
+
+for stage_name, model_key, target_type in pipeline_order:
+    full_file_path = paths_config[model_key][target_type]
+
+    if not os.path.exists(full_file_path):
+        print(f"Warning: File missing for {stage_name} at: {full_file_path}")
+        continue
     
-    if len(stack_dudx) > 0:
-        # Calculate nan-safe composite structures
-        cluster_means_dudx[i] = np.nanmean(np.array(stack_dudx), axis=0)
-        cluster_means_q[i]    = np.nanmean(np.array(stack_q), axis=0)
-        cluster_means_KE[i]   = np.nanmean(np.array(stack_KE), axis=0)
-        
-        # Track maximum limits to bound the symmetric pcolormesh norm
-        cluster_max = np.nanmax(np.abs(cluster_means_dudx[i]))
-        if cluster_max > global_max_dudx:
-            global_max_dudx = cluster_max
-    else:
-        cluster_means_dudx[i] = None
-        cluster_means_q[i]    = None
-        cluster_means_KE[i]   = None
+    records = joblib.load(full_file_path)
 
-if global_max_dudx == 0.0:
-    global_max_dudx = 1.0
-    print("Warning: No plumes matched this lead time criteria across any cluster.")
-print(f"Global symmetric limit calculated: ±{global_max_dudx:.4f}")
+    for i in range(3):
+        stack_slices = [
+            rec['dudx'] for rec in records 
+            if rec['cluster'] == i and min_lt <= rec['lead_time'] <= max_lt
+        ]
 
-norm = SymLogNorm(linthresh=0.005, linscale=1, vmin=-global_max_dudx, vmax=global_max_dudx, base=10)
+        sample_counts[stage_name][i] = len(stack_slices)
 
-# Setup 2x3 Figure matrix canvas
-labs_labels = [['(a)', '(b)', '(c)'], ['(d)', '(e)', '(f)']]
-cluster_colors = {0: 'tab:orange', 1: 'tab:green', 2: 'tab:purple'}
-cluster_titles = ['Cluster 1', 'Cluster 2', 'Cluster 3']
 
-fig, axs = plt.subplots(2, 3, figsize=(18, 9), tight_layout=True)
+        if len(stack_slices) > 0:
+            mean_profile = np.nanmean(np.array(stack_slices), axis=0)
+            composites[stage_name][i] = mean_profile
+            
+            # Keep colorbar scale uniform by tracking the absolute global peak value
+            cluster_max = np.nanmax(np.abs(mean_profile))
+            if cluster_max > global_max_val:
+                global_max_val = cluster_max
 
-for i in range(3):
-    # Recalculate event population counts for specific headers
-    n_plumes = len([rec for rec in composite_records_all if rec['cluster'] == i and min_lt <= rec['lead_time'] <= max_lt])
-    
-    ax_top = axs[0, i]
-    composite_mean_filtered = cluster_means_dudx[i]
-    
-    if composite_mean_filtered is not None:
-        im = ax_top.pcolormesh(dist_rel, time_rel, composite_mean_filtered, 
+if global_max_val == 0.0: global_max_val = 1.0
+norm = SymLogNorm(linthresh=0.005, linscale=1, vmin=-global_max_val, vmax=global_max_val, base=10)
+print(f"Symmetric LogNorm Scale Bounds set to: ±{global_max_val:.4f}")
+norm = SymLogNorm(linthresh=0.005, linscale=1, vmin=-global_max_val, vmax=global_max_val, base=10)
+
+panel_letters = [f"({l})" for l in string.ascii_lowercase[:15]]
+panel_idx = 0
+
+fig, axs = plt.subplots(5, 3, figsize=(12, 15), sharey=True, sharex=True, constrained_layout=True)
+
+for r_idx, (stage_name, _, _) in enumerate(pipeline_order):
+    for c_idx in range(3):
+        ax = axs[r_idx, c_idx]
+        composite_mean_filtered = composites[stage_name][c_idx]
+        n_plumes = sample_counts[stage_name][c_idx]
+
+        if composite_mean_filtered is not None:
+            im = ax.pcolormesh(dist_rel, time_rel, composite_mean_filtered, 
                                shading='nearest', 
                                cmap='RdBu_r',
                                rasterized=True, 
                                norm=norm)
-        
-        # Overlay structural pivot point crosshairs
-        ax_top.scatter(0, 0, color='black', marker='x', s=150, linewidths=2, zorder=5)
-        ax_top.axhline(0, color='black', linestyle=':', alpha=0.5)
-        ax_top.axvline(0, color='black', linestyle=':', alpha=0.5)
-        
-        ax_top.set_ylim(-30, 4)
-        ax_top.set_xlabel('Relative Distance ($x$)', fontsize=13)
-        ax_top.set_title(f"{cluster_titles[i]}\nLocal $\partial u / \partial x$ ($n={n_plumes}$)", fontsize=13, fontweight='bold', pad=8)
-    else:
-        ax_top.patch.set_facecolor('lightgray')
-        ax_top.text(0.5, 0.5, 'No Event Slices Matched', transform=ax_top.transAxes, ha='center', va='center')
-        ax_top.set_title(f"{cluster_titles[i]} ($n=0$)", fontsize=13, fontweight='bold', pad=8)
-
-    ax_top.text(0.02, 0.95, labs_labels[0][i], transform=ax_top.transAxes, fontsize=14, fontweight='bold', va='top')
-    ax_top.tick_params(axis='both', which='major', labelsize=12)
-    
-    # Hide shared y-labels for row 1 except the left column
-    if i == 0:
-        ax_top.set_ylabel('Relative Time ($\delta t$)', fontsize=13)
-    else:
-        ax_top.yaxis.set_tick_params(labelleft=False)
-
-    ax_bot = axs[1, i]
-    q_profile  = cluster_means_q[i]
-    KE_profile = cluster_means_KE[i]
-    
-    if q_profile is not None and KE_profile is not None:
-        color_theme = cluster_colors[i]
-        
-        # 1. Plot continuous phase route line
-        ax_bot.plot(q_profile, KE_profile, color=color_theme, linewidth=3, label='State Path')
-        
-        # 2. Drop historical progression milestones (t_-16, t_0 trigger point, t_+3 end)
-        ax_bot.scatter(q_profile[0], KE_profile[0], color='blue', s=80, marker='o', zorder=5, label='Start ($t_{-16}$)')
-        ax_bot.scatter(q_profile[16], KE_profile[16], color='red', s=140, marker='*', zorder=6, label='Trigger ($t_{0}$)')
-        ax_bot.scatter(q_profile[-1], KE_profile[-1], color='black', s=80, marker='X', zorder=5, label='End ($t_{+3}$)')
-        
-        # 3. Inject explicit directional metadata arrows along the pathway tracking step intervals
-        # for step in range(2, len(q_profile) - 2, 4):
-        #     ax_bot.annotate('  ', xy=(q_profile[step+1], KE_profile[step+1]), 
-        #                     xytext=(q_profile[step], KE_profile[step]),
-        #                     arrowprops=dict(arrowstyle="->", color=color_theme, lw=2, mutation_scale=12))
             
-        ax_bot.set_xlabel('Global Mean Moisture ($\overline{q}$)', fontsize=13)
-        ax_bot.grid(True, linestyle=':', alpha=0.6)
-        ax_bot.set_title(f"Global Dynamic Phase Space", fontsize=11, style='italic', pad=6)
-        # ax_bot.set_ylim(0.0001, 0.0005)
-        # ax_bot.set_xlim(0.25, 0.31)
+            # Overlay focus crosshairs at the exact location of triggering
+            ax.scatter(0, 0, color='black', marker='x', s=120, linewidths=2, zorder=5)
+            ax.axhline(0, color='black', linestyle=':', alpha=0.5)
+            ax.axvline(0, color='black', linestyle=':', alpha=0.5)
+            ax.set_ylim(-30, 4)
+        else:
+            # Muted background fill for empty data steps
+            ax.patch.set_facecolor('lightgray')
+            ax.text(0.5, 0.5, 'No Event Slices Matched', 
+                    transform=ax.transAxes, ha='center', va='center', color='dimgray')
 
-        if i == 0:
-            ax_bot.legend(fontsize=10, loc='upper left')
-    else:
-        ax_bot.patch.set_facecolor('lightgray')
-        ax_bot.text(0.5, 0.5, 'No Data Available', transform=ax_bot.transAxes, ha='center', va='center')
+        ax.text(0.02, 0.98, panel_letters[panel_idx], transform=ax.transAxes, fontsize=16, fontweight='bold', va='top')
+        panel_idx += 1
 
-    ax_bot.text(0.02, 0.95, labs_labels[1][i], transform=ax_bot.transAxes, fontsize=14, fontweight='bold', va='top')
-    ax_bot.tick_params(axis='both', which='major', labelsize=12)
-    
-    # Track common Y descriptor averages exclusively for the first column layout
-    if i == 0:
-        ax_bot.set_ylabel('Global Kinetic Energy ($\overline{KE}$)', fontsize=13)
+        # Subplot Title Configurations
+        if r_idx == 0:
+            ax.set_title(f"{cluster_titles[c_idx]}\n$n={n_plumes}$", fontsize=20, pad=8)
+        # else:
+        #     ax.set_title(f"$n={n_plumes}$", fontsize=11, style='italic', pad=4)
+            
+        # Row-wise vertical y-labels and bottom column x-labels
+        if c_idx == 0:
+            ax.set_ylabel(f"{stage_name}\nRelative Time", fontsize=18)
+        if r_idx == 4:
+            ax.set_xlabel('Relative Distance', fontsize=18)
+   
+        ax.tick_params(axis='both', which='major', labelsize=18)
 
-# Anchor a master unified colorbar corresponding tightly onto axis pane row 1, col 3
-if cluster_means_dudx[2] is not None:
-    cb = fig.colorbar(im, ax=axs[0, 2], pad=0.02)
-    cb.set_label(r'Mean Spatial Convergence $\partial u / \partial x$', fontsize=13)
-    cb.ax.tick_params(labelsize=11)
+# Attach a single coordinated global colorbar to the right side of the canvas mesh
+cb = fig.colorbar(im, ax=axs, orientation='vertical', fraction=0.02, pad=0.03)
+cb.set_label(r'Mean Convergence ($\partial u / \partial x$)', fontsize=20)
+cb.ax.tick_params(labelsize=16)
 
-print(min_lt, max_lt)
 # Export the high-res figure asset for presentation/thesis incorporation
-fig.savefig(images_path+f"/actual_ClusterAnalysis_LT_{min_lt}-{max_lt}_withglobals.png", dpi=300)
+fig.savefig(images_path+f"/all_ClusterAnalysis_LT_{min_lt}-{max_lt}.png", facecolor='white', transparent=False, dpi=300)
 
 print(f"Vector composite plot successfully saved")
 #plt.show()
 
-# Define your three lead-time windows
-lt_windows = [
-    (0, 14, "Short Lead Times"),
-    (15, 29, "Mid Lead Times"),
-    (30, 44, "Long Lead Times")
-]
+# --------------- GLOBAL --------------------------
 
-print("=" * 65)
-print("     VALIDATION TRACKER: NON-NAN DATA STEPS PER REGIME")
-print("=" * 65)
+# # Setup a single standalone scatter plot figure
+# fig, ax = plt.subplots(figsize=(8,6), tight_layout=True)
 
-for min_lt, max_lt, label in lt_windows:
-    before_counts = []
-    after_counts = []
-    total_events = 0
+
+# with h5py.File(input_path_testdata+'/CIN_CAPE_t00000_to_00630.h5', 'r') as df:
+#     print(df.keys())
+#     CAPE = df['CAPE'][:] 
+#     CIN  = df['CIN'][:] 
+#     time_vals = df['time_vals'][:] 
+
+# start_time = time_vals[0]
+# end_time   = time_vals[-1]
+# print(f"start time={time_vals[0]}, end time = {time_vals[-1]}")
+# print(f"shape of CIN dataset = {np.shape(CIN)}")
+
+# KE_global_all =  np.load(input_path+'/KE5000_30000.npy')
+# q_global_all  =  np.load(input_path+'/q5000_30000.npy')
+
+# global_start_idx = int(time_vals[0] - 5000)
+# global_end_idx = global_start_idx + (len(time_vals) * 2)
+
+# # 3. Slice the window and downsample from dt=1 to dt=2 in one go
+# ds_KE_global = KE_global_all[global_start_idx : global_end_idx : 2]
+# ds_q_global  = q_global_all[global_start_idx : global_end_idx : 2]
+
+# print(f"Polished Global KE shape: {ds_KE_global.shape}")
+# print(f"Target Spatial shape:    {len(time_vals)}")
+
+# assert len(ds_KE_global) == len(time_vals), (
+#     f"Mismatch! Sliced global array has {len(ds_KE_global)} steps, "
+#     f"but your test fields expect {len(time_vals)} steps."
+# )
+# print("Global arrays perfectly aligned to your 630-step test cadence!")
+
+
+# cluster_colors = {0: 'tab:orange', 1: 'tab:green', 2: 'tab:purple'}
+# cluster_titles = {0: 'Cluster 1', 1: 'Cluster 2', 2: 'Cluster 3'}
+
+# # Loop through each cluster to plot its individual population members as dots
+# for i in [0, 1, 2]:
+#     # Filter the actual records to find individual points matching this cluster and lead-time frame
+#     matching_records = [
+#         rec for rec in composite_records_all 
+#         if rec['cluster'] == i and min_lt <= rec['lead_time'] <= max_lt
+#     ]
     
-    for rec in composite_records_all:
-        if min_lt <= rec['lead_time'] <= max_lt:
-            total_events += 1
-            # rec['dudx'] shape is (20, 64)
-            # Row index 16 is t0 (initiation). 
-            # Rows 0 to 15 are BEFORE init (16 steps total)
-            # Rows 16 to 19 are AT/AFTER init (4 steps total)
-            dudx_block = rec['dudx']
+#     # Extract raw individual scalar values exactly at index 16 (t0)
+#     raw_q_points  = [rec['global_q'][16] for rec in matching_records if not np.isnan(rec['global_q'][16])]
+#     raw_KE_points = [rec['global_KE'][16] for rec in matching_records if not np.isnan(rec['global_KE'][16])]
+    
+#     n_points = len(raw_q_points)
+    
+#     ax.plot(ds_q_global,ds_KE_global,alpha=0.5,linestyle='--')
+
+#     # Plot as a scatter layer
+#     if n_points > 0:
+#         ax.scatter(raw_q_points, raw_KE_points, 
+#                    color=cluster_colors[i], 
+#                    label=f"{cluster_titles[i]} ($n={n_points}$)", 
+#                    alpha=0.6,          # Makes overlapping points visible
+#                    edgecolors='none', 
+#                    s=45)               # Size of dots
+
+# # Style the chart professionally for your thesis
+# ax.set_xlabel('$\overline{q}$ at Initiation ($t_0$)', fontsize=14)
+# ax.set_ylabel('$\overline{KE}$ at Initiation ($t_0$)', fontsize=14)
+# #ax.set_title(f'Attractor Phase Space Distribution at Trigger Instant ($t_0$)\nLead Time Window: {min_lt}-{max_lt} steps', 
+#              #fontsize=14, fontweight='bold', pad=15)
+
+# # Use scientific notation exclusively for the Y axis since KE values are minute
+# ax.yaxis.set_major_formatter(plt.FormatStrFormatter('%.2e'))
+
+# ax.grid(True, linestyle=':', alpha=0.6)
+# ax.legend(fontsize=12, loc='upper left')
+# ax.set_xlim()
+
+# # Export this new asset
+# output_scatter_name = f"/actual_ClusterAnalysis_ScatterSpace_LT_{min_lt}-{max_lt}.png"
+# fig.savefig(images_path + output_scatter_name, facecolor='white', transparent=False, dpi=300)
+# print(f"Global attractor scatter plot successfully saved")
+
+# # Define your three lead-time windows
+# lt_windows = [
+#     (0, 14, "Short Lead Times"),
+#     (15, 29, "Mid Lead Times"),
+#     (30, 44, "Long Lead Times")
+# ]
+
+# print("=" * 65)
+# print("     VALIDATION TRACKER: NON-NAN DATA STEPS PER REGIME")
+# print("=" * 65)
+
+# for min_lt, max_lt, label in lt_windows:
+#     before_counts = []
+#     after_counts = []
+#     total_events = 0
+    
+#     for rec in composite_records_all:
+#         if min_lt <= rec['lead_time'] <= max_lt:
+#             total_events += 1
+#             # rec['dudx'] shape is (20, 64)
+#             # Row index 16 is t0 (initiation). 
+#             # Rows 0 to 15 are BEFORE init (16 steps total)
+#             # Rows 16 to 19 are AT/AFTER init (4 steps total)
+#             dudx_block = rec['dudx']
             
-            # Count along the time axis (axis 0) if ANY valid numerical value exists in the row
-            valid_time_mask = ~np.isnan(dudx_block).all(axis=1)
+#             # Count along the time axis (axis 0) if ANY valid numerical value exists in the row
+#             valid_time_mask = ~np.isnan(dudx_block).all(axis=1)
             
-            # Split into before and after timelines
-            valid_before = valid_time_mask[0:16]
-            valid_after  = valid_time_mask[16:20]
+#             # Split into before and after timelines
+#             valid_before = valid_time_mask[0:16]
+#             valid_after  = valid_time_mask[16:20]
             
-            before_counts.append(np.sum(valid_before))
-            after_counts.append(np.sum(valid_after))
+#             before_counts.append(np.sum(valid_before))
+#             after_counts.append(np.sum(valid_after))
             
-    if total_events > 0:
-        mean_before = np.mean(before_counts)
-        mean_after  = np.mean(after_counts)
-        print(f"🔹 {label} (LT {min_lt}-{max_lt} steps) | Samples: n = {total_events}")
-        print(f"   • Avg steps BEFORE initiation (Max 16): {mean_before:.1f} steps")
-        print(f"   • Avg steps AFTER initiation  (Max  4): {mean_after:.1f} steps")
-    else:
-        print(f"🔹 {label} (LT {min_lt}-{max_lt} steps) | No matching events found.")
-    print("-" * 65)
+#     if total_events > 0:
+#         mean_before = np.mean(before_counts)
+#         mean_after  = np.mean(after_counts)
+#         print(f"🔹 {label} (LT {min_lt}-{max_lt} steps) | Samples: n = {total_events}")
+#         print(f"   • Avg steps BEFORE initiation (Max 16): {mean_before:.1f} steps")
+#         print(f"   • Avg steps AFTER initiation  (Max  4): {mean_after:.1f} steps")
+#     else:
+#         print(f"🔹 {label} (LT {min_lt}-{max_lt} steps) | No matching events found.")
+#     print("-" * 65)
 
 # S(t)
 # Define our target lead time strata to loop over
